@@ -1,0 +1,39 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Set up HCL Lighting",
+                "description": "Configure the Human Centric Lighting integration.",
+                "data": {
+                    "target": "Lights to control"
+                }
+            }
+        },
+        "abort": {
+            "already_configured": "Device is already configured"
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "HCL Lighting Options",
+                "data": {
+                    "target": "Lights to control",
+                    "smart_transition": "Compatibility Mode (Slow/Complex Lights)",
+                    "min_brightness": "Minimum Brightness (%)",
+                    "max_brightness": "Maximum Brightness (%)"
+                }
+            }
+        },
+        "error": {
+            "min_greater_max": "Minimum brightness must be lower than maximum."
+        }
+    },
+    "entity": {
+        "switch": {
+            "hcl_switch": {
+                "name": "HCL Mode"
+            }
+        }
+    }
+}

@@ -1,0 +1,16 @@
+"""Constants for the HCL Lighting integration."""
+
+DOMAIN = "hcl_lighting"
+CONF_TARGET = "target"
+HCL_TRANSITION_SECONDS = 30
+UPDATE_INTERVAL_MINUTES = 5
+BRIGHTNESS_THRESHOLD = 1
+KELVIN_THRESHOLD = 50
+MINUTES_PER_DAY = 1440
+CONF_SMART_TRANSITION = "smart_transition"
+CONF_MIN_BRIGHTNESS = "min_brightness"
+CONF_MAX_BRIGHTNESS = "max_brightness"
+
+# Defaults
+DEFAULT_MIN_BRIGHTNESS = 10
+DEFAULT_MAX_BRIGHTNESS = 100

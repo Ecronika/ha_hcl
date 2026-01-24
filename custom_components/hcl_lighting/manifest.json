@@ -1,0 +1,11 @@
+{
+  "domain": "hcl_lighting",
+  "name": "HCL Lighting",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/",
+  "iot_class": "calculated",
+  "requirements": [],
+  "version": "0.1.0"
+}
