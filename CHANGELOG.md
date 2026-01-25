@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Refactoring**: Split monolithic code into modular logic (`hcl_math`, `light_controller`, `override_manager`).
 - **Performance**: Parallel execution of light updates (asyncio.gather) and capability caching.
 - **Validation**: Strict "state == ON" check to prevent accidental turn-ons of offline lights.
+- **Group Safety**: Added Just-in-Time filtering to ignore Zigbee/Hue Groups (even if they sneak into target lists) to prevent "Double Control" of lights.
 
 ### Fixed
 - **Ghost Updates**: Fixed issue where old timer instances ("zombies") caused fluctuating light levels.

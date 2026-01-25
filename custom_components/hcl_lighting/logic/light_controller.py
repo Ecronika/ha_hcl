@@ -139,6 +139,14 @@ class HCLLightController:
     async def apply_fast(self, entity_id: str, brightness: int, kelvin: int):
         """Ultra-fast HCL application for turn-on events."""
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
+        
+        state = self.hass.states.get(entity_id)
+        if state and (state.attributes.get("is_hue_group") or 
+                      state.attributes.get("hue_type") or 
+                      isinstance(state.attributes.get(ATTR_ENTITY_ID), (list, tuple))):
+             _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
+             return
+
         # Update Tracking
         self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
         self.override_manager.set_ignore_window(entity_id, 2.0) # Small window for instant update
@@ -236,6 +244,14 @@ class HCLLightController:
 
         curr_b = state.attributes.get("brightness")
         curr_k = state.attributes.get("color_temp_kelvin")
+        
+        # Safety Check: Ignore Groups (Hue Groups or HA Groups)
+        # Groups shouldn't be in the list, but if they sneak in (e.g. startup race),
+        # we strictly ignore them here to avoid "Double Control".
+        if (state.attributes.get("is_hue_group") or 
+            state.attributes.get("hue_type") or 
+            isinstance(state.attributes.get(ATTR_ENTITY_ID), (list, tuple))):
+            return False
 
         # Check Brightness
         if curr_b is not None:
