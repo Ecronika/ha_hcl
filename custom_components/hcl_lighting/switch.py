@@ -76,8 +76,6 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
             if last_state.state == STATE_ON:
                 self._is_on = True
                 await self.async_turn_on()
-        
-        self._entry.async_on_unload(self._entry.add_update_listener(self._async_update_callback))
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
@@ -92,10 +90,9 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
 
     async def _async_update_callback(self, hass, entry):
         """Callback for config enty updates."""
-        # Re-initialize controller with new config options if needed
-        self.controller.config_entry = entry
-        # Invalidate target cache
-        self._resolved_targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
+        # This listener is redundant as __init__.py reloads the entry on change.
+        # We rely on async_will_remove_from_hass to clean up.
+        pass
 
     @property
     def is_on(self) -> bool:

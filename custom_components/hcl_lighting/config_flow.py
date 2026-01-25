@@ -19,7 +19,7 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# CONFIG_SCHEMA moved inside step for safety
+
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HCL Lighting."""

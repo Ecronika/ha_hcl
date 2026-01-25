@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.0-beta4 (Release Candidate)
+- **Fix**: Code Hygiene in `override_manager.py` (Indentation/Imports).
+- **Cleanup**: Removed redundant update listener in `switch.py` (Architecture).
+- **Cleanup**: Configuration flow comments.
+
 ## v0.2.0-beta3 (Review Fixes)
 - **Fix**: Critical Race Condition in Fast-Path logic (synchronous state tracking).
 - **Fix**: Zombie Timer prevention on integration reload.

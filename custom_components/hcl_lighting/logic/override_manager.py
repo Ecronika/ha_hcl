@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
+from homeassistant.core import State
 
 from ..const import (
     OVERRIDE_TIMEOUT_HOURS,
@@ -50,7 +51,7 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["last_set"] = (brightness, kelvin)
 
-from homeassistant.core import State
+
 
     def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None) -> bool:
         """Check if state change is a manual override.
