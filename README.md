@@ -84,10 +84,13 @@ The integration uses a 24-hour curve with key control points:
 | 00:00 | 2200K | 10% | Night |
 | 07:00 | 2700K | 30% | Wake-up |
 | 09:00 | 4500K | 50% | Morning activation |
+| 09:30 | 5500K | 75% | Morning ramp-up |
 | 10:00 | 6500K | 100% | Peak focus |
 | 12:00 | 6500K | 100% | Midday |
 | 12:30 | 4000K | 50% | Regeneration dip |
-| 13:30 | 6000K | 75% | Re-activation |
+| 13:00 | 4000K | 50% | Regeneration hold |
+| 13:30 | 6000K | 75% | Re-activation ramp |
+| 14:00 | 6000K | 75% | Afternoon focus |
 | 16:00 | 4000K | 50% | Afternoon wind-down |
 | 18:00 | 2700K | 30% | Evening |
 | 22:00 | 2200K | 10% | Night preparation |
@@ -110,10 +113,10 @@ The integration automatically adapts to each light's capabilities:
 
 ## Technical Details
 
-- **Update interval**: 5 minutes
-- **Transition duration**: 60 seconds (configurable via smart transition mode)
+- **Update interval**: 27 seconds
+- **Transition duration**: 30 seconds (configurable via smart transition mode)
 - **Delta thresholds**: 
-  - Brightness: 2% change required
+  - Brightness: 1% change required
   - Color temperature: 50K change required
 - **Interpolation method**: Cubic Hermite splines with periodic boundary conditions
 

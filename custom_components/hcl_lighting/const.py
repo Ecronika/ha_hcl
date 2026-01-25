@@ -3,10 +3,9 @@
 DOMAIN = "hcl_lighting"
 CONF_TARGET = "target"
 HCL_TRANSITION_SECONDS = 30
-UPDATE_INTERVAL_MINUTES = 5
+UPDATE_INTERVAL_SECONDS = 27
 BRIGHTNESS_THRESHOLD = 1
 KELVIN_THRESHOLD = 50
-MINUTES_PER_DAY = 1440
 CONF_SMART_TRANSITION = "smart_transition"
 CONF_MIN_BRIGHTNESS = "min_brightness"
 CONF_MAX_BRIGHTNESS = "max_brightness"
@@ -14,3 +13,11 @@ CONF_MAX_BRIGHTNESS = "max_brightness"
 # Defaults
 DEFAULT_MIN_BRIGHTNESS = 10
 DEFAULT_MAX_BRIGHTNESS = 100
+
+# Manual Override Detection
+OVERRIDE_TIMEOUT_HOURS = 4
+OVERRIDE_BRIGHTNESS_DELTA = 5      # >5% brightness change = override
+OVERRIDE_KELVIN_DELTA = 200        # >200K color temp change = override
+# Smooth Re-engagement Transition
+REENGAGE_STEPS = 6
+REENGAGE_INTERVAL_SECONDS = 30
