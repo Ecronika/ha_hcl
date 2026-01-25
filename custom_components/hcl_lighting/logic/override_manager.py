@@ -50,7 +50,9 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["last_set"] = (brightness, kelvin)
 
-    def check_override(self, entity_id: str, state, last_set_values: tuple[int, int] | None) -> bool:
+from homeassistant.core import State
+
+    def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None) -> bool:
         """Check if state change is a manual override.
         
         Returns:
@@ -96,7 +98,8 @@ class OverrideManager:
             _LOGGER.debug("Ignoring event for %s (Brightness is None/Unknown)", entity_id)
             return False
 
-        # Percentage
+        # Percentage with Bounds Check
+        curr_b = min(255, max(0, curr_b))
         curr_b_pct = int(curr_b * 100 / 255)
         
         # Calculate Deltas

@@ -16,7 +16,9 @@ from ..const import (
     REENGAGE_INTERVAL_SECONDS,
     REENGAGE_STEPS,
     BRIGHTNESS_THRESHOLD,
-    KELVIN_THRESHOLD
+    KELVIN_THRESHOLD,
+    XY_COLOR_SENSITIVITY,
+    KELVIN_RANGE
 )
 
 from .override_manager import OverrideManager
@@ -141,9 +143,7 @@ class HCLLightController:
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
         
         state = self.hass.states.get(entity_id)
-        if state and (state.attributes.get("is_hue_group") or 
-                      state.attributes.get("hue_type") or 
-                      isinstance(state.attributes.get(ATTR_ENTITY_ID), (list, tuple))):
+        if self._is_group(entity_id):
              _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
              return
 
@@ -248,9 +248,7 @@ class HCLLightController:
         # Safety Check: Ignore Groups (Hue Groups or HA Groups)
         # Groups shouldn't be in the list, but if they sneak in (e.g. startup race),
         # we strictly ignore them here to avoid "Double Control".
-        if (state.attributes.get("is_hue_group") or 
-            state.attributes.get("hue_type") or 
-            isinstance(state.attributes.get(ATTR_ENTITY_ID), (list, tuple))):
+        if self._is_group(entity_id):
             return False
 
         # Check Brightness
@@ -350,7 +348,7 @@ class HCLLightController:
             target_bri_byte = int(brightness * 255 / 100)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             curr_x, curr_y = curr_xy
-            delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * 5.0
+            delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * XY_COLOR_SENSITIVITY
             
             if delta_c > delta_b:
                 await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
@@ -360,6 +358,11 @@ class HCLLightController:
                 await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
         except Exception as e:
             _LOGGER.error("Smart XY error %s: %s", entity_id, e)
+            # Fallback
+            try:
+                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0}, blocking=True)
+            except Exception:
+                pass
 
     async def _apply_smart_ct_single(self, entity_id, kelvin, brightness, transition):
         try:
@@ -369,7 +372,7 @@ class HCLLightController:
             curr_kelvin = state.attributes.get("color_temp_kelvin") or 2700
             target_bri_byte = int(brightness * 255 / 100)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
-            delta_k = abs(curr_kelvin - kelvin) / 4500.0
+            delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
             
             if delta_k > delta_b:
                 await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
@@ -379,3 +382,17 @@ class HCLLightController:
                 await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
         except Exception as e:
             _LOGGER.error("Smart CT error %s: %s", entity_id, e)
+            # Fallback
+            try:
+                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True)
+            except Exception:
+                pass
+
+    def _is_group(self, entity_id: str) -> bool:
+        """Check if entity is a group."""
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return False
+        return (state.attributes.get("is_hue_group") or 
+                state.attributes.get("hue_type") or 
+                isinstance(state.attributes.get(ATTR_ENTITY_ID), (list, tuple)))

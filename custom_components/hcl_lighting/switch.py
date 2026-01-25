@@ -60,6 +60,7 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         self._calculated_kelvin = 2700
         self._timer_remove_callback = None
         self._state_listener_remove_callback = None
+        self._resolved_targets = set()
         
         # Modules
         self.calculator = HCLCalculator()
@@ -80,6 +81,7 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
+        self._is_on = False # Prevent further updates
         if self._timer_remove_callback:
             self._timer_remove_callback()
             self._timer_remove_callback = None
@@ -92,6 +94,8 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         """Callback for config enty updates."""
         # Re-initialize controller with new config options if needed
         self.controller.config_entry = entry
+        # Invalidate target cache
+        self._resolved_targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
 
     @property
     def is_on(self) -> bool:
@@ -112,7 +116,7 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
+        targets = self._resolved_targets or []
         return {
             "calculated_brightness": self._calculated_brightness,
             "calculated_color_temp": self._calculated_kelvin,
@@ -135,10 +139,12 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         # Originally we listened to "all" target entities.
         # This requires resolving targets dynamically.
         # Ideally, we should update the listener when config changes, but for now:
-        targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
-        if targets:
+        # Ideally, we should update the listener when config changes, but for now:
+        self._resolved_targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
+        
+        if self._resolved_targets:
             self._state_listener_remove_callback = async_track_state_change_event(
-                self.hass, list(targets), self._handle_light_state_change
+                self.hass, list(self._resolved_targets), self._handle_light_state_change
             )
 
         # Immediate update
@@ -179,9 +185,8 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         )
         self.async_write_ha_state()
 
-        # 2. Resolve Targets
-        target_config = self._entry.options.get(CONF_TARGET, {})
-        all_lights = self.controller.resolve_targets(target_config)
+        # 2. Resolve Targets (Cached)
+        all_lights = self._resolved_targets
         
         # 3. Check for Re-engagements (Expired Overrides)
         expired_overrides = self.override_manager.get_pending_reengagements()
@@ -239,6 +244,9 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
                  # Update cache while we are at it
                  self._calculated_brightness = fresh_b
                  self._calculated_kelvin = fresh_k
+
+                 # Synchronous Update to Override Manager (Fix Race Condition)
+                 self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
 
                  self.hass.async_create_task(
                      self.controller.apply_fast(
