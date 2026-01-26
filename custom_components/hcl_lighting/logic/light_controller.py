@@ -75,10 +75,6 @@ class HCLLightController:
         else:
             transition_val = transition
 
-        for eid in lights:
-             self.override_manager.set_last_set_values(eid, brightness, kelvin)
-             self.override_manager.set_ignore_window(eid, transition_val)
-
         # 2. Filter & Grouping
         lights_ct = []
         lights_dim = []
@@ -88,7 +84,11 @@ class HCLLightController:
         for entity_id in lights:
             # Check Thresholds to avoid redundant traffic
             if not self._needs_update(entity_id, brightness, kelvin):
-                continue
+                 continue
+            
+            # Update Tracking (Only for active updates)
+            self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
+            self.override_manager.set_ignore_window(entity_id, transition_val)
 
             cap_type = self._get_capability(entity_id, kelvin)
             if cap_type == "ct":
@@ -279,9 +279,13 @@ class HCLLightController:
 
         # 4. Attribute Validation (NO CACHE if invalid)
         supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+        # Type safety check
+        if supported_modes and not isinstance(supported_modes, (list, tuple)):
+             _LOGGER.warning("Entity %s has invalid supported_color_modes type: %s", entity_id, type(supported_modes))
+             return "onoff"
         
         # None or Empty List = Invalid (Warn if ON, Debug if others)
-        if supported_modes is None or (isinstance(supported_modes, (list, tuple)) and len(supported_modes) == 0):
+        if not supported_modes:
              if state.state == STATE_ON:
                   _LOGGER.warning("Entity %s is ON but has no 'supported_color_modes' - not caching", entity_id)
              else:
@@ -432,13 +436,15 @@ class HCLLightController:
         processed = set()
 
         while to_process:
-            eid = to_process.pop(0)
+            eid = to_process.pop() # Stack behavior (O(1)) instead of Queue (O(n))
+            
             if eid in processed: continue
             processed.add(eid)
 
             state = self.hass.states.get(eid)
             if not state:
-                final_entities.add(eid)
+                if eid.startswith("light."):
+                    final_entities.add(eid)
                 continue
 
             group_members = state.attributes.get(ATTR_ENTITY_ID)
@@ -447,7 +453,8 @@ class HCLLightController:
             elif (state.attributes.get("is_hue_group") or state.attributes.get("lights") or state.attributes.get("hue_type")):
                 continue # Skip raw Hue groups
             else:
-                final_entities.add(eid)
+                if eid.startswith("light."):
+                    final_entities.add(eid)
                 
         return final_entities
 

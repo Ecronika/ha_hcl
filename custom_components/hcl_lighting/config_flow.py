@@ -80,7 +80,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
         return self.async_show_form(
             step_id="init",
-            data_schema=self.add_suggested_values_to_schema(
+        # Compatibility wrapper for older HA versions
+        schema_defaults = self.config_entry_proxy.options or self.config_entry_proxy.data
+
+        if hasattr(self, "add_suggested_values_to_schema"):
+            data_schema = self.add_suggested_values_to_schema(
                 vol.Schema(
                     {
                         vol.Required(CONF_TARGET): selector.TargetSelector(
@@ -95,7 +99,27 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         vol.Optional(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                     }
                 ),
-                user_input or self.config_entry_proxy.options or self.config_entry_proxy.data
-            ),
+                schema_defaults
+            )
+        else:
+            # Fallback for old HA: Return clean schema without pre-filled values
+             data_schema = vol.Schema(
+                    {
+                        vol.Required(CONF_TARGET): selector.TargetSelector(
+                            {
+                                "entity": {
+                                    "domain": ["light"]
+                                },
+                             }
+                        ),
+                        vol.Optional(CONF_SMART_TRANSITION, default=False): selector.BooleanSelector(),
+                        vol.Optional(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                        vol.Optional(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                    }
+                )
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=data_schema,
             errors=errors
         )

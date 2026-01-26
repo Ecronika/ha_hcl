@@ -31,7 +31,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 - Full UI configuration (no YAML required)
 
 🔄 **Intelligent updates**
-- Periodic updates every 5 minutes with smart delta detection
+- Periodic updates (~30s) with smart delta detection
 - Instant application when lights turn on (no color flash)
 - State restoration after Home Assistant restart
 
@@ -113,7 +113,7 @@ The integration automatically adapts to each light's capabilities:
 
 ## Technical Details
 
-- **Update interval**: 27 seconds
+- **Update interval**: 27 seconds (periodic)
 - **Transition duration**: 30 seconds (configurable via smart transition mode)
 - **Delta thresholds**: 
   - Brightness: 1% change required

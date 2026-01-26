@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta4] (Production Stability)
+- **Fix**: Critical Bug where integration failed to work on fresh installs (Target Resolution priority).
+- **Fix**: Critical Override Logic Flaw (Ignore Window now only set on active updates).
+- **Fix**: Zombie Timers (Idempotent `turn_on`).
+- **Fix**: Group Expansion Efficiency ($O(n)$ Stack) & filtering non-light entities.
+- **Fix**: Exception Logging now includes stacktraces in update loop.
+- **Fix**: Config Flow compatibility with older HA versions.
+
 ## [0.2.1-beta3] (Cleanup & Validation)
 - **Fix**: Memory Leak in Capability Cache (Automatic Pruning).
 - **Fix**: Defensive Input Validation in Math Logic (Min/Max Brightness clamping).

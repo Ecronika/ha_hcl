@@ -125,11 +125,12 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         self._is_on = True
         
         # Start Timer
-        self._timer_remove_callback = async_track_time_interval(
-            self.hass,
-            self._update_hcl, # Main Loop
-            timedelta(seconds=UPDATE_INTERVAL_SECONDS)
-        )
+        if self._timer_remove_callback is None:
+            self._timer_remove_callback = async_track_time_interval(
+                self.hass,
+                self._update_hcl, # Main Loop
+                timedelta(seconds=UPDATE_INTERVAL_SECONDS)
+            )
         
         # Start State Listener (Fast Path + Override)
         # Note: We need to know WHICH entities to listen to.
@@ -137,9 +138,11 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         # This requires resolving targets dynamically.
         # Ideally, we should update the listener when config changes, but for now:
         # Ideally, we should update the listener when config changes, but for now:
-        self._resolved_targets = self.controller.resolve_targets(self._entry.options.get(CONF_TARGET, {}))
+        self._resolved_targets = self.controller.resolve_targets(
+            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
+        )
         
-        if self._resolved_targets:
+        if self._resolved_targets and self._state_listener_remove_callback is None:
             self._state_listener_remove_callback = async_track_state_change_event(
                 self.hass, list(self._resolved_targets), self._handle_light_state_change
             )
@@ -213,8 +216,8 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
                     self._calculated_kelvin,
                     transition=HCL_TRANSITION_SECONDS 
                 )
-        except Exception as e:
-             _LOGGER.error("Error in HCL update loop: %s", e)
+        except Exception:
+             _LOGGER.exception("Error in HCL update loop")
 
     @callback
     def _handle_light_state_change(self, event: Event) -> None:
