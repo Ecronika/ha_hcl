@@ -5,19 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v0.2.0-beta4 (Release Candidate)
+## [0.2.1-beta1] (Capability Fix)
+- **Fix**: Prevent caching capabilities for Unavailable/Unknown/OFF entities.
+- **Fix**: Force re-calculation of capabilities if `supported_color_modes` was empty previously.
+- **Improved**: Safe caching logic with versioning (v2) to automatically fix legacy cache issues.
+- **Refactor**: Improved debug logging for capability detection.
+
+## [0.2.0-beta4] (Release Candidate)
 - **Fix**: Code Hygiene in `override_manager.py` (Indentation/Imports).
 - **Cleanup**: Removed redundant update listener in `switch.py` (Architecture).
 - **Cleanup**: Configuration flow comments.
 
-## v0.2.0-beta3 (Review Fixes)
+## [0.2.0-beta3] (Review Fixes)
 - **Fix**: Critical Race Condition in Fast-Path logic (synchronous state tracking).
 - **Fix**: Zombie Timer prevention on integration reload.
 - **Fix**: Validation logic for Overrides (bounds check).
 - **Optimization**: Cached target resolution (CPU reduction).
 - **Refactoring**: Deduplicated group detection and cleanup of magic numbers.
 
-## v0.2.0-beta2 (Hotfix)
+## [0.2.0-beta2] (Hotfix)
 
 ## [0.2.0-beta1] - 2026-01-25
 

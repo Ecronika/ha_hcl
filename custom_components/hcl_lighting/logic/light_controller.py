@@ -18,10 +18,19 @@ from ..const import (
     BRIGHTNESS_THRESHOLD,
     KELVIN_THRESHOLD,
     XY_COLOR_SENSITIVITY,
-    KELVIN_RANGE
+    KELVIN_RANGE,
+    CAPABILITY_CACHE_VERSION
 )
 
 from .override_manager import OverrideManager
+
+from homeassistant.const import (
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    STATE_OFF,
+    STATE_ON,
+    ATTR_ENTITY_ID
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +42,7 @@ class HCLLightController:
         self.override_manager = override_manager
         self.config_entry = config_entry
         self._capability_cache = {}
+        self._cache_version = CAPABILITY_CACHE_VERSION
 
     async def apply_batch(
         self, 
@@ -206,35 +216,122 @@ class HCLLightController:
         )
 
     def _get_capability(self, entity_id: str, kelvin: int) -> str:
-        """Determine capabilities of a light (Cached)."""
+        """Determine capabilities of a light (Cached with Migration Safety)."""
+        
+        # 1. Check Cache + Version Migration
         if entity_id in self._capability_cache:
-            cap = self._capability_cache[entity_id]
-            # Dynamic check for XY
-            if cap["type"] == "ct" and cap.get("min_kelvin") and kelvin < cap["min_kelvin"] and cap.get("supports_color"):
-                return "xy_sim"
-            return cap["type"]
+            cached = self._capability_cache[entity_id]
+            
+            # Version Mismatch = Invalidate (Migration from v0.2.0)
+            cached_version = cached.get("version")
+            if cached_version != self._cache_version:
+                _LOGGER.debug(
+                    "Cache invalidated for %s (v%s->v%s, forcing recalc)", 
+                    entity_id, 
+                    cached_version or "none", 
+                    self._cache_version
+                )
+                del self._capability_cache[entity_id]
+            else:
+                # Valid Cache: Check Dynamic XY
+                if (cached["type"] == "ct" and 
+                    cached.get("min_kelvin") and 
+                    kelvin < cached["min_kelvin"] and 
+                    cached.get("supports_color")):
+                    return "xy_sim"
+                return cached["type"]
 
+        # 2. Get Current State
         state = self.hass.states.get(entity_id)
         if not state:
+            # Not loaded yet?
             return "onoff"
+        
+        if state.state is None:
+             _LOGGER.warning("Entity %s has NULL state, treating as unavailable", entity_id)
+             return "onoff"
 
-        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []
+        # 3. Safe State Check (NO CACHE)
+        # Avoid caching if light is unavailable, unknown, or OFF (often missing attributes)
+        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN, STATE_OFF):
+            _LOGGER.debug(
+                "Entity %s in unsafe state '%s' - calculating without cache", 
+                entity_id, 
+                state.state
+            )
+            # Calculate live but DON'T cache
+            return self._calculate_capability_from_state(state)
+
+        # 4. Attribute Validation (NO CACHE if invalid)
+        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+        
+        # None or Empty List = Invalid (Warn if ON, Debug if others)
+        if supported_modes is None or (isinstance(supported_modes, (list, tuple)) and len(supported_modes) == 0):
+             if state.state == STATE_ON:
+                  _LOGGER.warning("Entity %s is ON but has no 'supported_color_modes' - not caching", entity_id)
+             else:
+                  _LOGGER.debug("Entity %s has no 'supported_color_modes' - not caching", entity_id)
+             return "onoff"
+
+        # 5. Safe to Cache (State=ON + Valid Attributes)
         min_kelvin = state.attributes.get("min_color_temp_kelvin")
-        supports_color = any(mode in supported_modes for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB))
+        supports_color = any(
+            mode in supported_modes 
+            for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB)
+        )
 
-        cap_data = {"type": "onoff"}
+        # Calculate Capability
+        if ColorMode.COLOR_TEMP in supported_modes:
+            cap_type = "ct"
+        elif supports_color:
+            cap_type = "xy_sim"
+        elif (ColorMode.BRIGHTNESS in supported_modes or 
+              (supported_modes and ColorMode.ONOFF not in supported_modes)):
+            cap_type = "dim"
+        else:
+            cap_type = "onoff"
+
+        # Store in Cache with Version
+        cap_data = {
+            "type": cap_type,
+            "min_kelvin": min_kelvin,
+            "supports_color": supports_color,
+            "version": self._cache_version  # MIGRATION TAG
+        }
+        self._capability_cache[entity_id] = cap_data
+
+        _LOGGER.debug(
+            "Capability cached for %s: %s (v%s, modes=%s)", 
+            entity_id, 
+            cap_type, 
+            self._cache_version,
+            supported_modes
+        )
+
+        # 6. Recursive Check for Dynamic XY
+        return self._get_capability(entity_id, kelvin)
+
+    def _calculate_capability_from_state(self, state) -> str:
+        """Calculate capability without caching (for unsafe states)."""
+        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []
+        
+        if not supported_modes:
+            return "onoff"
+        
+        supports_color = any(
+            mode in supported_modes 
+            for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB)
+        )
 
         if ColorMode.COLOR_TEMP in supported_modes:
-            cap_data = {"type": "ct", "min_kelvin": min_kelvin, "supports_color": supports_color}
+            return "ct"
         elif supports_color:
-            cap_data = {"type": "xy_sim"}
-        elif ColorMode.BRIGHTNESS in supported_modes or (supported_modes and ColorMode.ONOFF not in supported_modes):
-             cap_data = {"type": "dim"}
+            return "xy_sim"
+        elif (ColorMode.BRIGHTNESS in supported_modes or 
+              (supported_modes and ColorMode.ONOFF not in supported_modes)):
+            return "dim"
         
-        self._capability_cache[entity_id] = cap_data
-        
-        # Recursive re-check for dynamic XY
-        return self._get_capability(entity_id, kelvin)
+        return "onoff"
 
     def _needs_update(self, entity_id: str, target_b: int, target_k: int) -> bool:
         """Check if an update is needed based on thresholds."""
