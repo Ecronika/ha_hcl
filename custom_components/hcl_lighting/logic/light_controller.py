@@ -374,8 +374,12 @@ class HCLLightController:
         if not state:
             return True
 
+        # Current State
         curr_b = state.attributes.get("brightness")
-        curr_k = state.attributes.get("color_temp_kelvin")
+        # Use ROUND instead of INT truncation to prevent off-by-one ping-pong loops
+        # e.g. 50% = 127.5 -> round(128) vs int(127).
+        curr_b_pct = round(curr_b * 100 / 255) if curr_b is not None else None
+        curr_k = state.attributes.get(ATTR_COLOR_TEMP_KELVIN)
         
         # Safety Check: Ignore Groups (Hue Groups or HA Groups)
         # Groups shouldn't be in the list, but if they sneak in (e.g. startup race),

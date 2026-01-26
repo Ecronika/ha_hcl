@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta7] (Timing & Loop Fixes)
+- **Critical Fix**: Resolved concurrency race condition in Update Loop (Switch Reentrancy).
+- **Critical Fix**: Reduced Transition Time (20s) to guarantee completion before next update cycle (27s).
+- **Fix**: Math Rounding Logic (switched to `round()`) to prevent infinite 1% ping-pong loops.
+- **Fix**: Switch UI State Consistency (force write state on toggle).
+- **Fix**: Override Detection reliability (added Reference Fallback).
+- **Hardening**: Config Type Coercion and DivisionByZero guards.
+
 ## [0.2.1-beta6] (Edge Case Polish)
 - **Fix**: Override Logic refined (Ignore Window only set if update actually queued).
 - **Fix**: Logic Fallback Safety (Prevent invalid `supported_color_modes` types).

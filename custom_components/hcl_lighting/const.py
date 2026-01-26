@@ -2,7 +2,7 @@
 
 DOMAIN = "hcl_lighting"
 CONF_TARGET = "target"
-HCL_TRANSITION_SECONDS = 30
+HCL_TRANSITION_SECONDS = 20 # Reduced to ensure completion before next 27s update
 UPDATE_INTERVAL_SECONDS = 27
 BRIGHTNESS_THRESHOLD = 1
 KELVIN_THRESHOLD = 50

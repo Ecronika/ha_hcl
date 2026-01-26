@@ -9,63 +9,78 @@ from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.util import dt as dt_util
+from homeassistant.util.dt import utcnow
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.const import STATE_ON
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.service import async_call_from_config
 
 from .const import (
-    DOMAIN, 
-    CONF_TARGET, 
-    UPDATE_INTERVAL_SECONDS,
+    DOMAIN,
+    CONF_TARGET,
+    CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
-    HCL_TRANSITION_SECONDS
+    UPDATE_INTERVAL_SECONDS,
+    HCL_TRANSITION_SECONDS,
 )
 
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
-from .logic.light_controller import HCLLightController
+from .logic.light_controller import LightController
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up the HCL Lighting switch."""
-    async_add_entities([HCLSwitch(hass, entry)])
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+    """Set up the HCL Switch from a config entry."""
+    
+    # Initialize Logic Components
+    override_manager = OverrideManager()
+    hcl_calc = HCLCalculator()
+    controller = LightController(hass, override_manager)
+    
+    switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
+    
+    async_add_entities([switch])
+    
+    # Listen for options updates
+    entry.async_on_unload(entry.add_update_listener(switch.async_options_updated))
 
 
-from homeassistant.helpers.restore_state import RestoreEntity
-
-class HCLSwitch(SwitchEntity, RestoreEntity):
+class HCLSwitch(RestoreEntity, SwitchEntity):
     """Representation of a HCL Lighting Switch."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "hcl_switch"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller: LightController, hcl_calc: HCLCalculator, override_manager: OverrideManager) -> None:
         """Initialize the switch."""
         self.hass = hass
         self._entry = entry
         self._attr_unique_id = entry.entry_id
         
         # State
-        self._is_on = False
-        self._calculated_brightness = 0
-        self._calculated_kelvin = 2700
+        self._attr_is_on = False
+        self._attr_icon = "mdi:theme-light-dark"
+        
         self._timer_remove_callback = None
         self._state_listener_remove_callback = None
-        self._resolved_targets = set()
+        
+        self._calculated_brightness = None
+        self._calculated_kelvin = None
+        
+        self._is_on = False # Internal state for update loop control
+        self._resolved_targets = set() # Cache for target entities
         
         # Modules
-        self.calculator = HCLCalculator()
-        self.override_manager = OverrideManager()
-        self.controller = HCLLightController(hass, self.override_manager, entry)
+        self.hcl_calc = hcl_calc
+        self.override_manager = override_manager
+        self.controller = controller
+
+        # Concurrency Guard
+        self._update_lock = asyncio.Lock()
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
@@ -88,11 +103,14 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
 
-    async def _async_update_callback(self, hass, entry):
-        """Callback for config enty updates."""
-        # This listener is redundant as __init__.py reloads the entry on change.
-        # We rely on async_will_remove_from_hass to clean up.
-        pass
+    async def async_options_updated(self, entry: ConfigEntry) -> None:
+        """Handle options update."""
+        _LOGGER.debug("HCL Switch options updated. Re-evaluating targets.")
+        self._entry = entry # Update the entry reference
+        # Re-resolve targets immediately if the switch is on
+        if self._is_on:
+            await self._re_evaluate_targets_and_listeners()
+        self.async_write_ha_state() # Ensure UI updates if needed
 
     @property
     def is_on(self) -> bool:
@@ -123,6 +141,7 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         self._is_on = True
+        self.async_write_ha_state() # Ensure UI updates immediately
         
         # Start Timer
         if self._timer_remove_callback is None:
@@ -132,27 +151,35 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
                 timedelta(seconds=UPDATE_INTERVAL_SECONDS)
             )
         
-        # Start State Listener (Fast Path + Override)
-        # Note: We need to know WHICH entities to listen to.
-        # Originally we listened to "all" target entities.
-        # This requires resolving targets dynamically.
-        # Ideally, we should update the listener when config changes, but for now:
-        # Ideally, we should update the listener when config changes, but for now:
-        self._resolved_targets = self.controller.resolve_targets(
-            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
-        )
-        
-        if self._resolved_targets and self._state_listener_remove_callback is None:
-            self._state_listener_remove_callback = async_track_state_change_event(
-                self.hass, list(self._resolved_targets), self._handle_light_state_change
-            )
+        await self._re_evaluate_targets_and_listeners()
 
         # Immediate update
         await self._update_hcl()
 
+    async def _re_evaluate_targets_and_listeners(self) -> None:
+        """Re-evaluate target entities and update state listeners."""
+        # Stop existing listener if any
+        if self._state_listener_remove_callback:
+            self._state_listener_remove_callback()
+            self._state_listener_remove_callback = None
+
+        # Resolve targets dynamically
+        self._resolved_targets = self.controller.resolve_targets(
+            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
+        )
+        
+        # Start new listener if targets exist
+        if self._resolved_targets and self._state_listener_remove_callback is None:
+            self._state_listener_remove_callback = async_track_state_change_event(
+                self.hass, list(self._resolved_targets), self._handle_light_state_change
+            )
+        _LOGGER.debug("HCL Switch targets re-evaluated. Listening to: %s", self._resolved_targets)
+
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         self._is_on = False
+        self.async_write_ha_state() # Ensure UI updates immediately
         
         if self._timer_remove_callback:
             self._timer_remove_callback()
@@ -162,62 +189,66 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
 
-    async def _update_hcl(self, now=None) -> None:
-        """Update the switch state and calculated values."""
+    async def _update_hcl(self, now=None):
+        """Main HCL Update Loop."""
         if not self._is_on:
-            return
-            
-        if now is None:
-            now = dt_util.now()
-        else:
-            now = dt_util.as_local(now)
+             return
+             
+        # prevent reentrancy
+        if self._update_lock.locked():
+             _LOGGER.warning("Update loop skipped: Previous cycle still running!")
+             return
 
-        try:
-            # 1. Calculate Target Values
-            min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-            max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-            
-            self._calculated_brightness, self._calculated_kelvin = self.calculator.get_hcl_values(
-                now, min_b, max_b
-            )
-            _LOGGER.debug(
-                "HCL Update Cycle: Target B=%s%%, K=%sK", 
-                self._calculated_brightness, self._calculated_kelvin
-            )
-            self.async_write_ha_state()
-
-            # 2. Resolve Targets (Cached)
-            all_lights = self._resolved_targets
-            
-            # Prune cache to avoid memory leaks
-            self.controller.prune_cache(all_lights)
-            
-            # 3. Check for Re-engagements (Expired Overrides)
-            expired_overrides = self.override_manager.get_pending_reengagements()
-            for eid in expired_overrides:
-                if eid in all_lights:
-                    await self.controller.reengage_light(
-                        eid, self._calculated_brightness, self._calculated_kelvin
-                    )
-
-            # 4. Filter Active Lights (Not Overridden)
-            active_lights = []
-            for eid in all_lights:
-                state = self.hass.states.get(eid)
-                # Only control lights that are currently ON
-                if state and state.state == STATE_ON and not self.override_manager.is_overridden(eid):
-                    active_lights.append(eid)
-            
-            # 5. Apply Batch
-            if active_lights:
-                await self.controller.apply_batch(
-                    active_lights, 
-                    self._calculated_brightness, 
-                    self._calculated_kelvin,
-                    transition=HCL_TRANSITION_SECONDS 
+        async with self._update_lock:
+            try:
+                # 1. Calculate Target Values
+                # Dynamic Config
+                min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+                max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+                
+                brightness, kelvin = self.hcl_calc.get_hcl_values(utcnow(), min_b, max_b)
+                
+                # Update State for UI/Debugging
+                self._calculated_brightness = brightness
+                self._calculated_kelvin = kelvin
+                _LOGGER.debug(
+                    "HCL Update Cycle: Target B=%s%%, K=%sK", 
+                    self._calculated_brightness, self._calculated_kelvin
                 )
-        except Exception:
-             _LOGGER.exception("Error in HCL update loop")
+                self.async_write_ha_state()
+
+                # 2. Resolve Targets (Cached)
+                all_lights = self._resolved_targets
+                
+                # Prune cache to avoid memory leaks
+                self.controller.prune_cache(all_lights)
+                
+                # 3. Check for Re-engagements (Expired Overrides)
+                expired_overrides = self.override_manager.get_pending_reengagements()
+                for eid in expired_overrides:
+                    if eid in all_lights:
+                        await self.controller.reengage_light(
+                            eid, self._calculated_brightness, self._calculated_kelvin
+                        )
+
+                # 4. Filter Active Lights (Not Overridden)
+                active_lights = []
+                for eid in all_lights:
+                    state = self.hass.states.get(eid)
+                    # Only control lights that are currently ON
+                    if state and state.state == STATE_ON and not self.override_manager.is_overridden(eid):
+                        active_lights.append(eid)
+                
+                # 5. Apply Batch
+                if active_lights:
+                    await self.controller.apply_batch(
+                        active_lights, 
+                        self._calculated_brightness, 
+                        self._calculated_kelvin,
+                        transition=HCL_TRANSITION_SECONDS 
+                    )
+            except Exception:
+                 _LOGGER.exception("Error in HCL update loop")
 
     @callback
     def _handle_light_state_change(self, event: Event) -> None:
@@ -244,8 +275,8 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
                  # Stored self._calculated_brightness might be up to UPDATE_INTERVAL old.
                  min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
                  max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-                 now = dt_util.now()
-                 fresh_b, fresh_k = self.calculator.get_hcl_values(now, min_b, max_b)
+                 now = utcnow()
+                 fresh_b, fresh_k = self.hcl_calc.get_hcl_values(now, min_b, max_b)
                  
                  # Update cache while we are at it
                  self._calculated_brightness = fresh_b
@@ -270,7 +301,11 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         # 2. Check for Manual Override
         # This now only processes changes happening WHILE the light is already ON,
         # OR the Turn-Off event (to reset).
-        is_override = self.override_manager.check_override(entity_id, new_state, None)
+        is_override = self.override_manager.check_override(
+            entity_id, 
+            new_state,
+            (self._calculated_brightness, self._calculated_kelvin) # Fallback Reference
+        )
         
         if is_override:
             return

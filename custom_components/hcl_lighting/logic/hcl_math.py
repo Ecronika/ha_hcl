@@ -42,7 +42,15 @@ class HCLCalculator:
         Returns:
             tuple(brightness, kelvin)
         """
-        # Defensive Input Validation
+        # Defensive Input Validation & Coercion
+        try:
+            min_brightness = int(min_brightness) if min_brightness is not None else DEFAULT_MIN_BRIGHTNESS
+            max_brightness = int(max_brightness) if max_brightness is not None else DEFAULT_MAX_BRIGHTNESS
+        except (ValueError, TypeError):
+             _LOGGER.error("Invalid config types for brightness. Using defaults.")
+             min_brightness = DEFAULT_MIN_BRIGHTNESS
+             max_brightness = DEFAULT_MAX_BRIGHTNESS
+
         min_brightness = max(0, min(100, min_brightness))
         max_brightness = max(0, min(100, max_brightness))
 
@@ -75,7 +83,12 @@ class HCLCalculator:
         dt_interval = t1 - t0
         if dt_interval < 0:
             dt_interval += self.MINUTES_PER_DAY
-            
+        
+        # Division by zero guard
+        if dt_interval == 0:
+             _LOGGER.error("Degenerate segment detected in HCL curve (dt=0). Skipping interpolation.")
+             return min_brightness, 4000 # Fail safe
+
         # 3. Calculate Normalized Time t (0..1)
         # Handle current_minutes crossing midnight relative to t0
         dist_from_t0 = current_minutes - t0
