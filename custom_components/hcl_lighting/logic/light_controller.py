@@ -145,8 +145,12 @@ class HCLLightController:
                 for t in tasks:
                     self.hass.async_create_task(t)
             else:
-                # Standard Mode: Wait for all to finish, but run them concurrently
-                await asyncio.gather(*tasks)
+            else:
+                # Standard Mode: Wait for all to finish, catch individual failures
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for res in results:
+                    if isinstance(res, Exception):
+                        _LOGGER.error("Error applying HCL to light batch: %s", res)
 
     async def apply_fast(self, entity_id: str, brightness: int, kelvin: int):
         """Ultra-fast HCL application for turn-on events."""
@@ -159,7 +163,8 @@ class HCLLightController:
 
         # Update Tracking
         self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
-        self.override_manager.set_ignore_window(entity_id, 2.0) # Small window for instant update
+        # NOTE: override_manager.set_ignore_window must be called by the caller 
+        # (synchronously) before scheduling this task to avoid race conditions.
 
         cap_type = self._get_capability(entity_id, kelvin)
         

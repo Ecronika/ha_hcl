@@ -169,46 +169,49 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
         else:
             now = dt_util.as_local(now)
 
-        # 1. Calculate Target Values
-        min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-        max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-        
-        self._calculated_brightness, self._calculated_kelvin = self.calculator.get_hcl_values(
-            now, min_b, max_b
-        )
-        _LOGGER.debug(
-            "HCL Update Cycle: Target B=%s%%, K=%sK", 
-            self._calculated_brightness, self._calculated_kelvin
-        )
-        self.async_write_ha_state()
-
-        # 2. Resolve Targets (Cached)
-        all_lights = self._resolved_targets
-        
-        # 3. Check for Re-engagements (Expired Overrides)
-        expired_overrides = self.override_manager.get_pending_reengagements()
-        for eid in expired_overrides:
-            if eid in all_lights:
-                await self.controller.reengage_light(
-                    eid, self._calculated_brightness, self._calculated_kelvin
-                )
-
-        # 4. Filter Active Lights (Not Overridden)
-        active_lights = []
-        for eid in all_lights:
-            state = self.hass.states.get(eid)
-            # Only control lights that are currently ON
-            if state and state.state == STATE_ON and not self.override_manager.is_overridden(eid):
-                active_lights.append(eid)
-        
-        # 5. Apply Batch
-        if active_lights:
-            await self.controller.apply_batch(
-                active_lights, 
-                self._calculated_brightness, 
-                self._calculated_kelvin,
-                transition=HCL_TRANSITION_SECONDS 
+        try:
+            # 1. Calculate Target Values
+            min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+            max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+            
+            self._calculated_brightness, self._calculated_kelvin = self.calculator.get_hcl_values(
+                now, min_b, max_b
             )
+            _LOGGER.debug(
+                "HCL Update Cycle: Target B=%s%%, K=%sK", 
+                self._calculated_brightness, self._calculated_kelvin
+            )
+            self.async_write_ha_state()
+
+            # 2. Resolve Targets (Cached)
+            all_lights = self._resolved_targets
+            
+            # 3. Check for Re-engagements (Expired Overrides)
+            expired_overrides = self.override_manager.get_pending_reengagements()
+            for eid in expired_overrides:
+                if eid in all_lights:
+                    await self.controller.reengage_light(
+                        eid, self._calculated_brightness, self._calculated_kelvin
+                    )
+
+            # 4. Filter Active Lights (Not Overridden)
+            active_lights = []
+            for eid in all_lights:
+                state = self.hass.states.get(eid)
+                # Only control lights that are currently ON
+                if state and state.state == STATE_ON and not self.override_manager.is_overridden(eid):
+                    active_lights.append(eid)
+            
+            # 5. Apply Batch
+            if active_lights:
+                await self.controller.apply_batch(
+                    active_lights, 
+                    self._calculated_brightness, 
+                    self._calculated_kelvin,
+                    transition=HCL_TRANSITION_SECONDS 
+                )
+        except Exception as e:
+             _LOGGER.error("Error in HCL update loop: %s", e)
 
     @callback
     def _handle_light_state_change(self, event: Event) -> None:
@@ -244,6 +247,9 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
 
                  # Synchronous Update to Override Manager (Fix Race Condition)
                  self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
+                 
+                 # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
+                 self.override_manager.set_ignore_window(entity_id, 2.0)
 
                  self.hass.async_create_task(
                      self.controller.apply_fast(

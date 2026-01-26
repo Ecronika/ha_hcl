@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta2] (Stability Hardening)
+- **Fix**: Critical Race Condition in Fast-Path logic (Fixed spurious override detection).
+- **Fix**: Resilient Batch Updates (One failing light no longer blocks others).
+- **Fix**: Added Exception Handling to Main Update Loop.
+
 ## [0.2.1-beta1] (Capability Fix)
 - **Fix**: Prevent caching capabilities for Unavailable/Unknown/OFF entities.
 - **Fix**: Force re-calculation of capabilities if `supported_color_modes` was empty previously.
