@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta5] (Final Polish)
+- **Fix**: Critical Config Flow Syntax Error that prevented loading on some setups.
+- **Fix**: Added logical validation for Brightness Bounds (prevents min > max).
+- **Fix**: Reduced log noise (missing capabilities warning downgraded to debug).
+- **Fix**: Improved batch update exception logging (includes stacktraces).
+
 ## [0.2.1-beta4] (Production Stability)
 - **Fix**: Critical Bug where integration failed to work on fresh installs (Target Resolution priority).
 - **Fix**: Critical Override Logic Flaw (Ignore Window now only set on active updates).

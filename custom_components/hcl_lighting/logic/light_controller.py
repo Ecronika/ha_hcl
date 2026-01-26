@@ -158,9 +158,13 @@ class HCLLightController:
 
                 # Standard Mode: Wait for all to finish, catch individual failures
                 results = await asyncio.gather(*tasks, return_exceptions=True)
-                for res in results:
-                    if isinstance(res, Exception):
-                        _LOGGER.error("Error applying HCL to light batch: %s", res)
+                for i, res in enumerate(results):
+                    if isinstance(res, BaseException):
+                        _LOGGER.error(
+                            "Batch light update task %d/%d failed: %s", 
+                            i + 1, len(results), res, 
+                            exc_info=res
+                        )
 
     async def apply_fast(self, entity_id: str, brightness: int, kelvin: int):
         """Ultra-fast HCL application for turn-on events."""
@@ -284,12 +288,12 @@ class HCLLightController:
              _LOGGER.warning("Entity %s has invalid supported_color_modes type: %s", entity_id, type(supported_modes))
              return "onoff"
         
-        # None or Empty List = Invalid (Warn if ON, Debug if others)
+        # None or Empty List = Invalid
         if not supported_modes:
-             if state.state == STATE_ON:
-                  _LOGGER.warning("Entity %s is ON but has no 'supported_color_modes' - not caching", entity_id)
-             else:
-                  _LOGGER.debug("Entity %s has no 'supported_color_modes' - not caching", entity_id)
+             _LOGGER.debug(
+                 "Entity %s is %s but has no 'supported_color_modes' - treating as onoff", 
+                 entity_id, state.state
+             )
              return "onoff"
 
         # 5. Safe to Cache (State=ON + Valid Attributes)

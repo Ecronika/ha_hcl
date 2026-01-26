@@ -78,45 +78,32 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             else:
                 return self.async_create_entry(title="", data=user_input)
 
-        return self.async_show_form(
-            step_id="init",
         # Compatibility wrapper for older HA versions
-        schema_defaults = self.config_entry_proxy.options or self.config_entry_proxy.data
+        # Use current options/data as defaults if user_input is None
+        schema_defaults = user_input or self.config_entry_proxy.options or self.config_entry_proxy.data
+        
+        # Manually inject defaults into base schema for fallback compatibility
+        base_schema = vol.Schema(
+            {
+                vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET)): selector.TargetSelector(
+                    {"entity": {"domain": ["light"]}}
+                ),
+                vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),
+                vol.Optional(CONF_MIN_BRIGHTNESS, default=schema_defaults.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                vol.Optional(CONF_MAX_BRIGHTNESS, default=schema_defaults.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+            }
+        )
 
         if hasattr(self, "add_suggested_values_to_schema"):
-            data_schema = self.add_suggested_values_to_schema(
-                vol.Schema(
-                    {
-                        vol.Required(CONF_TARGET): selector.TargetSelector(
-                            {
-                                "entity": {
-                                    "domain": ["light"]
-                                },
-                             }
-                        ),
-                        vol.Optional(CONF_SMART_TRANSITION, default=False): selector.BooleanSelector(),
-                        vol.Optional(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                        vol.Optional(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                    }
-                ),
-                schema_defaults
-            )
+            try:
+                # Provide the defaults object to HA helper
+                data_schema = self.add_suggested_values_to_schema(base_schema, schema_defaults)
+            except Exception:
+                _LOGGER.exception("Failed to apply suggested schema defaults, falling back to base schema")
+                data_schema = base_schema
         else:
-            # Fallback for old HA: Return clean schema without pre-filled values
-             data_schema = vol.Schema(
-                    {
-                        vol.Required(CONF_TARGET): selector.TargetSelector(
-                            {
-                                "entity": {
-                                    "domain": ["light"]
-                                },
-                             }
-                        ),
-                        vol.Optional(CONF_SMART_TRANSITION, default=False): selector.BooleanSelector(),
-                        vol.Optional(CONF_MIN_BRIGHTNESS, default=DEFAULT_MIN_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                        vol.Optional(CONF_MAX_BRIGHTNESS, default=DEFAULT_MAX_BRIGHTNESS): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                    }
-                )
+            # Fallback for old HA: use the base_schema which already has defaults injected manually above
+            data_schema = base_schema
 
         return self.async_show_form(
             step_id="init",
