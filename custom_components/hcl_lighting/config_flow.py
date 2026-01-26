@@ -85,7 +85,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Manually inject defaults into base schema for fallback compatibility
         base_schema = vol.Schema(
             {
-                vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET)): selector.TargetSelector(
+                vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET) or {}): selector.TargetSelector(
                     {"entity": {"domain": ["light"]}}
                 ),
                 vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),

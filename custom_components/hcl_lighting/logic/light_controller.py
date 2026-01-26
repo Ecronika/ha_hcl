@@ -86,17 +86,22 @@ class HCLLightController:
             if not self._needs_update(entity_id, brightness, kelvin):
                  continue
             
-            # Update Tracking (Only for active updates)
-            self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
-            self.override_manager.set_ignore_window(entity_id, transition_val)
+            # NOTE: Override Tracking has been moved inside the capability check blocks
+            # below to ensure we only ignore-window lights that ACTUALLY get an update command.
 
             cap_type = self._get_capability(entity_id, kelvin)
             if cap_type == "ct":
                 lights_ct.append(entity_id)
+                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
+                self.override_manager.set_ignore_window(entity_id, transition_val)
             elif cap_type == "xy_sim":
                 lights_xy_sim.append(entity_id)
+                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
+                self.override_manager.set_ignore_window(entity_id, transition_val)
             elif cap_type == "dim":
                 lights_dim.append(entity_id)
+                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
+                self.override_manager.set_ignore_window(entity_id, transition_val)
 
         # 3. Task Collection for Parallel Execution
         tasks = []
@@ -336,7 +341,14 @@ class HCLLightController:
 
     def _calculate_capability_from_state(self, state) -> str:
         """Calculate capability without caching (for unsafe states)."""
-        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES) or []
+        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
+        
+        # Type safety: ensure iterable
+        if supported_modes and not isinstance(supported_modes, (list, tuple)):
+            # Invalid type (e.g. string) -> onoff
+            return "onoff"
+
+        supported_modes = supported_modes or []
         
         if not supported_modes:
             return "onoff"

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 
+from ..const import DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS
+
 _LOGGER = logging.getLogger(__name__)
 
 class HCLCalculator:
@@ -38,6 +40,7 @@ class HCLCalculator:
             max_brightness: User configured maximum brightness (0-100)
             
         Returns:
+            tuple(brightness, kelvin)
         """
         # Defensive Input Validation
         min_brightness = max(0, min(100, min_brightness))
@@ -45,8 +48,8 @@ class HCLCalculator:
 
         if min_brightness >= max_brightness:
              _LOGGER.error("Invalid brightness bounds (min=%d >= max=%d), check config! Using defaults.", min_brightness, max_brightness)
-             min_brightness = 10
-             max_brightness = 100
+             min_brightness = DEFAULT_MIN_BRIGHTNESS
+             max_brightness = DEFAULT_MAX_BRIGHTNESS
 
         current_minutes = now.hour * 60 + now.minute
         points = self.POINTS
