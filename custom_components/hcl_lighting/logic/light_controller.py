@@ -145,7 +145,7 @@ class HCLLightController:
                 for t in tasks:
                     self.hass.async_create_task(t)
             else:
-            else:
+
                 # Standard Mode: Wait for all to finish, catch individual failures
                 results = await asyncio.gather(*tasks, return_exceptions=True)
                 for res in results:
