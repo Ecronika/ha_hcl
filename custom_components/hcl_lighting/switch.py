@@ -186,6 +186,9 @@ class HCLSwitch(SwitchEntity, RestoreEntity):
             # 2. Resolve Targets (Cached)
             all_lights = self._resolved_targets
             
+            # Prune cache to avoid memory leaks
+            self.controller.prune_cache(all_lights)
+            
             # 3. Check for Re-engagements (Expired Overrides)
             expired_overrides = self.override_manager.get_pending_reengagements()
             for eid in expired_overrides:

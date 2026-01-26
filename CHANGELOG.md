@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta3] (Cleanup & Validation)
+- **Fix**: Memory Leak in Capability Cache (Automatic Pruning).
+- **Fix**: Defensive Input Validation in Math Logic (Min/Max Brightness clamping).
+
 ## [0.2.1-beta2] (Stability Hardening)
 - **Fix**: Critical Race Condition in Fast-Path logic (Fixed spurious override detection).
 - **Fix**: Resilient Batch Updates (One failing light no longer blocks others).

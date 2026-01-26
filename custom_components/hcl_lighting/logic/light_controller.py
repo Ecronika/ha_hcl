@@ -44,6 +44,16 @@ class HCLLightController:
         self._capability_cache = {}
         self._cache_version = CAPABILITY_CACHE_VERSION
 
+    def prune_cache(self, valid_entity_ids: set[str]) -> None:
+        """Prune capability cache of invalid/removed entities."""
+        to_remove = [eid for eid in self._capability_cache if eid not in valid_entity_ids]
+        
+        for eid in to_remove:
+            del self._capability_cache[eid]
+            
+        if to_remove:
+            _LOGGER.debug("Pruned %d stale entities from capability cache", len(to_remove))
+
     async def apply_batch(
         self, 
         lights: list[str], 

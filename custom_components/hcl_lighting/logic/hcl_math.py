@@ -40,6 +40,10 @@ class HCLCalculator:
         Returns:
             tuple(brightness, kelvin)
         """
+        # Defensive Input Validation
+        min_brightness = max(0, min(100, min_brightness))
+        max_brightness = max(0, min(100, max_brightness))
+
         current_minutes = now.hour * 60 + now.minute
         points = self.POINTS
         
