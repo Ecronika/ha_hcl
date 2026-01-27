@@ -63,27 +63,52 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["last_set"] = (brightness, kelvin)
 
-    def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None) -> bool:
-        """Check if state change is a manual override.
-        
-        Returns:
-            bool: True if override was detected, False otherwise.
-        """
+    def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None, old_state: State | None = None) -> bool:
+        """Check if state change is a manual override."""
         if not state:
             return False
 
-        # If we don't track this light yet, initialize
         if entity_id not in self._override_state:
             self._override_state[entity_id] = {}
 
         light_data = self._override_state[entity_id]
         now = dt_util.now()
 
-        # 1. Check Ignore Window
+        # Priority: internal last_set > global last_applied
+        recorded_last_set = light_data.get("last_set")
+        reference_values = recorded_last_set or last_set_values
+        last_b = reference_values[0] if reference_values else None
+
+        # 1. Check Ignore Window with Divergence Detection
         ignore_until = light_data.get("ignore_events_until")
         if ignore_until and now < ignore_until:
-             _LOGGER.debug("Ignoring event for %s (Window active until %s)", entity_id, ignore_until)
-             return False
+            # Trajectory Analysis: Did we move AWAY from target significantly?
+            divergence_detected = False
+            if old_state and old_state.state == "on" and last_b is not None:
+                try:
+                    curr_b_raw = state.attributes.get("brightness") or 0
+                    old_b_raw = old_state.attributes.get("brightness") or 0
+                    
+                    curr_pct = round(curr_b_raw * 100 / 255)
+                    old_pct = round(old_b_raw * 100 / 255)
+                    
+                    dist_new = abs(curr_pct - last_b)
+                    dist_old = abs(old_pct - last_b)
+                    
+                    # If new distance is significantly larger (>5%) than old distance,
+                    # the user moved the light away from the target -> Override!
+                    if dist_new > dist_old + 5:
+                        _LOGGER.debug(
+                            "Override detected inside Ignore Window! Divergence: OldDist=%s%%, NewDist=%s%%", 
+                            dist_old, dist_new
+                        )
+                        divergence_detected = True
+                except Exception:
+                    pass # Fallback to standard ignore
+            
+            if not divergence_detected:
+                _LOGGER.debug("Ignoring event for %s (Window active until %s)", entity_id, ignore_until)
+                return False
 
         # 2. Check if light is ON
         if state.state != "on":
@@ -95,8 +120,8 @@ class OverrideManager:
 
         # 3. Compare with Expected Values
         # Priority: internal last_set > global last_applied
-        recorded_last_set = light_data.get("last_set")
-        reference_values = recorded_last_set or last_set_values
+        # recorded_last_set = light_data.get("last_set") # Already got above
+        # reference_values = recorded_last_set or last_set_values
 
         if reference_values:
             last_b, last_k = reference_values
@@ -116,7 +141,7 @@ class OverrideManager:
 
         # Percentage with Bounds Check
         curr_b = min(255, max(0, curr_b))
-        curr_b_pct = int(curr_b * 100 / 255)
+        curr_b_pct = round(curr_b * 100 / 255) # Fixed: Use round() for consistency
         
         # Calculate Deltas
         delta_b = abs(curr_b_pct - last_b)

@@ -305,7 +305,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             is_override = self.override_manager.check_override(
                 entity_id, 
                 new_state,
-                (self._calculated_brightness, self._calculated_kelvin) # Fallback Reference
+                (self._calculated_brightness, self._calculated_kelvin), # Fallback Reference
+                old_state=old_state
             )
             
             if is_override:
