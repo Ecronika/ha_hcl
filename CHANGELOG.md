@@ -5,22 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.1-beta9] (Emergency Hotfix)
-- **Rolled Back**: `OverrideManager` logic reverted to stable architecture (beta7) to fix critical runtime crashes.
-- **Fixed**: Syntax Error in `switch.py` (restored missing "Fast Path" logic block).
-- **Added**: Proper memory leak pruning (backported to stable architecture).
-- **Fixed**: `asyncio` and `HCLLightController` imports are now correct.
-- **Improved**: Time calculation explicitly uses `dt_util.now()` (Local Time) everywhere.
-
-## [0.2.1-beta8] (DO NOT USE - BROKEN)
-
-## [0.2.1-beta7] (Timing & Loop Fixes)
-- **Critical Fix**: Resolved concurrency race condition in Update Loop (Switch Reentrancy).
+## [0.2.1-beta10] (Stability & Hardening)
+- **Critical Stability**: Resolved concurrency race conditions in Update Loop (Switch Reentrancy Guard) and fixed startup crashes.
 - **Critical Fix**: Reduced Transition Time (20s) to guarantee completion before next update cycle (27s).
-- **Fix**: Math Rounding Logic (switched to `round()`) to prevent infinite 1% ping-pong loops.
-- **Fix**: Switch UI State Consistency (force write state on toggle).
-- **Fix**: Override Detection reliability (added Reference Fallback).
-- **Hardening**: Config Type Coercion and DivisionByZero guards.
+- **Core Logic**: Switched to Proper Local Time (`dt_util.now()`) for correct HCL curve execution (was UTC).
+- **Math & Logic**: Improved rounding logic (`round()` vs `int()`) to prevent ping-pong loops and added DivisionByZero guards.
+- **Memory**: Implemented proper memory pruning for Override Manager and Controller caches to prevent leaks.
+- **Race Condition**: Removed redundant config update listeners to prevent "fighting" during options updates.
+- **UX**: Enforced UI state consistency (`async_write_ha_state`) on toggle events to prevent UI glitches.
+- **Robustness**: Guarded against `None` attributes in capability detection and override logic.
 
 ## [0.2.1-beta6] (Edge Case Polish)
 - **Fix**: Override Logic refined (Ignore Window only set if update actually queued).
