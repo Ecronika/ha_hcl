@@ -252,11 +252,47 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             except Exception:
                  _LOGGER.exception("Error in HCL update loop")
 
-    @callback
-    def _handle_light_state_change(self, event: Event) -> None:
-        """Handle state changes of monitored lights."""
         if not self._is_on:
             return
+        
+        entity_id = event.data.get("entity_id")
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+
+        if not entity_id or not new_state:
+            return
+
+        # 1. Fast Path (Turn On Event)
+        # Check this BEFORE override to handle "Restore Last State" correctly.
+        # If a light turns on, we want to capture it immediately into HCL, 
+        # ignoring whatever brightness it "remembered" from last time.
+        if old_state and old_state.state != STATE_ON and new_state.state == STATE_ON:
+             # Just turned on.
+             # Only apply if not persistently overridden (though we usually reset on OFF)
+             if not self.override_manager.is_overridden(entity_id):
+                 # RECALCULATE FRESH VALUES IMMEDIATELY
+                 # Stored self._calculated_brightness might be up to UPDATE_INTERVAL old.
+                 min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+                 max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+                 
+                 # Use local time for calculation
+                 now = dt_util.now()
+                 fresh_b, fresh_k = self.hcl_calc.get_hcl_values(now, min_b, max_b)
+                 
+                 # Update cache while we are at it
+                 self._calculated_brightness = fresh_b
+                 self._calculated_kelvin = fresh_k
+
+                 # Synchronous Update to Override Manager (Fix Race Condition)
+                 self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
+                 
+                 # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
+                 self.override_manager.set_ignore_window(entity_id, 2.0)
+
+                 self.hass.async_create_task(
+                     self.controller.apply_fast(
+                         entity_id, 
+                         fresh_b, 
                          fresh_k
                      )
                  )
