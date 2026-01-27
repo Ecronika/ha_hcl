@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta8] (Crash Guard & Race Fixes)
+- **Critical Fix**: Resolved Startup Crash (Missing Imports & Class Names).
+- **Critical Fix**: Fixed Capability Detection Crash (`TypeError` on `None` attributes).
+- **Fix**: Memory Leak in Override Manager (Pruning stale entities).
+- **Fix**: Race Condition during Config Updates (Removed redundant listener).
+- **Fix**: Event Listener reliability (Crash Protection).
+- **Fix**: UTC/Local Time logic verified (using `dt_util.now()`).
+
 ## [0.2.1-beta7] (Timing & Loop Fixes)
 - **Critical Fix**: Resolved concurrency race condition in Update Loop (Switch Reentrancy).
 - **Critical Fix**: Reduced Transition Time (20s) to guarantee completion before next update cycle (27s).

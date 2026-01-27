@@ -6,7 +6,11 @@ import asyncio
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.components.light import ATTR_SUPPORTED_COLOR_MODES, ColorMode
+from homeassistant.components.light import (
+    ATTR_SUPPORTED_COLOR_MODES,
+    ATTR_COLOR_TEMP_KELVIN,
+    ColorMode
+)
 from homeassistant.helpers import entity_registry as er, device_registry as dr
 from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
 from homeassistant.const import ATTR_ENTITY_ID
@@ -260,7 +264,8 @@ class HCLLightController:
                 # Valid Cache: Check Dynamic XY
                 if (cached["type"] == "ct" and 
                     cached.get("min_kelvin") and 
-                    kelvin < cached["min_kelvin"] and 
+                    cached.get("max_kelvin") and
+                    (kelvin < cached["min_kelvin"] or kelvin > cached["max_kelvin"]) and 
                     cached.get("supports_color")):
                     return "xy_sim"
                 return cached["type"]
@@ -303,12 +308,14 @@ class HCLLightController:
 
         # 5. Safe to Cache (State=ON + Valid Attributes)
         min_kelvin = state.attributes.get("min_color_temp_kelvin")
+        max_kelvin = state.attributes.get("max_color_temp_kelvin")
         supports_color = any(
             mode in supported_modes 
             for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB)
         )
 
         # Calculate Capability
+        cap_type = "onoff" # Default
         if ColorMode.COLOR_TEMP in supported_modes:
             cap_type = "ct"
         elif supports_color:
@@ -316,13 +323,25 @@ class HCLLightController:
         elif (ColorMode.BRIGHTNESS in supported_modes or 
               (supported_modes and ColorMode.ONOFF not in supported_modes)):
             cap_type = "dim"
-        else:
-            cap_type = "onoff"
+        
+        # Handle CT lights with missing min/max kelvin or target kelvin out of range
+        if cap_type == "ct":
+            # If we have color_temp mode but no limits, assume standard range to avoid crash
+            # This happens with some MQTT/Template lights
+            if min_kelvin is None:
+                min_kelvin = 2000
+            if max_kelvin is None:
+                max_kelvin = 6500
+            
+            # If target kelvin is outside the light's reported range, simulate with XY if possible
+            if (kelvin < min_kelvin or kelvin > max_kelvin) and supports_color:
+                cap_type = "xy_sim" # Simulate CT using XY if target is out of range
 
         # Store in Cache with Version
         cap_data = {
             "type": cap_type,
             "min_kelvin": min_kelvin,
+            "max_kelvin": max_kelvin,
             "supports_color": supports_color,
             "version": self._cache_version  # MIGRATION TAG
         }
@@ -336,8 +355,12 @@ class HCLLightController:
             supported_modes
         )
 
-        # 6. Recursive Check for Dynamic XY
-        return self._get_capability(entity_id, kelvin)
+        # 6. Recursive Check for Dynamic XY (if it was originally CT but switched to XY_SIM)
+        # This ensures the logic for out-of-range kelvin is applied immediately after caching
+        if cap_type == "xy_sim" and cap_data["type"] == "ct": # If it was originally CT but we decided to simulate
+            return self._get_capability(entity_id, kelvin) # Recalculate with the new kelvin range logic
+        
+        return cap_type
 
     def _calculate_capability_from_state(self, state) -> str:
         """Calculate capability without caching (for unsafe states)."""
@@ -388,32 +411,28 @@ class HCLLightController:
             return False
 
         # Check Brightness
+        delta_b = 0
         if curr_b is not None:
              curr_b_pct = int(curr_b * 100 / 255)
              delta_b = abs(curr_b_pct - target_b)
-             if delta_b > BRIGHTNESS_THRESHOLD:
-                 return True
         else:
-            delta_b = "Unknown"
             # Unknown brightness, assume update needed
             return True
             
         # Check Kelvin (if supported)
+        delta_k = 0
         if curr_k is not None:
              delta_k = abs(curr_k - target_k)
-             if delta_k > KELVIN_THRESHOLD:
-                 return True
         elif self._get_capability(entity_id, target_k) in ("ct", "xy_sim"):
              # Color supported but current is None (e.g. RGB mode?), force update
              return True
-        else:
-            delta_k = "N/A"
-
-        _LOGGER.debug(
-            "Skipping update for %s: Change too small (Delta B=%s%%, K=%sK)", 
-            entity_id, delta_b, delta_k
-        )
-        return False
+        
+        if delta_b <= BRIGHTNESS_THRESHOLD and (delta_k <= KELVIN_THRESHOLD if target_k else True):
+             # Logs demoted to TRACE (level 5) to avoid spam
+             _LOGGER.log(5, "Skipping update for %s: Change too small (Delta B=%s%%, K=%sK)", entity_id, delta_b, delta_k if target_k else "N/A")
+             return False
+        
+        return True
 
     def resolve_targets(self, target_config: dict[str, Any]) -> set[str]:
         """Resolve target config to a set of entity IDs."""

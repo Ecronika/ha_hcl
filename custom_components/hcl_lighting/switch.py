@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 from typing import Any
 from datetime import timedelta
 
@@ -29,7 +30,7 @@ from .const import (
 
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
-from .logic.light_controller import LightController
+from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,14 +40,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # Initialize Logic Components
     override_manager = OverrideManager()
     hcl_calc = HCLCalculator()
-    controller = LightController(hass, override_manager)
+    controller = HCLLightController(hass, override_manager, entry)
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
     
     async_add_entities([switch])
     
-    # Listen for options updates
-    entry.async_on_unload(entry.add_update_listener(switch.async_options_updated))
+    # NOTE: redundant listener removed to prevent race conditions.
+    # __init__.py handles reload on options update.
 
 
 class HCLSwitch(RestoreEntity, SwitchEntity):
@@ -55,7 +56,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "hcl_switch"
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller: LightController, hcl_calc: HCLCalculator, override_manager: OverrideManager) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller: HCLLightController, hcl_calc: HCLCalculator, override_manager: OverrideManager) -> None:
         """Initialize the switch."""
         self.hass = hass
         self._entry = entry
@@ -206,7 +207,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
                 max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
                 
-                brightness, kelvin = self.hcl_calc.get_hcl_values(utcnow(), min_b, max_b)
+                brightness, kelvin = self.hcl_calc.get_hcl_values(dt_util.now(), min_b, max_b)
                 
                 # Update State for UI/Debugging
                 self._calculated_brightness = brightness
@@ -220,8 +221,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 # 2. Resolve Targets (Cached)
                 all_lights = self._resolved_targets
                 
-                # Prune cache to avoid memory leaks
+                # Prune cache to avoid memory leaks (Both Controller and Override Manager)
                 self.controller.prune_cache(all_lights)
+                self.override_manager.prune_stale_entities(all_lights)
                 
                 # 3. Check for Re-engagements (Expired Overrides)
                 expired_overrides = self.override_manager.get_pending_reengagements()
@@ -255,43 +257,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         """Handle state changes of monitored lights."""
         if not self._is_on:
             return
-
-        entity_id = event.data.get("entity_id")
-        new_state = event.data.get("new_state")
-        old_state = event.data.get("old_state")
-        
-        if not new_state:
-            return
-
-        # 1. Fast Path (Turn On Event)
-        # Check this BEFORE override to handle "Restore Last State" correctly.
-        # If a light turns on, we want to capture it immediately into HCL, 
-        # ignoring whatever brightness it "remembered" from last time.
-        if old_state and old_state.state != STATE_ON and new_state.state == STATE_ON:
-             # Just turned on.
-             # Only apply if not persistently overridden (though we usually reset on OFF)
-             if not self.override_manager.is_overridden(entity_id):
-                 # RECALCULATE FRESH VALUES IMMEDIATELY
-                 # Stored self._calculated_brightness might be up to UPDATE_INTERVAL old.
-                 min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-                 max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-                 now = utcnow()
-                 fresh_b, fresh_k = self.hcl_calc.get_hcl_values(now, min_b, max_b)
-                 
-                 # Update cache while we are at it
-                 self._calculated_brightness = fresh_b
-                 self._calculated_kelvin = fresh_k
-
-                 # Synchronous Update to Override Manager (Fix Race Condition)
-                 self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
-                 
-                 # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
-                 self.override_manager.set_ignore_window(entity_id, 2.0)
-
-                 self.hass.async_create_task(
-                     self.controller.apply_fast(
-                         entity_id, 
-                         fresh_b, 
                          fresh_k
                      )
                  )
