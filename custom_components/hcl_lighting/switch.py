@@ -294,7 +294,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                          self.controller.apply_fast(
                              entity_id, 
                              fresh_b, 
-                             fresh_k
+                             fresh_k,
+                             state_obj=new_state
                          )
                      )
                      # IMPORTANT: Return here to avoid detecting this initial state as an override

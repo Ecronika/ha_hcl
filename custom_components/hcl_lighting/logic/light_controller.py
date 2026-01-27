@@ -175,47 +175,48 @@ class HCLLightController:
                             exc_info=res
                         )
 
-    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int):
+    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None):
         """Ultra-fast HCL application for turn-on events."""
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
         
-        state = self.hass.states.get(entity_id)
-        if self._is_group(entity_id):
+        # Use passed state object or fallback to lookup (performance optimization)
+        state = state_obj or self.hass.states.get(entity_id)
+        
+        if state is None:
+            return
+
+        if self._is_group(entity_id, state):
              _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
              return
 
-        # Update Tracking
-        self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
-        # NOTE: override_manager.set_ignore_window must be called by the caller 
-        # (synchronously) before scheduling this task to avoid race conditions.
-
-        cap_type = self._get_capability(entity_id, kelvin)
+        # Redundant tracking removed (handled in switch.py synchronously)
         
-        coro = None
+        cap_type = self._get_capability(entity_id, kelvin, state)
+        
+        service_data = {
+            "entity_id": entity_id,
+            "brightness_pct": brightness,
+            "transition": 0
+        }
         
         if cap_type == "ct":
-             coro = self.hass.services.async_call(
-                "light", "turn_on",
-                {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": 0},
-                blocking=True
-            )
+             service_data["color_temp_kelvin"] = kelvin
         elif cap_type == "xy_sim":
             rgb = color_temperature_to_rgb(kelvin)
             x, y = color_RGB_to_xy(*rgb)
-            coro = self.hass.services.async_call(
-                "light", "turn_on",
-                {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0},
-                blocking=True
-            )
+            service_data["xy_color"] = (x, y)
         elif cap_type == "dim":
-            coro = self.hass.services.async_call(
-                "light", "turn_on",
-                {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0},
-                blocking=True
-            )
-            
-        if coro:
-             self.hass.async_create_task(coro)
+            pass
+        else:
+            return # onoff or unknown
+
+        # Execute immediately in current task context (no double-scheduling)
+        await self.hass.services.async_call(
+            "light", 
+            "turn_on",
+            service_data,
+            blocking=True
+        )
 
     async def reengage_light(self, entity_id: str, target_brightness: int, target_kelvin: int):
         """Smoothly re-engage a light back to HCL values."""
@@ -243,7 +244,7 @@ class HCLLightController:
             fast_mode=True # Don't block main loop
         )
 
-    def _get_capability(self, entity_id: str, kelvin: int) -> str:
+    def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
         """Determine capabilities of a light (Cached with Migration Safety)."""
         
         # 1. Check Cache + Version Migration
@@ -271,7 +272,7 @@ class HCLLightController:
                 return cached["type"]
 
         # 2. Get Current State
-        state = self.hass.states.get(entity_id)
+        state = state_obj or self.hass.states.get(entity_id)
         if not state:
             # Not loaded yet?
             return "onoff"
@@ -546,9 +547,9 @@ class HCLLightController:
             except Exception:
                 pass
 
-    def _is_group(self, entity_id: str) -> bool:
+    def _is_group(self, entity_id: str, state_obj=None) -> bool:
         """Check if entity is a group."""
-        state = self.hass.states.get(entity_id)
+        state = state_obj or self.hass.states.get(entity_id)
         if not state:
             return False
         return (state.attributes.get("is_hue_group") or 
