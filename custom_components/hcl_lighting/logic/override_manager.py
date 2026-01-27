@@ -5,6 +5,7 @@ import logging
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
 from homeassistant.core import State
+from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
 
 from ..const import (
     OVERRIDE_TIMEOUT_HOURS,
@@ -160,6 +161,26 @@ class OverrideManager:
         if delta_k > OVERRIDE_KELVIN_DELTA:
              is_override = True
              reasons.append(f"Kelvin (L:{last_k}K->C:{curr_k}K, d:{delta_k}K)")
+
+        # XY Color Check (Fallback if Kelvin is missing or for Color changes)
+        # Threshold 0.05 covers significant color changes while ignoring minor gamut drifts
+        if not is_override and last_k:
+            curr_xy = state.attributes.get("xy_color")
+            if curr_xy:
+                try:
+                    # Calculate expected XY from last known Kelvin
+                    rgb = color_temperature_to_rgb(last_k)
+                    exp_x, exp_y = color_RGB_to_xy(*rgb)
+                    curr_x, curr_y = curr_xy
+                    
+                    # Euclidean distance
+                    dist_xy = ((curr_x - exp_x)**2 + (curr_y - exp_y)**2)**0.5
+                    
+                    if dist_xy > 0.05:
+                        is_override = True
+                        reasons.append(f"XY Color (d:{dist_xy:.3f})")
+                except Exception:
+                    pass # Math errors shouldn't crash logic
         
         if is_override:
             _LOGGER.debug("Manual Override detected for %s: %s", entity_id, ", ".join(reasons))

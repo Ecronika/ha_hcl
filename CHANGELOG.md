@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1-beta14] (Color Override Support)
+- **Feature**: Added XY/RGB Divergence Detection. Manual color changes (e.g. to Blue/Red) are now correctly recognized as overrides even if the light stops reporting Kelvin values.
+
 ## [0.2.1-beta13] (Override Precision)
 - **Feature**: "Divergence Detection" - massive manual changes (e.g. 12% -> 100%) now break the "Ignore Window" and are correctly recognized as overrides.
 - **Precision**: Tuned detection thresholds (Kelvin >100K, Brightness >2%) to tolerate steepest HCL curve gradients while catching overrides.
