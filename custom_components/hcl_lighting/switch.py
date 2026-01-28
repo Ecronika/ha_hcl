@@ -27,7 +27,14 @@ from .const import (
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     UPDATE_INTERVAL_SECONDS,
+    UPDATE_INTERVAL_SECONDS,
     HCL_TRANSITION_SECONDS,
+    CONF_WAKE_TIME,
+    CONF_MIDDAY_TIME,
+    CONF_SLEEP_TIME,
+    DEFAULT_WAKE_TIME,
+    DEFAULT_MIDDAY_TIME,
+    DEFAULT_SLEEP_TIME
 )
 
 from .logic.hcl_math import HCLCalculator
@@ -40,8 +47,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     """Set up the HCL Switch from a config entry."""
     
     # Initialize Logic Components
+    # Initialize Logic Components
     override_manager = OverrideManager()
     hcl_calc = HCLCalculator()
+    
+    # Initial Curve Generation
+    wake = entry.options.get(CONF_WAKE_TIME) or entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
+    midday = entry.options.get(CONF_MIDDAY_TIME) or entry.data.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
+    sleep = entry.options.get(CONF_SLEEP_TIME) or entry.data.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
+    
+    hcl_calc.generate_curve(wake, midday, sleep)
+    
     controller = HCLLightController(hass, override_manager, entry)
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
@@ -110,9 +126,18 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         """Handle options update."""
         _LOGGER.debug("HCL Switch options updated. Re-evaluating targets.")
         self._entry = entry # Update the entry reference
+        
+        # Regenerate Curve
+        wake = entry.options.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)
+        midday = entry.options.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)
+        sleep = entry.options.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)
+        
+        self.hcl_calc.generate_curve(wake, midday, sleep)
+        
         # Re-resolve targets immediately if the switch is on
         if self._is_on:
             await self._re_evaluate_targets_and_listeners()
+            await self._update_hcl() # Trigger immediate update with new curve
         self.async_write_ha_state() # Ensure UI updates if needed
 
     @property

@@ -28,3 +28,12 @@ OVERRIDE_KELVIN_DELTA = 100        # >100K (Must be >56K to survive steepest HCL
 # Smooth Re-engagement Transition
 REENGAGE_STEPS = 6
 REENGAGE_INTERVAL_SECONDS = 30
+
+# Dynamic Curve Anchors
+CONF_WAKE_TIME = "wake_time"
+CONF_MIDDAY_TIME = "midday_time"
+CONF_SLEEP_TIME = "sleep_time"
+
+DEFAULT_WAKE_TIME = "07:00"
+DEFAULT_MIDDAY_TIME = "12:30"
+DEFAULT_SLEEP_TIME = "22:30"

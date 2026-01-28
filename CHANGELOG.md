@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta1] (Dynamic Curves)
+- **Feature**: User-Customizable Curve! You can now define your `Wake Time`, `Social Midday`, and `Sleep Time` in the configuration.
+- **Logic**: The HCL curve is no longer static. It dynamically generates tailored phases (Warm-up, Focus, Dip, Wind-down) based on your schedule.
+- **Hotfix**: Added translations and "Elastic Interval" logic to prevent overlapped curve sectors.
+
 ## [0.2.1] - 2026-01-28
 ### "Architecture & Intelligence" Release
 

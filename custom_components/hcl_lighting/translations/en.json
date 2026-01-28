@@ -21,7 +21,10 @@
                     "target": "Lights to control",
                     "smart_transition": "Compatibility Mode (Slow/Complex Lights)",
                     "min_brightness": "Minimum Brightness (%)",
-                    "max_brightness": "Maximum Brightness (%)"
+                    "max_brightness": "Maximum Brightness (%)",
+                    "wake_time": "Wake Time (Activation Start)",
+                    "midday_time": "Social Midday (Peak & Dip)",
+                    "sleep_time": "Sleep Time (Wind Down)"
                 }
             }
         },

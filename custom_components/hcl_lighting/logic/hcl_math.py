@@ -3,7 +3,16 @@ from __future__ import annotations
 
 import logging
 
-from ..const import DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS
+from datetime import time
+from homeassistant.util import dt as dt_util
+
+from ..const import (
+    DEFAULT_MIN_BRIGHTNESS, 
+    DEFAULT_MAX_BRIGHTNESS,
+    DEFAULT_WAKE_TIME,
+    DEFAULT_MIDDAY_TIME,
+    DEFAULT_SLEEP_TIME
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -13,21 +22,141 @@ class HCLCalculator:
     # Time -> (Kelvin, Brightness %)
     # Using DIN SPEC 67600 inspired points
     # Format: (Minutes from Midnight, Kelvin, Brightness)
-    POINTS = [
-        (0, 2200, 10),           # 00:00
-        (7 * 60, 2700, 30),      # 07:00
-        (9 * 60, 4500, 50),      # 09:00
-        (9 * 60 + 30, 5500, 75), # 09:30
-        (10 * 60, 6500, 100),    # 10:00
-        (12 * 60, 6500, 100),    # 12:00
-        (12 * 60 + 30, 4000, 50),# 12:30 (Regeneration)
-        (13 * 60, 4000, 50),     # 13:00
-        (13 * 60 + 30, 6000, 75),# 13:30 (Re-Activation)
-        (14 * 60, 6000, 75),     # 14:00
-        (16 * 60, 4000, 50),     # 16:00
-        (18 * 60, 2700, 30),     # 18:00
-        (22 * 60, 2200, 10),     # 22:00
-    ]
+    # Dynamic Curve Storage
+    active_curve = []
+    
+    def __init__(self):
+        """Initialize with default curve."""
+        self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME)
+
+    def generate_curve(self, wake_str: str, midday_str: str, sleep_str: str):
+        """Generate the HCL curve based on 3 anchor points."""
+        try:
+            wake_time = dt_util.parse_time(wake_str) or dt_util.parse_time(DEFAULT_WAKE_TIME)
+            midday_time = dt_util.parse_time(midday_str) or dt_util.parse_time(DEFAULT_MIDDAY_TIME)
+            sleep_time = dt_util.parse_time(sleep_str) or dt_util.parse_time(DEFAULT_SLEEP_TIME)
+        except Exception:
+            _LOGGER.error("Error parsing HCL times, using defaults")
+            wake_time = dt_util.parse_time(DEFAULT_WAKE_TIME)
+            midday_time = dt_util.parse_time(DEFAULT_MIDDAY_TIME)
+            sleep_time = dt_util.parse_time(DEFAULT_SLEEP_TIME)
+
+        def to_min(t): return t.hour * 60 + t.minute
+        
+        w_min = to_min(wake_time)
+        m_min = to_min(midday_time)
+        s_min = to_min(sleep_time)
+
+        # Basic Validation: Ensure logic doesn't break if times are weird
+        # For v1 we assume 0..24h and user sanity, but we sort the points anyway.
+        
+        # Validate and Elasticize Sectors
+        # Calculate available durations
+        def get_duration(start, end):
+            d = end - start
+            if d < 0: d += 1440
+            return d
+
+        dur_wake_to_midday = get_duration(w_min, m_min)
+        dur_midday_to_sleep = get_duration(m_min, s_min)
+        
+        # Define default offsets
+        DEFAULT_WAKE_PEAK_OFFSET = 120    # +2h
+        DEFAULT_MIDDAY_PRE_OFFSET = 30    # -30m
+        
+        # Factor for Wake Sector (Wake -> Midday)
+        # We need space for Wake+2h AND Midday-30m. Total needed: 150m.
+        needed_wm = DEFAULT_WAKE_PEAK_OFFSET + DEFAULT_MIDDAY_PRE_OFFSET
+        factor_wm = 1.0
+        if dur_wake_to_midday < needed_wm + 30: # +30m buffer
+             factor_wm = dur_wake_to_midday / (needed_wm + 30)
+             _LOGGER.warning("Elastic Curve: Compressing Morning Sector by factor %.2f", factor_wm)
+
+        wake_peak_off = int(DEFAULT_WAKE_PEAK_OFFSET * factor_wm)
+        midday_pre_off = int(DEFAULT_MIDDAY_PRE_OFFSET * factor_wm)
+
+
+        # Factor for Midday Sector (Midday -> Sleep)
+        # We have Midday+90m (Re-activation). Sleep-120m (Wind-down).
+        needed_ms = 90 + 120
+        factor_ms = 1.0
+        if dur_midday_to_sleep < needed_ms + 30:
+             factor_ms = dur_midday_to_sleep / (needed_ms + 30)
+             _LOGGER.warning("Elastic Curve: Compressing Afternoon Sector by factor %.2f", factor_ms)
+             
+        midday_post_off = int(90 * factor_ms)
+        try:
+             # Ensure wind-down starts after re-activation
+             # This is tricky as wind-down is defined relative to Sleep
+             pass
+        except:
+             pass
+
+        # Construct Points based on Relative Offsets (Elastic)
+        points = [
+            # Wake Sector
+            (w_min, 2700, 30),                 # Wake Up
+            (w_min + wake_peak_off, 6500, 100),# +Elastic: Full Activation
+            
+            # Midday Sector
+            (m_min - midday_pre_off, 6500, 100), # -Elastic: Pre-Lunch Peak
+            (m_min, 5000, 80),                 # Lunch Start (Cozy)
+            (m_min + 30, 4000, 50),            # Dip (Regeneration) - Keep 30m fixed for dip? Yes.
+            (m_min + midday_post_off, 6000, 75), # +Elastic: Re-Activation
+            
+            # Sleep Sector
+            (s_min - int(120 * factor_ms), 3500, 50), # -Elastic: Melatonin Prep
+            (s_min, 2200, 10),                 # Bedtime
+        ]
+        
+        # Dynamic Midnight wrapping
+        # If the day wrap happens in a gradient, we need to ensure 1440 aligns with 0
+        # If Sleep is 01:00, then 1440 (24:00) should be interpolated between Evening and Sleep.
+        # But our interpolation engine handles the 1440->0 wrap automatically if we just don't define 1440 explicitly IF it's not a discrete point.
+        # However, to be safe for the cubic spline, having a 1440 point is good for the last segment.
+        
+        # Let's calculate the "Virtual Midnight" value
+        # This is simplified: We just clamp the result.
+        points.append((0, 2200, 10)) # Ensure anchor at 0 exists
+        points.append((1440, 2200, 10)) # Ensure anchor at 1440 exists
+        
+        # Normalize and Sort
+        # Handle wrap-around or >1440 if offsets push it over
+        final_points = []
+        for m, k, b in points:
+            
+            # Simple approach for valid daily curve:
+            # If minute < 0: add 1440
+            # If minute >= 1440: sub 1440 (unless it's the exact end anchor 1440)
+            
+            norm_m = m
+            if norm_m < 0: norm_m += 1440
+            if norm_m > 1440: norm_m -= 1440 # 25:00 -> 01:00
+            
+            # Special logic: Do not fold 1440 back to 0, keep it as end anchor if intended
+            if m == 1440: norm_m = 1440
+            
+            final_points.append((norm_m, k, b))
+            
+        # Ensure distinct points (overlapping times can cause div/0)
+        # Sort by time
+        final_points.sort(key=lambda x: x[0])
+        
+        # Deduplicate timestamps (keep last defined)
+        unique_points = []
+        seen_times = set()
+        for p in final_points:
+            if p[0] not in seen_times:
+                unique_points.append(p)
+                seen_times.add(p[0])
+            else:
+                 # Update existing
+                 for i, ex in enumerate(unique_points):
+                     if ex[0] == p[0]:
+                         unique_points[i] = p
+        
+        self.active_curve = unique_points
+        _LOGGER.debug("Generated HCL Curve with %d points: %s", len(self.active_curve), self.active_curve)
     
     MINUTES_PER_DAY = 1440
     
@@ -60,7 +189,7 @@ class HCLCalculator:
              max_brightness = DEFAULT_MAX_BRIGHTNESS
 
         current_minutes = now.hour * 60 + now.minute
-        points = self.POINTS
+        points = self.active_curve
         
         # 1. Find segment
         # Default to last segment (wrapping to start)

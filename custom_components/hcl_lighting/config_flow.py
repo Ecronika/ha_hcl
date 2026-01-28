@@ -14,7 +14,9 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN, CONF_TARGET, CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS,
-    DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS
+    DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS,
+    CONF_WAKE_TIME, CONF_MIDDAY_TIME, CONF_SLEEP_TIME,
+    DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,6 +90,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET) or {}): selector.TargetSelector(
                     {"entity": {"domain": ["light"]}}
                 ),
+                vol.Required(CONF_WAKE_TIME, default=schema_defaults.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)): selector.TimeSelector(),
+                vol.Required(CONF_MIDDAY_TIME, default=schema_defaults.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)): selector.TimeSelector(),
+                vol.Required(CONF_SLEEP_TIME, default=schema_defaults.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)): selector.TimeSelector(),
                 vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),
                 vol.Optional(CONF_MIN_BRIGHTNESS, default=schema_defaults.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(CONF_MAX_BRIGHTNESS, default=schema_defaults.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),

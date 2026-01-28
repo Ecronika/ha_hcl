@@ -21,7 +21,10 @@
                     "target": "Zu steuernde Lichter",
                     "smart_transition": "Kompatibilitätsmodus (Langsame/Komplexe Lichter)",
                     "min_brightness": "Minimale Helligkeit (%)",
-                    "max_brightness": "Maximale Helligkeit (%)"
+                    "max_brightness": "Maximale Helligkeit (%)",
+                    "wake_time": "Aufwachzeit (Start der Aktivierung)",
+                    "midday_time": "Sozialer Mittag (Höhepunkt & Dip)",
+                    "sleep_time": "Schlafenszeit (Entspannung)"
                 }
             }
         },
