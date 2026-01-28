@@ -414,7 +414,6 @@ class HCLLightController:
         # Check Brightness
         delta_b = 0
         if curr_b is not None:
-             curr_b_pct = int(curr_b * 100 / 255)
              delta_b = abs(curr_b_pct - target_b)
         else:
             # Unknown brightness, assume update needed
