@@ -114,10 +114,14 @@ The integration automatically adapts to each light's capabilities:
 ## Technical Details
 
 - **Update interval**: 27 seconds (periodic)
-- **Transition duration**: 30 seconds (configurable via smart transition mode)
-- **Delta thresholds**: 
-  - Brightness: 1% change required
-  - Color temperature: 50K change required
+- **Transition duration**: 20 seconds (configurable via smart transition mode)
+- **Update Thresholds** (Traffic Control):
+  - Brightness: >1% change
+  - Color temperature: >50K change
+- **Override Thresholds** (Manual Detection):
+  - Brightness: >2% deviation (with divergence detection)
+  - Color temperature: >100K deviation (with steep slope tolerance)
+  - Color (XY): >0.05 vector distance
 - **Interpolation method**: Cubic Hermite splines with periodic boundary conditions
 
 ## Troubleshooting
