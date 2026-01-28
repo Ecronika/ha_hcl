@@ -5,10 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta3] (Cozy Evening Optimization)
+- **Feature**: Refined Evening Curve with a new "Social Evening" phase (-4h before sleep @ 3800K/60%) for a warmer atmosphere.
+- **Logic**: Adjusted "Wind-Down" phase (-2h before sleep) to be cozier (2700K/30%).
+
+## [0.3.0-beta2] (Stable Dynamic Curves)
+- **Fix**: Added missing translations for configuration options.
+- **Fix**: Implemented "Elastic Interval" logic to prevent overlapped curve sectors and corrected midnight wrapping.
+
 ## [0.3.0-beta1] (Dynamic Curves)
 - **Feature**: User-Customizable Curve! You can now define your `Wake Time`, `Social Midday`, and `Sleep Time` in the configuration.
 - **Logic**: The HCL curve is no longer static. It dynamically generates tailored phases (Warm-up, Focus, Dip, Wind-down) based on your schedule.
-- **Hotfix**: Added translations and "Elastic Interval" logic to prevent overlapped curve sectors.
 
 ## [0.2.1] - 2026-01-28
 ### "Architecture & Intelligence" Release

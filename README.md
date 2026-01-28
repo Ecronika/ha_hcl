@@ -81,19 +81,16 @@ The integration uses a 24-hour curve with key control points:
 
 | Time  | Color Temp | Brightness | Phase |
 |-------|------------|------------|-------|
-| 00:00 | 2200K | 10% | Night |
-| 07:00 | 2700K | 30% | Wake-up |
-| 09:00 | 4500K | 50% | Morning activation |
-| 09:30 | 5500K | 75% | Morning ramp-up |
-| 10:00 | 6500K | 100% | Peak focus |
-| 12:00 | 6500K | 100% | Midday |
-| 12:30 | 4000K | 50% | Regeneration dip |
-| 13:00 | 4000K | 50% | Regeneration hold |
-| 13:30 | 6000K | 75% | Re-activation ramp |
-| 14:00 | 6000K | 75% | Afternoon focus |
-| 16:00 | 4000K | 50% | Afternoon wind-down |
-| 18:00 | 2700K | 30% | Evening |
-| 22:00 | 2200K | 10% | Night preparation |
+| Time  | Color Temp | Brightness | Phase |
+|-------|------------|------------|-------|
+| Wake | 2700K | 30% | Wake-up Start |
+| +2h | 6500K | 100% | Full Activation |
+| Midday | 5000K | 80% | Social Midday |
+| +30m | 4000K | 50% | Regeneration Dip |
+| +Re-Act | 6000K | 75% | Re-Activation |
+| -4h Sleep | 3800K | 60% | Social Evening |
+| -2h Sleep | 2700K | 30% | Wind-Down |
+| Sleep | 2200K | 10% | Bedtime |
 
 Transitions between these points use **cubic Hermite spline interpolation** for smooth, natural-feeling changes.
 

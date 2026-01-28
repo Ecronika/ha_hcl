@@ -77,20 +77,18 @@ class HCLCalculator:
 
 
         # Factor for Midday Sector (Midday -> Sleep)
-        # We have Midday+90m (Re-activation). Sleep-120m (Wind-down).
-        needed_ms = 90 + 120
+        # We have Midday+90m (Re-activation). 
+        # New: Sleep-240m (Social Evening). Sleep-120m (Wind-down).
+        # We need space for Re-activation offset (90) + Social Evening offset (240). Total 330m.
+        needed_ms = 90 + 240
         factor_ms = 1.0
         if dur_midday_to_sleep < needed_ms + 30:
              factor_ms = dur_midday_to_sleep / (needed_ms + 30)
              _LOGGER.warning("Elastic Curve: Compressing Afternoon Sector by factor %.2f", factor_ms)
              
         midday_post_off = int(90 * factor_ms)
-        try:
-             # Ensure wind-down starts after re-activation
-             # This is tricky as wind-down is defined relative to Sleep
-             pass
-        except:
-             pass
+        social_evening_off = int(240 * factor_ms)
+        wind_down_off = int(120 * factor_ms)
 
         # Construct Points based on Relative Offsets (Elastic)
         points = [
@@ -105,7 +103,8 @@ class HCLCalculator:
             (m_min + midday_post_off, 6000, 75), # +Elastic: Re-Activation
             
             # Sleep Sector
-            (s_min - int(120 * factor_ms), 3500, 50), # -Elastic: Melatonin Prep
+            (s_min - social_evening_off, 3800, 60), # -Elastic: Social Evening (Cozy Start)
+            (s_min - wind_down_off, 2700, 30),      # -Elastic: Wind-Down (Melatonin Prep)
             (s_min, 2200, 10),                 # Bedtime
         ]
         
