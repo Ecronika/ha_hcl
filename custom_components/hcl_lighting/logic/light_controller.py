@@ -504,7 +504,7 @@ class HCLLightController:
             if not state: return
             curr_bri = state.attributes.get("brightness") or 0
             curr_xy = state.attributes.get("xy_color") or (x, y)
-            target_bri_byte = int(brightness * 255 / 100)
+            target_bri_byte = int(round(float(brightness) * 255 / 100))
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             curr_x, curr_y = curr_xy
             delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * XY_COLOR_SENSITIVITY
@@ -529,7 +529,7 @@ class HCLLightController:
             if not state: return
             curr_bri = state.attributes.get("brightness") or 0
             curr_kelvin = state.attributes.get("color_temp_kelvin") or 2700
-            target_bri_byte = int(brightness * 255 / 100)
+            target_bri_byte = int(round(float(brightness) * 255 / 100))
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
             

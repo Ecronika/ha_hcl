@@ -23,10 +23,11 @@ class HCLCalculator:
     # Using DIN SPEC 67600 inspired points
     # Format: (Minutes from Midnight, Kelvin, Brightness)
     # Dynamic Curve Storage
-    active_curve = []
+    # active_curve moved to __init__ to prevent shared state bug
     
     def __init__(self):
         """Initialize with default curve."""
+        self.active_curve = []
         self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME)
 
     def generate_curve(self, wake_str: str, midday_str: str, sleep_str: str):

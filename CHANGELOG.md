@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta6] (Critical Fixes)
+- **Shared State Fix**: Active curve is now properly isolated per instance (Fixed critical HCLCalculator bug).
+- **Stability**: Added protections against None/TypeError in OverrideManager.
+- **Safety**: Robust float->int conversions in LightController.
+- **Cleanup**: Removed duplicate imports.
+
 ## [0.3.0-beta5] (Smooth Midday)
 - **Math**: Extended "Midday Dip" duration to 60m (was 30m) and "Re-Activation" to 120m (was 90m) to ensure brightness change < 1%/min and limit "thunderstorm" effect.
 

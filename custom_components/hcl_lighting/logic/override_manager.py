@@ -124,13 +124,13 @@ class OverrideManager:
         # recorded_last_set = light_data.get("last_set") # Already got above
         # reference_values = recorded_last_set or last_set_values
 
-        if reference_values:
+        if reference_values and len(reference_values) == 2:
             last_b, last_k = reference_values
         else:
              # If no reference values (startup/race), assume valid to prevent crash
              return False
 
-        if last_b is None:
+        if last_b is None or last_k is None:
              return False
 
         curr_b = state.attributes.get("brightness")
