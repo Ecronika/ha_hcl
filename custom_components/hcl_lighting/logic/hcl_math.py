@@ -77,30 +77,32 @@ class HCLCalculator:
 
 
         # Factor for Midday Sector (Midday -> Sleep)
-        # We have Midday+90m (Re-activation). 
+        # We have Midday+120m (Re-activation - extended for smoothness). 
         # New: Sleep-240m (Social Evening). Sleep-120m (Wind-down).
-        # We need space for Re-activation offset (90) + Social Evening offset (240). Total 330m.
-        needed_ms = 90 + 240
+        # We need space for Re-activation offset (120) + Social Evening offset (240). Total 360m.
+        needed_ms = 120 + 240
         factor_ms = 1.0
         if dur_midday_to_sleep < needed_ms + 30:
              factor_ms = dur_midday_to_sleep / (needed_ms + 30)
              _LOGGER.warning("Elastic Curve: Compressing Afternoon Sector by factor %.2f", factor_ms)
              
-        midday_post_off = int(90 * factor_ms)
+        midday_dip_off = int(60 * factor_ms)   # NEU: Variabler Dip-Offset (60m duration)
+        midday_post_off = int(120 * factor_ms) # NEU: Längere Re-Activation (120m duration)
         social_evening_off = int(240 * factor_ms)
         wind_down_off = int(120 * factor_ms)
 
         # Construct Points based on Relative Offsets (Elastic)
         points = [
             # Wake Sector
+            (w_min - 30, 2200, 10),            # Pre-Wake Clamp (Crucial for steep rise)
             (w_min, 2700, 30),                 # Wake Up
             (w_min + wake_peak_off, 6500, 100),# +Elastic: Full Activation
             
             # Midday Sector
             (m_min - midday_pre_off, 6500, 100), # -Elastic: Pre-Lunch Peak
             (m_min, 5000, 80),                 # Lunch Start (Cozy)
-            (m_min + 30, 4000, 50),            # Dip (Regeneration) - Keep 30m fixed for dip? Yes.
-            (m_min + midday_post_off, 6000, 75), # +Elastic: Re-Activation
+            (m_min + midday_dip_off, 4000, 50),# Dip (Extended: 60m duration, <1%/min)
+            (m_min + midday_post_off, 6000, 75), # +Elastic: Re-Activation (Extended)
             
             # Sleep Sector
             (s_min - social_evening_off, 3800, 60), # -Elastic: Social Evening (Cozy Start)

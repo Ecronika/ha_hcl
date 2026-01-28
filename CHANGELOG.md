@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0-beta5] (Smooth Midday)
+- **Math**: Extended "Midday Dip" duration to 60m (was 30m) and "Re-Activation" to 120m (was 90m) to ensure brightness change < 1%/min and limit "thunderstorm" effect.
+
+## [0.3.0-beta4] (Spline Tuning)
+- **Improvement**: Softened the Midday Dip to 4400K/65% (was 4000K/50%) for a less aggressive transition.
+- **Improvement**: Added a "Night Clamp" at `Wake - 30m` to keep the room dark until shortly before wake-up.
+
 ## [0.3.0-beta3] (Cozy Evening Optimization)
 - **Feature**: Refined Evening Curve with a new "Social Evening" phase (-4h before sleep @ 3800K/60%) for a warmer atmosphere.
 - **Logic**: Adjusted "Wind-Down" phase (-2h before sleep) to be cozier (2700K/30%).

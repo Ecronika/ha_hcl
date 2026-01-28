@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -42,7 +43,7 @@
             background-color: var(--card-bg);
             padding: 20px;
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 20px;
@@ -60,7 +61,9 @@
             color: #aaa;
         }
 
-        input[type="time"], input[type="number"], input[type="range"] {
+        input[type="time"],
+        input[type="number"],
+        input[type="range"] {
             background-color: var(--input-bg);
             border: 1px solid var(--input-border);
             color: white;
@@ -73,7 +76,7 @@
             background-color: var(--card-bg);
             padding: 15px;
             border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
             position: relative;
             height: 500px;
             width: 100%;
@@ -85,13 +88,13 @@
             margin-top: 10px;
             text-align: center;
         }
-        
+
         .slider-container {
             display: flex;
             align-items: center;
             gap: 10px;
         }
-        
+
         .slider-val {
             min-width: 40px;
             text-align: right;
@@ -104,10 +107,11 @@
         }
     </style>
 </head>
+
 <body>
 
     <div class="container">
-        <h1>HCL Lighting Simulator (v0.3.0 Logic)</h1>
+        <h1>HCL Lighting Simulator (v0.3.0-beta5 Logic)</h1>
 
         <div class="controls">
             <div class="control-group">
@@ -142,9 +146,11 @@
         <div class="chart-container">
             <canvas id="hclChart"></canvas>
         </div>
-        
+
         <p class="info-text">
-            This simulation uses the exact same <b>Cubic Hermite Spline</b> algorithm and <b>Elastic Interval</b> logic as the Home Assistant integration. The curves show the calculated target values for color temperature (Kelvin) and brightness.
+            This simulation uses the exact same <b>Cubic Hermite Spline</b> algorithm and <b>Elastic Interval</b> logic
+            as the Home Assistant integration. The curves show the calculated target values for color temperature
+            (Kelvin) and brightness.
         </p>
     </div>
 
@@ -194,26 +200,28 @@
                 const midday_pre_off = Math.floor(DEFAULT_MIDDAY_PRE_OFFSET * factor_wm);
 
                 // Midday Sector Elasticity
-                const needed_ms = 90 + 240; // Post(90) + SocialEve(240)
+                const needed_ms = 120 + 240; // Re-Act(120) + SocialEve(240)
                 let factor_ms = 1.0;
                 if (dur_midday_to_sleep < needed_ms + 30) {
                     factor_ms = dur_midday_to_sleep / (needed_ms + 30);
                 }
 
-                const midday_post_off = Math.floor(90 * factor_ms);
+                const midday_dip_off = Math.floor(60 * factor_ms);
+                const midday_post_off = Math.floor(120 * factor_ms);
                 const social_evening_off = Math.floor(240 * factor_ms);
                 const wind_down_off = Math.floor(120 * factor_ms);
 
                 // Construct Points (Minute, Kelvin, Brightness)
                 let points = [
+                    [w_min - 30, 2200, 10],             // Pre-Wake Clamp
                     [w_min, 2700, 30],                  // Wake Up
                     [w_min + wake_peak_off, 6500, 100], // Full Activation
-                    
+
                     [m_min - midday_pre_off, 6500, 100],// Pre-Lunch Peak
                     [m_min, 5000, 80],                  // Lunch Start
-                    [m_min + 30, 4000, 50],             // Dip
-                    [m_min + midday_post_off, 6000, 75],// Re-Activation
-                    
+                    [m_min + midday_dip_off, 4000, 50], // Dip (Extended 60m)
+                    [m_min + midday_post_off, 6000, 75],// Re-Activation (Extended 120m)
+
                     [s_min - social_evening_off, 3800, 60], // Social Evening
                     [s_min - wind_down_off, 2700, 30],      // Wind Down
                     [s_min, 2200, 10]                       // Bedtime
@@ -234,7 +242,7 @@
                     if (m > 1440) m -= 1440;
                     if (p[0] === 1440) m = 1440; // Keep explicit end anchor
 
-                    final_points.push({m, k, b});
+                    final_points.push({ m, k, b });
                 });
 
                 final_points.sort((a, b) => a.m - b.m);
@@ -249,7 +257,7 @@
                     } else {
                         // Update existing (overwrite)
                         let idx = this.active_curve.findIndex(x => x.m === p.m);
-                        if(idx !== -1) this.active_curve[idx] = p;
+                        if (idx !== -1) this.active_curve[idx] = p;
                     }
                 });
             }
@@ -268,7 +276,7 @@
                 // 1. Find Segment
                 let idx = len - 1;
                 for (let i = 0; i < len - 1; i++) {
-                    if (current_minutes >= points[i].m && current_minutes < points[i+1].m) {
+                    if (current_minutes >= points[i].m && current_minutes < points[i + 1].m) {
                         idx = i;
                         break;
                     }
@@ -284,14 +292,14 @@
 
                 let dt_interval = p1.m - p0.m;
                 if (dt_interval < 0) dt_interval += this.MINUTES_PER_DAY;
-                
+
                 let kelvin, brightness;
 
                 // FIX: If interval is 0 (e.g., 1440->0 wrap), avoid division by zero.
                 // We keep the start values to prevent jump to 4000K.
                 if (dt_interval === 0) {
-                     kelvin = p0.k;
-                     brightness = p0.b;
+                    kelvin = p0.k;
+                    brightness = p0.b;
                 } else {
                     // 3. Normalize Time t
                     let dist = current_minutes - p0.m;
@@ -309,22 +317,22 @@
                     const t2 = t * t;
                     const t3 = t2 * t;
 
-                    const h00 = 2*t3 - 3*t2 + 1;
-                    const h10 = t3 - 2*t2 + t;
-                    const h01 = -2*t3 + 3*t2;
+                    const h00 = 2 * t3 - 3 * t2 + 1;
+                    const h10 = t3 - 2 * t2 + t;
+                    const h01 = -2 * t3 + 3 * t2;
                     const h11 = t3 - t2;
 
-                    kelvin = h00*p0.k + h10*dt_interval*m0_k + h01*p1.k + h11*dt_interval*m1_k;
-                    brightness = h00*p0.b + h10*dt_interval*m0_b + h01*p1.b + h11*dt_interval*m1_b;
+                    kelvin = h00 * p0.k + h10 * dt_interval * m0_k + h01 * p1.k + h11 * dt_interval * m1_k;
+                    brightness = h00 * p0.b + h10 * dt_interval * m0_b + h01 * p1.b + h11 * dt_interval * m1_b;
                 }
 
                 // 6. Scale Brightness
                 const INTERNAL_MIN = 10.0;
                 const INTERNAL_RANGE = 100.0 - INTERNAL_MIN;
-                
+
                 let norm_b = (brightness - INTERNAL_MIN) / INTERNAL_RANGE;
                 norm_b = Math.max(0, Math.min(1, norm_b));
-                
+
                 let scaled_b = parseInt(min_b_config) + norm_b * (parseInt(max_b_config) - parseInt(min_b_config));
 
                 return {
@@ -352,7 +360,7 @@
 
         // Event Listeners
         Object.values(inputs).forEach(el => {
-            if(el.tagName === 'INPUT') el.addEventListener('input', updateChart);
+            if (el.tagName === 'INPUT') el.addEventListener('input', updateChart);
         });
 
         function updateSliderLabels() {
@@ -370,12 +378,12 @@
             // Calculate every 5 minutes for performance/precision balance
             for (let m = 0; m <= 1440; m += 5) {
                 const res = hcl.getValues(m, inputs.minBri.value, inputs.maxBri.value);
-                
+
                 // Format Time Label
                 let h = Math.floor(m / 60);
                 if (h === 24) h = 0;
                 let min = m % 60;
-                let label = `${h.toString().padStart(2,'0')}:${min.toString().padStart(2,'0')}`;
+                let label = `${h.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 
                 labels.push(label);
                 dataKelvin.push(res.k);
@@ -387,7 +395,7 @@
 
         function initChart() {
             const ctx = document.getElementById('hclChart').getContext('2d');
-            
+
             Chart.defaults.color = '#888';
             Chart.defaults.font.family = 'system-ui';
 
@@ -430,15 +438,15 @@
                             titleColor: '#fff',
                             bodyColor: '#fff',
                             callbacks: {
-                                label: function(context) {
+                                label: function (context) {
                                     let label = context.dataset.label || '';
                                     if (label) {
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
                                         label += Math.round(context.parsed.y);
-                                        if(context.dataset.yAxisID === 'yBri') label += '%';
-                                        if(context.dataset.yAxisID === 'yKelvin') label += 'K';
+                                        if (context.dataset.yAxisID === 'yBri') label += '%';
+                                        if (context.dataset.yAxisID === 'yKelvin') label += 'K';
                                     }
                                     return label;
                                 }
@@ -483,11 +491,11 @@
         function updateChart() {
             updateSliderLabels();
             const data = generateData();
-            
+
             chartInstance.data.labels = data.labels;
             chartInstance.data.datasets[0].data = data.dataKelvin;
             chartInstance.data.datasets[1].data = data.dataBrightness;
-            
+
             chartInstance.update();
         }
 
@@ -497,4 +505,5 @@
 
     </script>
 </body>
+
 </html>
