@@ -7,5 +7,5 @@
   "documentation": "https://www.home-assistant.io/",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "0.3.0-rc2"
+  "version": "0.3.0-rc3"
 }

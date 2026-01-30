@@ -150,7 +150,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
-            name="HCL Lighting",
+            name=self._entry.title,
             manufacturer="HCL Integration",
             model="HCL Controller",
         )

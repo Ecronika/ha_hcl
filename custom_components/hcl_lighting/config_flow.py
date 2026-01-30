@@ -19,6 +19,8 @@ from .const import (
     DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME
 )
 
+from homeassistant.const import CONF_NAME
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -45,6 +47,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="user", 
                 data_schema=vol.Schema(
                     {
+                        vol.Required(CONF_NAME, default="HCL Lighting"): str,
                         vol.Required(CONF_TARGET): selector.TargetSelector(
                             {
                                 "entity": {
@@ -56,7 +59,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             )
 
-        return self.async_create_entry(title="HCL Lighting", data=user_input)
+        return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
