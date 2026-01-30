@@ -88,7 +88,15 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     if "lovelace" not in hass.data:
         return
 
-    resources = hass.data["lovelace"].get("resources")
+    lovelace_data = hass.data["lovelace"]
+    
+    # Handle deprecation: .resources attribute instead of .get("resources")
+    if hasattr(lovelace_data, "resources"):
+        resources = lovelace_data.resources
+    else:
+        # Fallback for older versions (though likely dict access)
+        resources = lovelace_data.get("resources")
+
     if not resources:
         return
 

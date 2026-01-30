@@ -1,0 +1,20 @@
+update_curve:
+  name: Update Curve
+  description: Update the HCL control points (used by Frontend UI).
+  fields:
+    points:
+      name: Control Points
+      description: List of control points [{t, b, k}].
+      required: true
+      selector:
+        object:
+    mode:
+      name: Mode
+      description: Action mode (preview, apply, save).
+      required: true
+      selector:
+        select:
+          options:
+            - preview
+            - apply
+            - save

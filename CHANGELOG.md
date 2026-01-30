@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta7] (Hotfix: Lovelace Deprecation)
+- **Fix**: Use `lovelace_data.resources` (attribute) instead of `.get("resources")` to avoid future breaking change warning.
+
+## [0.4.0-beta6] (Hotfix: Services)
+- **Fix**: Added missing `services.yaml` definition for `update_curve`. Fixing `Failed to load services.yaml` error.
+
 ## [0.4.0-beta5] (Hotfix: Static Path)
 - **Fix**: Use `async_register_static_paths` instead of deprecated default method. Fixes setup error.
 
