@@ -99,7 +99,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             config_entry = hass.config_entries.async_get_entry(entry_id)
             new_options = {**config_entry.options}
             new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
-            await hass.config_entries.async_update_entry(config_entry, options=new_options)
+            hass.config_entries.async_update_entry(config_entry, options=new_options)
             return
 
         # 3. Notify Updates (Preview/Apply)

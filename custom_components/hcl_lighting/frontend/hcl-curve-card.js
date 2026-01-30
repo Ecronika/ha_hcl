@@ -47,7 +47,11 @@ class HCLCurveCard extends HTMLElement {
         }
         this.render();
         this._initialized = true;
-        this._refreshCharts(); // Initial render
+
+        // Delay calculation until layout is stable
+        requestAnimationFrame(() => {
+            this._refreshCharts();
+        });
     }
 
     render() {
