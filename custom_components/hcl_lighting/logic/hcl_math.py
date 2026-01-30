@@ -95,23 +95,28 @@ class HCLCalculator:
         # If segments are extremely short, the spline might look weird, but v0.2.1 didn't have complex elasticity.
 
         # Construct Points based on Relative Offsets (Elastic)
-        # Construct Points based on Relative Offsets (Elastic)
-        # v0.2.1 / v0.3.0-Classic Style: Simpler, clearer phases.
+        # v0.2.1 Exact Replica Logic
+        # Translating absolute v0.2.1 points to relative dynamic offsets
+        # Based on defaults: Wake 07:00, Midday 12:30, Sleep 22:00
+        
         points = [
-            # Wake Sector
-            (w_min, 2700, 30),                 # Wake Up (Start)
-            (w_min + wake_peak_off, 6500, 100),# Full Activation (+2h)
+            # --- Wake Sector (Morning Rise) ---
+            (w_min, 2700, 30),                  # 07:00 Wake
+            (w_min + 120, 4500, 50),            # 09:00 (+2h)
+            (w_min + 150, 5500, 75),            # 09:30 (+2.5h)
+            (w_min + 180, 6500, 100),           # 10:00 (+3h) Peak Start
             
-            # Midday Sector
-            # In v0.2.1 "Midday" IS the dip.
-            (m_min - 30, 6500, 100),           # Pre-Dip Peak
-            (m_min, 4000, 50),                 # Midday Dip (The configured time is the low point)
-            (m_min + 60, 6500, 100),           # Re-Activation (Fast recovery, 60m)
+            # --- Midday Sector (Focus & Dip) ---
+            (m_min - 30, 6500, 100),            # 12:00 (-30m) Peak End
+            (m_min, 4000, 50),                  # 12:30 Midday Dip Start
+            (m_min + 30, 4000, 50),             # 13:00 (+30m) Dip Plateau
+            (m_min + 60, 6000, 75),             # 13:30 (+1h) Recovery
+            (m_min + 90, 6000, 75),             # 14:00 (+1.5h) Afternoon Plateau
+            (m_min + 210, 4000, 50),            # 16:00 (+3.5h) Late Afternoon Fade
             
-            # Sleep Sector
-            # Removed "Social Evening" shoulder to allow natural wind-down
-            (s_min - 120, 2700, 30),            # Wind-Down (Melatonin Start, -2h)
-            (s_min, 2200, 10),                 # Bedtime
+            # --- Sleep Sector (Evening) ---
+            (s_min - 240, 2700, 30),            # 18:00 (-4h) Early Evening
+            (s_min, 2200, 10),                  # 22:00 Sleep
         ]
         
         # Dynamic Midnight wrapping

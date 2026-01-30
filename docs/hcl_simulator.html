@@ -188,22 +188,25 @@
                 const wake_peak_off = 120; // +2h
 
                 // Construct Points (Minute, Kelvin, Brightness)
-                // Exactly matching hcl_math.py v0.3.0 final
+                // Exactly matching hcl_math.py v0.3.0 final logic
                 let points = [
-                    // Wake Sector
-                    [w_min, 2700, 30],                  // Wake Up (Start)
-                    [w_min + wake_peak_off, 6500, 100], // Full Activation (+2h)
+                    // --- Wake Sector (Morning Rise) ---
+                    [w_min, 2700, 30],                  // 07:00 Wake
+                    [w_min + 120, 4500, 50],            // 09:00 (+2h)
+                    [w_min + 150, 5500, 75],            // 09:30 (+2.5h)
+                    [w_min + 180, 6500, 100],           // 10:00 (+3h) Peak Start
 
-                    // Midday Sector
-                    // Midday IS the dip
-                    [m_min - 30, 6500, 100],            // Pre-Dip Peak (-30m)
-                    [m_min, 4000, 50],                  // Midday Dip (Target Time)
-                    [m_min + 60, 6500, 100],            // Re-Activation (+60m)
+                    // --- Midday Sector (Focus & Dip) ---
+                    [m_min - 30, 6500, 100],            // 12:00 (-30m) Peak End
+                    [m_min, 4000, 50],                  // 12:30 Midday Dip Start
+                    [m_min + 30, 4000, 50],             // 13:00 (+30m) Dip Plateau
+                    [m_min + 60, 6000, 75],             // 13:30 (+1h) Recovery
+                    [m_min + 90, 6000, 75],             // 14:00 (+1.5h) Afternoon Plateau
+                    [m_min + 210, 4000, 50],            // 16:00 (+3.5h) Late Afternoon Fade
 
-                    // Sleep Sector
-                    // Standard Wind-Down
-                    [s_min - 120, 2700, 30],            // Wind-Down Start (-2h)
-                    [s_min, 2200, 10],                  // Bedtime
+                    // --- Sleep Sector (Evening) ---
+                    [s_min - 240, 2700, 30],            // 18:00 (-4h) Early Evening
+                    [s_min, 2200, 10]                   // 22:00 Sleep
                 ];
 
                 // Add Anchors for 0 and 1440 (Virtual Midnight)
