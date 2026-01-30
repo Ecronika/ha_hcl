@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta3] (Auto-Registration)
+- **Feature**: Auto-register `hcl-curve-card.js` as Lovelace Resource on startup.
+- **UX**: Eliminates manual installation step for Dashboard Card.
+
 ## [0.4.0-beta2] (Frontend Alpha)
 - **Feature**: `custom:hcl-curve-card` Lovelace Card.
 - **Frontend**: Full PCHIP Interpolation logic in JS.

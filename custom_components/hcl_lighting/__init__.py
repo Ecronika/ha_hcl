@@ -57,9 +57,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
+    # Auto-register Lovelace Resource
+    await _async_register_lovelace_resource(hass)
+    
     entry.async_on_unload(entry.add_update_listener(update_listener))
     
     return True
+
+async def _async_register_lovelace_resource(hass: HomeAssistant):
+    """Register the Lovelace card resource if not already present."""
+    from homeassistant.components.lovelace.resources import ResourceStorageCollection
+    
+    URL = "/local/hcl_lighting/hcl-curve-card.js"
+    
+    # We need to access the Lovelace resources collection
+    # Only if Lovelace maps are loaded
+    if "lovelace" not in hass.data:
+        return
+
+    resources = hass.data["lovelace"].get("resources")
+    if not resources:
+        return
+
+    # Check if exists
+    for resource in resources.async_items():
+        if resource["url"] == URL:
+            return
+
+    _LOGGER.info("Auto-registering HCL Curve Card resource: %s", URL)
+    try:
+        await resources.async_create_item({"res_type": "module", "url": URL})
+    except Exception as e:
+        _LOGGER.warning("Failed to auto-register HCL Curve Card: %s", e)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
