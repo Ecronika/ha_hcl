@@ -57,26 +57,22 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
-3. Search for "HCL Lighting"
-4. Select your target lights, devices, or areas
-5. Configure options:
+3. Search for **"HCL Lighting"**
+4. **General Setup**:
+   - **Name**: Give this instance a unique name (e.g., "Living Room").
+   - **Target Lights**: Select lights, areas, or devices to control.
+5. **Schedule (Dynamic Curve)**:
+   - **Wake Time**: Start of the active day (Default: 07:00).
+   - **Midday Time**: Time of the "Regeneration Dip" (lowest midday point) (Default: 12:30).
+   - **Sleep Time**: End of the day (Wind down complete) (Default: 22:00).
+6. **options**:
    - **Minimum Brightness**: Lowest brightness level (default: 10%)
    - **Maximum Brightness**: Highest brightness level (default: 100%)
-   - **Smart Transition Mode**: Enable for better compatibility with some lights (default: disabled)
+   - **Smart Transition Mode**: Enable for better compatibility with some lights.
 
 ## Multiple Areas / Instances
 
-You can create **multiple independent HCL instances** to control different areas with different schedules (e.g. "Living Room" vs "Home Office" or "Shift Work" vs "Normal").
-
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration** again
-3. Select **HCL Lighting**
-4. Configure the new instance with its own:
-   - **Target Lights**: Select the lights for this specific zone
-   - **Schedule**: Define unique Wake/Sleep times for this area
-   - **Brightness Limits**: Set appropriate min/max brightness
-
-Each instance creates its own Switch entity (e.g., `switch.hcl_lighting_living_room`, `switch.hcl_lighting_office`) which can be toggled independently.
+You can create **multiple independent HCL instances** to control different areas with different schedules (e.g. "Living Room" vs "Home Office" or "Shift Work" vs "Normal"). Each instance operates completely independently.
 
 ## Usage
 
@@ -89,24 +85,24 @@ The switch entity provides attributes showing:
 - `calculated_color_temp`: Current color temperature in Kelvin
 - `target_entities`: List of controlled lights
 
-## HCL Curve Details
+## HCL Curve Details (v0.3.0 Profile)
 
-The integration uses a 24-hour curve with key control points:
+The integration generates a custom 24-hour curve based on your configured **Wake**, **Midday**, and **Sleep** times. The default profile mimics natural daylight with a specific "Regeneration Dip" at midday.
 
-| Time  | Color Temp | Brightness | Phase |
-|-------|------------|------------|-------|
-| Time  | Color Temp | Brightness | Phase |
-|-------|------------|------------|-------|
-| Wake | 2700K | 30% | Wake-up Start |
-| +2h | 6500K | 100% | Full Activation |
-| Midday | 5000K | 80% | Social Midday |
-| +30m | 4000K | 50% | Regeneration Dip |
-| +Re-Act | 6000K | 75% | Re-Activation |
-| -4h Sleep | 3800K | 60% | Social Evening |
-| -2h Sleep | 2700K | 30% | Wind-Down |
-| Sleep | 2200K | 10% | Bedtime |
+**Key Control Points (Relative to your schedule):**
 
-Transitions between these points use **cubic Hermite spline interpolation** for smooth, natural-feeling changes.
+| Phase | Relative Time | Color Temp | Brightness | Description |
+|-------|---------------|------------|------------|-------------|
+| **Wake Up** | `Wake` | 2700K | 30% | Gentle start |
+| **Morning Rise** | `Wake + 2h` | 4500K | 50% | Energizing |
+| **Peak Focus** | `Wake + 3h` | 6500K | 100% | Maximum alertness |
+| **Dip Start** | `Midday - 30m` | 6500K | 100% | Pre-lunch peak |
+| **Regeneration** | `Midday` | **4000K** | **50%** | **Rest & Digest** |
+| **Recovery** | `Midday + 1h` | 6000K | 75% | Afternoon focus |
+| **Evening** | `Sleep - 4h` | 2700K | 30% | Warm atmosphere |
+| **Bedtime** | `Sleep` | 2200K | 10% | Melatonin ready |
+
+*Transitions use **Cubic Hermite Spline** interpolation for smooth, organic changes.*
 
 ## Compatibility
 
