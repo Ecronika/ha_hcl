@@ -37,3 +37,12 @@ CONF_SLEEP_TIME = "sleep_time"
 DEFAULT_WAKE_TIME = "07:00"
 DEFAULT_MIDDAY_TIME = "12:30"
 DEFAULT_SLEEP_TIME = "22:00"
+
+# v0.4.0 Interactive UI
+SERVICE_UPDATE_CURVE = "update_curve"
+CONF_CURVE_CONFIG = "curve_config"
+
+ATTR_CURVE_VERSION = "curve_version"
+ATTR_CURVE_HASH = "curve_hash"
+ATTR_SAMPLE_COUNT = "sample_count"
+ATTR_SAMPLES = "samples"

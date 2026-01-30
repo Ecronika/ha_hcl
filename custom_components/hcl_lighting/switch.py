@@ -5,13 +5,15 @@ import logging
 import asyncio
 from typing import Any
 from datetime import timedelta
+import voluptuous as vol
 
 from homeassistant.util import dt as dt_util
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.util.dt import utcnow
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.const import STATE_ON
@@ -33,7 +35,9 @@ from .const import (
     CONF_SLEEP_TIME,
     DEFAULT_WAKE_TIME,
     DEFAULT_MIDDAY_TIME,
-    DEFAULT_SLEEP_TIME
+    DEFAULT_SLEEP_TIME,
+    SERVICE_UPDATE_CURVE,
+    CONF_CURVE_CONFIG
 )
 
 from .logic.hcl_math import HCLCalculator
@@ -42,30 +46,33 @@ from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Switch from a config entry."""
     
-    # Initialize Logic Components
+    # Retrieve Shared Calculator
+    hcl_calc: HCLCalculator = hass.data[DOMAIN][entry.entry_id]
+
     # Initialize Logic Components
     override_manager = OverrideManager()
-    hcl_calc = HCLCalculator()
-    
-    # Initial Curve Generation
-    wake = entry.options.get(CONF_WAKE_TIME) or entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
-    midday = entry.options.get(CONF_MIDDAY_TIME) or entry.data.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
-    sleep = entry.options.get(CONF_SLEEP_TIME) or entry.data.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
-    
-    hcl_calc.generate_curve(wake, midday, sleep)
     
     controller = HCLLightController(hass, override_manager, entry)
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
     
     async_add_entities([switch])
-    
-    # NOTE: redundant listener removed to prevent race conditions.
-    # __init__.py handles reload on options update.
 
+    # Register Service
+    platform = async_get_current_platform()
+    
+    platform.async_register_entity_service(
+        SERVICE_UPDATE_CURVE,
+        {
+            vol.Required("points"): list, # List of dicts
+            vol.Optional("mode", default="preview"): vol.In(["preview", "apply", "save"]),
+            vol.Optional("drive_lights", default=False): bool,
+        },
+        "async_update_curve_service"
+    )
 
 class HCLSwitch(RestoreEntity, SwitchEntity):
     """Representation of a HCL Lighting Switch."""
@@ -126,18 +133,57 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         _LOGGER.debug("HCL Switch options updated. Re-evaluating targets.")
         self._entry = entry # Update the entry reference
         
-        # Regenerate Curve
-        wake = entry.options.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)
-        midday = entry.options.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)
-        sleep = entry.options.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)
-        
-        self.hcl_calc.generate_curve(wake, midday, sleep)
+        # Regenerate Curve (Check for new config or legacy)
+        curve_config = entry.options.get(CONF_CURVE_CONFIG)
+        if curve_config:
+             self.hcl_calc.generate_curve_from_config(curve_config)
+        else:
+             wake = entry.options.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)
+             midday = entry.options.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)
+             sleep = entry.options.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)
+             self.hcl_calc.generate_curve(wake, midday, sleep)
         
         # Re-resolve targets immediately if the switch is on
         if self._is_on:
             await self._re_evaluate_targets_and_listeners()
             await self._update_hcl() # Trigger immediate update with new curve
         self.async_write_ha_state() # Ensure UI updates if needed
+
+    async def async_update_curve_service(self, points: list, mode: str = "preview", drive_lights: bool = False):
+        """Handle update_curve service call."""
+        _LOGGER.debug(f"Service update_curve called (mode={mode}, points={len(points)})")
+        
+        # 1. Update In-Memory Calculator (Source of Truth for Sensor)
+        # Assuming points are list of dicts {t, b, k}
+        self.hcl_calc.calculate_curve_from_points(points)
+        
+        # 2. Mode Handling
+        if mode == "save":
+            # Persist to Options -> Will trigger reload
+            new_options = {**self._entry.options}
+            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+            
+            await self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+            # Return early as reload will happen
+            return
+
+        elif mode == "apply":
+            # Force Light Update
+            if self._is_on:
+                await self._update_hcl()
+        
+        # Preview mode just updates the calculator, 
+        # which informs the Sensor (via callback or polling? Sensor needs to know).
+        # We need to notify the sensor to update its state.
+        # But wait, Sensor is separate entity.
+        # Ideally HCLCalculator emits an event, or we interact with the sensor entity.
+        # Or simpler: The Sensor just exposes `hcl_calc.active_curve`.
+        # We need to tell Home Assistant that the Sensor state has changed.
+        # We can fire an event `hcl_lighting_curve_updated`?
+        # Or async_dispatcher_send?
+        
+        from homeassistant.helpers.dispatcher import async_dispatcher_send
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     @property
     def is_on(self) -> bool:

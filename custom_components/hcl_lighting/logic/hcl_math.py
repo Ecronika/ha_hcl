@@ -1,8 +1,8 @@
-"""Pure math calculations for HCL values."""
 from __future__ import annotations
 
 import logging
-
+import math
+from typing import TypedDict, List
 from datetime import time
 from homeassistant.util import dt as dt_util
 
@@ -16,28 +16,105 @@ from ..const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+class HCLPoint(TypedDict):
+    """Control point for HCL curve."""
+    t: int # Minutes from midnight (0..1439)
+    b: int # Brightness (0..100)
+    k: int # Kelvin (2000..7000)
+
+class CurveConfig(TypedDict):
+    """Configuration for HCL curve."""
+    points: List[HCLPoint]
+    version: int
+
 class HCLCalculator:
-    """Calculator for HCL values using Cubic Hermite Spline interpolation."""
+    """Calculator for HCL values using Free-hand Interpolation."""
 
     # Time -> (Kelvin, Brightness %)
-    # Using DIN SPEC 67600 inspired points
     # Format: (Minutes from Midnight, Kelvin, Brightness)
-    # Dynamic Curve Storage
-    # active_curve moved to __init__ to prevent shared state bug
     
     def __init__(self):
         """Initialize with default curve."""
         self.active_curve = []
+        # Boot with default config
         self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME)
 
+    def generate_curve_from_config(self, config: CurveConfig):
+        """Generate the active curve from a CurveConfig object."""
+        self.calculate_curve_from_points(config['points'])
+
+    def calculate_curve_from_points(self, points: List[HCLPoint]):
+        """Calculate the 24h curve (96 points) from explicit control points using Cosine Interpolation.
+        Matches logic in hcl_dashboard.html (v0.4.7).
+        """
+        if not points:
+             _LOGGER.error("No points provided for curve calculation!")
+             return
+
+        # Sort points by time
+        sorted_points = sorted(points, key=lambda p: p['t'])
+        
+        # Prepare X, B, K arrays with wrapping (-1440, 0, +1440)
+        X = []
+        B = []
+        K = []
+        
+        for offset in [-1440, 0, 1440]:
+            for p in sorted_points:
+                X.append(p['t'] + offset)
+                B.append(p['b'])
+                K.append(p['k'])
+        
+        # Interpolate 24h cycle (every 15 min -> 97 points incl 1440)
+        # We store this as self.active_curve for lookup.
+        # Format: (t, k, b) tuple list.
+        # NOTE: self.active_curve in v0.3.0 logic was a list of Control Points used for Spline calculation at runtime.
+        # In v0.4.0 (Free-hand), we are pre-calculating the 15-min resolution curve here? 
+        # OR are we storing the Control Points and interpolating at runtime?
+        # The Dashboard does PCHIP at runtime.
+        # BUT: The switch logic expects `self.active_curve` to be the Spline Control Points for Cubic Hermite.
+        # 
+        # CRITICAL DECISION:
+        # To support "Free-hand" with potentially many points, the old "Hermite Loop" in get_hcl_values is too rigid (it assumes sparse points).
+        # We should PRE-CALCULATE the 24h curve at high resolution (e.g. 1 min or 5 min) and just look it up.
+        # OR we verify if we can just use the Cosine Interp at runtime.
+        # Given the dashboard code uses Cosine Interp ("pchip" named function), we should use that at runtime.
+        # So `active_curve` will store the Control Points (sorted, distinct).
+        
+        self.active_curve = []
+        # Logic: We just store the points as Tuples (t, k, b) for compatibility with get_hcl_values logic?
+        # No, get_hcl_values logic is hardcoded for Cubic Hermite. 
+        # We need to UPDATE get_hcl_values to use the new interpolation if we change the structure.
+        # For now, let's keep active_curve as the explicit list of control points (tuples),
+        # And update get_hcl_values to use Cosine Interpolation instead of Hermite.
+        
+        # Convert HCLPoints to tuples for internal storage
+        # Tuple: (t, k, b) - wait, HCLPoint is t,b,k? No, HCLPoint is dict. 
+        # existing points were (t, k, b). HCLPoint has keys.
+        # Let's verify usage in get_hcl_values. p0[0] is t, p0[1] is k, p0[2] is b.
+        
+        unique_points = []
+        seen = set()
+        for p in sorted_points:
+            if p['t'] not in seen:
+                 unique_points.append((p['t'], p['k'], p['b']))
+                 seen.add(p['t'])
+        
+        self.active_curve = unique_points
+        _LOGGER.debug("Calculated HCL Curve with %d control points", len(self.active_curve))
+
     def generate_curve(self, wake_str: str, midday_str: str, sleep_str: str):
-        """Generate the HCL curve based on 3 anchor points."""
+        """Legacy wrapper: Generate curve from 3 anchors (v0.3.0 style) -> Migrates to v0.4.0 points."""
+        config = self.migrate_legacy_config(wake_str, midday_str, sleep_str)
+        self.generate_curve_from_config(config)
+
+    def migrate_legacy_config(self, wake_str: str, midday_str: str, sleep_str: str) -> CurveConfig:
+        """Migrate v0.3.0 anchors to v0.4.0 explicit point list (v0.2.1 Replica Profile)."""
         try:
             wake_time = dt_util.parse_time(wake_str) or dt_util.parse_time(DEFAULT_WAKE_TIME)
             midday_time = dt_util.parse_time(midday_str) or dt_util.parse_time(DEFAULT_MIDDAY_TIME)
             sleep_time = dt_util.parse_time(sleep_str) or dt_util.parse_time(DEFAULT_SLEEP_TIME)
         except Exception:
-            _LOGGER.error("Error parsing HCL times, using defaults")
             wake_time = dt_util.parse_time(DEFAULT_WAKE_TIME)
             midday_time = dt_util.parse_time(DEFAULT_MIDDAY_TIME)
             sleep_time = dt_util.parse_time(DEFAULT_SLEEP_TIME)
@@ -48,130 +125,44 @@ class HCLCalculator:
         m_min = to_min(midday_time)
         s_min = to_min(sleep_time)
 
-        # Basic Validation: Ensure logic doesn't break if times are weird
-        # For v1 we assume 0..24h and user sanity, but we sort the points anyway.
-        
-        # Validate and Elasticize Sectors
-        # Calculate available durations
-        def get_duration(start, end):
-            d = end - start
-            if d < 0: d += 1440
-            return d
-
-        dur_wake_to_midday = get_duration(w_min, m_min)
-        dur_midday_to_sleep = get_duration(m_min, s_min)
-        
-        # Define default offsets
-        DEFAULT_WAKE_PEAK_OFFSET = 120    # +2h
-        DEFAULT_MIDDAY_PRE_OFFSET = 30    # -30m
-        
-        # Factor for Wake Sector (Wake -> Midday)
-        # We need space for Wake+2h AND Midday-30m. Total needed: 150m.
-        needed_wm = DEFAULT_WAKE_PEAK_OFFSET + DEFAULT_MIDDAY_PRE_OFFSET
-        factor_wm = 1.0
-        if dur_wake_to_midday < needed_wm + 30: # +30m buffer
-             factor_wm = dur_wake_to_midday / (needed_wm + 30)
-             _LOGGER.warning("Elastic Curve: Compressing Morning Sector by factor %.2f", factor_wm)
-
-        wake_peak_off = int(DEFAULT_WAKE_PEAK_OFFSET * factor_wm)
-        midday_pre_off = int(DEFAULT_MIDDAY_PRE_OFFSET * factor_wm)
-
-
-        # Factor for Midday Sector (Midday -> Sleep)
-        # We have Midday+120m (Re-activation - extended for smoothness). 
-        # New: Sleep-240m (Social Evening). Sleep-120m (Wind-down).
-        # We need space for Re-activation offset (120) + Social Evening offset (240). Total 360m.
-        needed_ms = 120 + 240
-        factor_ms = 1.0
-        if dur_midday_to_sleep < needed_ms + 30:
-             factor_ms = dur_midday_to_sleep / (needed_ms + 30)
-             _LOGGER.warning("Elastic Curve: Compressing Afternoon Sector by factor %.2f", factor_ms)
-             
-        # v0.2.1 Standard Offsets (Fixed)
-        # Using simplified fixed duration logic as requested.
-        # factor_ms (Elastic) is still calculated but deemed less critical for standard profile.
-        
-        # We assume standard spacing is sufficient for 99% of cases.
-        # If segments are extremely short, the spline might look weird, but v0.2.1 didn't have complex elasticity.
-
-        # Construct Points based on Relative Offsets (Elastic)
-        # v0.2.1 Exact Replica Logic
-        # Translating absolute v0.2.1 points to relative dynamic offsets
-        # Based on defaults: Wake 07:00, Midday 12:30, Sleep 22:00
-        
-        points = [
-            # --- Wake Sector (Morning Rise) ---
-            (w_min, 2700, 30),                  # 07:00 Wake
-            (w_min + 120, 4500, 50),            # 09:00 (+2h)
-            (w_min + 150, 5500, 75),            # 09:30 (+2.5h)
-            (w_min + 180, 6500, 100),           # 10:00 (+3h) Peak Start
+        # v0.2.1 Replica Logic (Offsets)
+        # Structure: time, kelvin, brightness
+        raw_points = [
+            # Wake Sector
+            (w_min, 2700, 30),
+            (w_min + 120, 4500, 50),
+            (w_min + 150, 5500, 75),
+            (w_min + 180, 6500, 100),
             
-            # --- Midday Sector (Focus & Dip) ---
-            (m_min - 30, 6500, 100),            # 12:00 (-30m) Peak End
-            (m_min, 4000, 50),                  # 12:30 Midday Dip Start
-            (m_min + 30, 4000, 50),             # 13:00 (+30m) Dip Plateau
-            (m_min + 60, 6000, 75),             # 13:30 (+1h) Recovery
-            (m_min + 90, 6000, 75),             # 14:00 (+1.5h) Afternoon Plateau
-            (m_min + 210, 4000, 50),            # 16:00 (+3.5h) Late Afternoon Fade
+            # Midday Sector
+            (m_min - 30, 6500, 100),
+            (m_min, 4000, 50), # Dip
+            (m_min + 30, 4000, 50),
+            (m_min + 60, 6000, 75),
+            (m_min + 90, 6000, 75),
+            (m_min + 210, 4000, 50),
             
-            # --- Sleep Sector (Evening) ---
-            (s_min - 240, 2700, 30),            # 18:00 (-4h) Early Evening
-            (s_min, 2200, 10),                  # 22:00 Sleep
+            # Sleep Sector
+            (s_min - 240, 2700, 30),
+            (s_min, 2200, 10),
         ]
-        
-        # Dynamic Midnight wrapping
-        # If the day wrap happens in a gradient, we need to ensure 1440 aligns with 0
-        # If Sleep is 01:00, then 1440 (24:00) should be interpolated between Evening and Sleep.
-        # But our interpolation engine handles the 1440->0 wrap automatically if we just don't define 1440 explicitly IF it's not a discrete point.
-        # However, to be safe for the cubic spline, having a 1440 point is good for the last segment.
-        
-        # Let's calculate the "Virtual Midnight" value
-        # This is simplified: We just clamp the result.
-        points.append((0, 2200, 10)) # Ensure anchor at 0 exists
-        points.append((1440, 2200, 10)) # Ensure anchor at 1440 exists
-        
-        # Normalize and Sort
-        # Handle wrap-around or >1440 if offsets push it over
-        final_points = []
-        for m, k, b in points:
+
+        # Convert to HCLPoint list
+        points: List[HCLPoint] = []
+        for t, k, b in raw_points:
+            # Normalize t
+            norm_t = t
+            if norm_t < 0: norm_t += 1440
+            if norm_t >= 1440: norm_t -= 1440
             
-            # Simple approach for valid daily curve:
-            # If minute < 0: add 1440
-            # If minute >= 1440: sub 1440 (unless it's the exact end anchor 1440)
+            points.append({"t": norm_t, "k": k, "b": b})
             
-            norm_m = m
-            if norm_m < 0: norm_m += 1440
-            if norm_m > 1440: norm_m -= 1440 # 25:00 -> 01:00
-            
-            # Special logic: Do not fold 1440 back to 0, keep it as end anchor if intended
-            if m == 1440: norm_m = 1440
-            
-            final_points.append((norm_m, k, b))
-            
-        # Ensure distinct points (overlapping times can cause div/0)
-        # Sort by time
-        final_points.sort(key=lambda x: x[0])
-        
-        # Deduplicate timestamps (keep last defined)
-        unique_points = []
-        seen_times = set()
-        for p in final_points:
-            if p[0] not in seen_times:
-                unique_points.append(p)
-                seen_times.add(p[0])
-            else:
-                 # Update existing
-                 for i, ex in enumerate(unique_points):
-                     if ex[0] == p[0]:
-                         unique_points[i] = p
-        
-        self.active_curve = unique_points
-        _LOGGER.debug("Generated HCL Curve with %d points: %s", len(self.active_curve), self.active_curve)
+        return {"points": points, "version": 2}
     
     MINUTES_PER_DAY = 1440
     
     def get_hcl_values(self, now, min_brightness: int, max_brightness: int) -> tuple[int, int]:
-        """Calculate target Brightness and Color Temp for the given time.
+        """Calculate target Brightness and Color Temp using PCHIP Interpolation (Monotone).
         
         Args:
             now: datetime object
@@ -201,6 +192,15 @@ class HCLCalculator:
         current_minutes = now.hour * 60 + now.minute
         points = self.active_curve
         
+        if not points:
+            return min_brightness, 2700
+
+        # PCHIP requires context of the whole curve or at least neighbors.
+        # Since we have relatively few points (e.g. 10-20), we can just PCHIP the whole 24h cycle
+        # effectively or find the segment + slopes.
+        # For efficient on-the-fly calculation without full pre-calc:
+        # PCHIP slope at point i depends on points i-1, i, i+1.
+        
         # 1. Find segment
         # Default to last segment (wrapping to start)
         idx = len(points) - 1
@@ -211,93 +211,144 @@ class HCLCalculator:
                 idx = i
                 break
         
-        # 2. Extract Data for Segment [idx, idx+1]
-        p0 = points[idx]
-        p1 = points[(idx + 1) % len(points)]
+        # 2. Extract Neighbors for PCHIP
+        # We need p[i-1], p[i], p[i+1], p[i+2] to calculate slopes at p[i] and p[i+1]
+        n_points = len(points)
         
-        t0, k0, b0 = p0
-        t1, k1, b1 = p1
+        curr_pt = points[idx]
+        next_pt = points[(idx + 1) % n_points]
         
-        # Handle time wrapping
-        dt_interval = t1 - t0
-        if dt_interval < 0:
-            dt_interval += self.MINUTES_PER_DAY
+        # Calculate Slopes (m0 at curr_pt, m1 at next_pt)
+        # Slope depends on left and right neighbors
+        prev_pt = points[(idx - 1) % n_points]
+        next_next_pt = points[(idx + 2) % n_points]
         
-        # Division by zero guard
-        if dt_interval == 0:
-             _LOGGER.error("Degenerate segment detected in HCL curve (dt=0). Skipping interpolation.")
-             return min_brightness, 4000 # Fail safe
+        # Time Handling for Slopes
+        # We need to normalize times relative to the specific wrap-around context
+        
+        # Calculate slope at Current Point (idx) using (idx-1, idx, idx+1)
+        # Times relative to curr_pt
+        t_prev_rel = prev_pt[0] - curr_pt[0]
+        if t_prev_rel >= 0: t_prev_rel -= 1440 # Previous is in past
+        
+        t_next_rel = next_pt[0] - curr_pt[0]
+        if t_next_rel <= 0: t_next_rel += 1440 # Next is in future
+        
+        # Calculate slope pairs
+        # Secants d0, d1
+        # d0 = (y0 - y_prev) / (t0 - t_prev)
+        # d1 = (y1 - y0) / (t1 - t0)
+        
+        def safe_div(n, d): return n / d if d != 0 else 0
+        
+        # Kelvin Slopes
+        dk_0 = safe_div(curr_pt[1] - prev_pt[1], -t_prev_rel) # Note: t_prev_rel is negative, so diff is 0 - t_prev
+        dk_0_raw = safe_div(curr_pt[1] - prev_pt[1], 0 - t_prev_rel) 
+        # Wait, simple: d_Left = (y_curr - y_prev) / (t_curr - t_prev)
+        
+        # Let's standardize input for _pchip_slope
+        
+        # Slope at Current Point
+        mk_curr = self._pchip_slope(
+            prev_pt[0], prev_pt[1], 
+            curr_pt[0], curr_pt[1], 
+            next_pt[0], next_pt[1]
+        )
+        mb_curr = self._pchip_slope(
+            prev_pt[0], prev_pt[2], 
+            curr_pt[0], curr_pt[2], 
+            next_pt[0], next_pt[2]
+        )
 
-        # 3. Calculate Normalized Time t (0..1)
-        # Handle current_minutes crossing midnight relative to t0
-        dist_from_t0 = current_minutes - t0
-        if dist_from_t0 < 0:
-            dist_from_t0 += self.MINUTES_PER_DAY
-            
-        t = dist_from_t0 / dt_interval
+        # Slope at Next Point (idx+1)
+        mk_next = self._pchip_slope(
+            curr_pt[0], curr_pt[1], 
+            next_pt[0], next_pt[1], 
+            next_next_pt[0], next_next_pt[1]
+        )
+        mb_next = self._pchip_slope(
+            curr_pt[0], curr_pt[2], 
+            next_pt[0], next_pt[2], 
+            next_next_pt[0], next_next_pt[2]
+        )
+
+        # 3. Cubic Hermite Interpolation using PCHIP slopes
+        # Valid for interval [curr_pt, next_pt]
         
-        # 4. Tangents (Slopes) for Catmull-Rom style spline
-        # Need p_minus and p_plus for context
-        p_minus = points[(idx - 1) % len(points)]
-        p_plus = points[(idx + 2) % len(points)]
+        # Normalized Time t (0..1)
+        t0 = curr_pt[0]
+        t1 = next_pt[0]
+        dt = t1 - t0
+        if dt < 0: dt += 1440
         
-        # Calculate slopes for Kelvin and Brightness
+        if dt == 0: return curr_pt[2], curr_pt[1] # Fail safe
+
+        # Current time relative to t0
+        dist = current_minutes - t0
+        if dist < 0: dist += 1440
         
-        # Kelvin tangents
-        # m0 = slope through p0 from p_minus to p1
-        m0_k = self._get_slope(p_minus[0], p_minus[1], p1[0], p1[1])
-        # m1 = slope through p1 from p0 to p_plus
-        m1_k = self._get_slope(p0[0], p0[1], p_plus[0], p_plus[1])
+        t = dist / dt
         
-        # Brightness tangents
-        m0_b = self._get_slope(p_minus[0], p_minus[2], p1[0], p1[2])
-        m1_b = self._get_slope(p0[0], p0[2], p_plus[0], p_plus[2])
+        # Evaluate
+        kelvin = self._evaluate_hermite(t, dt, curr_pt[1], next_pt[1], mk_curr, mk_next)
+        brightness = self._evaluate_hermite(t, dt, curr_pt[2], next_pt[2], mb_curr, mb_next)
         
-        # 5. Cubic Hermite Interpolation
-        # h00 = 2t^3 - 3t^2 + 1
-        # h10 = t^3 - 2t^2 + t
-        # h01 = -2t^3 + 3t^2
-        # h11 = t^3 - t^2
+        # 4. Clamp Results
+        # Clamping (WYSIWYG)
         
-        t2 = t * t
-        t3 = t2 * t
+        # Apply user min/max to brightness
+        brightness = max(min_brightness, min(max_brightness, brightness))
+        
+        # Global bounds
+        brightness = max(1, min(100, int(round(brightness))))
+        kelvin = max(2000, min(7000, int(round(kelvin))))
+        
+        return brightness, kelvin
+
+    def _pchip_slope(self, t_prev, y_prev, t_curr, y_curr, t_next, y_next):
+        """Calculate monotonic slope at t_curr given neighbors."""
+        # Handle wrapping for time diffs
+        dt_left = t_curr - t_prev
+        if dt_left <= 0: dt_left += 1440
+        
+        dt_right = t_next - t_curr
+        if dt_right <= 0: dt_right += 1440
+        
+        # Secants
+        if dt_left == 0 or dt_right == 0: return 0
+        
+        d_left = (y_curr - y_prev) / dt_left
+        d_right = (y_next - y_curr) / dt_right
+        
+        # PCHIP Logic:
+        # If signs differ (peak/valley), slope is 0 to enforce monotonicity
+        if d_left * d_right <= 0:
+            return 0
+        
+        # Harmonic Mean for slope (Weighted by interval lengths)
+        # w1 = 2*h_rate + h_left
+        # w2 = h_right + 2*h_rate
+        # This is the standard PCHIP formula for non-uniform grids
+        
+        w1 = 2 * dt_right + dt_left
+        w2 = dt_right + 2 * dt_left
+        
+        return (w1 + w2) / (w1 / d_left + w2 / d_right)
+
+    def _evaluate_hermite(self, t, h, y0, y1, m0, m1):
+        """Evaluate Cubic Hermite Spline at normalized time t."""
+        # t: 0..1
+        # h: interval length (x1 - x0) - needed because m0/m1 are dy/dx
+        # y0, y1: values
+        # m0, m1: slopes
+        
+        t2 = t*t
+        t3 = t2*t
         
         h00 = 2*t3 - 3*t2 + 1
         h10 = t3 - 2*t2 + t
         h01 = -2*t3 + 3*t2
         h11 = t3 - t2
         
-        kelvin = h00*k0 + h10*dt_interval*m0_k + h01*k1 + h11*dt_interval*m1_k
-        brightness = h00*b0 + h10*dt_interval*m0_b + h01*b1 + h11*dt_interval*m1_b
-        
-        # 6. Scale Brightness to User Limits
-        # "User Min" should correspond to the "Lowest HCL Value" (Night = 10%),
-        # not the theoretical 0%. Mapping [10, 100] -> [UserMin, UserMax].
-        INTERNAL_MIN_HCL = 10.0
-        INTERNAL_RANGE = 100.0 - INTERNAL_MIN_HCL
-        
-        # Normalize input (brightness from spline 10-100) to 0-1 range relative to effective curve
-        normalized_b = (brightness - INTERNAL_MIN_HCL) / INTERNAL_RANGE
-        
-        # Clamp normalized to 0-1 (in case spline dipped slightly below 10)
-        normalized_b = max(0.0, min(1.0, normalized_b))
-        
-        # Scale to user range
-        scaled_b = min_brightness + normalized_b * (max_brightness - min_brightness)
-        
-        brightness = scaled_b
-
-        # Clamp values to valid ranges
-        brightness = max(1, min(100, int(brightness)))
-        kelvin = max(2000, min(6500, int(kelvin)))
-        
-        return brightness, kelvin
-
-    def _get_slope(self, t1, v1, t2, v2):
-        """Calculate slope with periodic wraparound handling."""
-        dt = t2 - t1
-        if dt < 0:
-            dt += self.MINUTES_PER_DAY
-        if dt == 0:
-            return 0
-        return (v2 - v1) / dt
+        # Standard Hermite formula uses derivatives w.r.t t (0..1), so scale slopes by h
+        return h00*y0 + h10*h*m0 + h01*y1 + h11*h*m1

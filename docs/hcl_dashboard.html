@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HCL Configurator v0.4.7 - Fixed Offset</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            /* Theme Variables */
+            --glass-bg: rgba(255, 255, 255, 0.03);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+
+            --accent-gold: #FFD700;
+            --accent-blue: #00E5FF;
+            --text-main: #ffffff;
+            --wrapper-padding: 16px;
+            /* Zentral definiert für Sync */
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #050505;
+            /* Deep Space Background */
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(76, 29, 149, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(56, 189, 248, 0.1), transparent 25%);
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        /* Ambient Glow */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -10%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60vw;
+            height: 40vh;
+            background: radial-gradient(ellipse at center, rgba(255, 255, 255, 0.03), transparent 70%);
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        /* MAIN CARD */
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 30px;
+            width: 100%;
+            max-width: 900px;
+            box-shadow: var(--glass-shadow);
+        }
+
+        h2 {
+            margin: 0 0 4px 0;
+            font-weight: 500;
+            font-size: 22px;
+            letter-spacing: -0.5px;
+            text-align: center;
+            background: linear-gradient(180deg, #fff, #888);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            text-align: center;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 13px;
+            margin-bottom: 30px;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn-preset {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.7);
+            padding: 8px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .btn-preset:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+        }
+
+        .btn-preset.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: #fff;
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
+        }
+
+        /* Charts Grid */
+        .charts-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 768px) {
+            .charts-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* CHART CONTAINER (The crucial part for alignment) */
+        .chart-wrapper {
+            position: relative;
+            height: 280px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            /* Padding ensures Canvas doesn't touch borders, BUT we must sync HandleLayer */
+            padding: var(--wrapper-padding);
+        }
+
+        .chart-label {
+            position: absolute;
+            top: 18px;
+            left: 24px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.3);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* HANDLE LAYER - FIXED ALIGNMENT */
+        .handle-layer {
+            position: absolute;
+            /* Inset MUST match the Wrapper Padding exactly so (0,0) aligns with Canvas (0,0) */
+            top: var(--wrapper-padding);
+            left: var(--wrapper-padding);
+            right: var(--wrapper-padding);
+            bottom: var(--wrapper-padding);
+            pointer-events: none;
+            /* Let clicks pass through to Handles, but ignore layer background */
+            overflow: visible;
+            /* Allow tooltips to pop out */
+        }
+
+        /* Handles */
+        .handle {
+            position: absolute;
+            width: 10px;
+            height: 10px;
+            /* Small precision dot */
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            /* Centering */
+            cursor: grab;
+            pointer-events: auto;
+            z-index: 100;
+            transition: width 0.1s, height 0.1s;
+        }
+
+        /* Specific Styles */
+        .handle.type-b {
+            background: var(--accent-gold);
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5), 0 0 10px rgba(255, 215, 0, 0.4);
+        }
+
+        .handle.type-k {
+            background: var(--accent-blue);
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5), 0 0 10px rgba(0, 229, 255, 0.4);
+        }
+
+        .handle:hover {
+            transform: translate(-50%, -50%) scale(1.5);
+            z-index: 110;
+        }
+
+        .handle:active {
+            cursor: grabbing;
+            transform: translate(-50%, -50%) scale(1.3);
+        }
+
+        /* Tooltip Label (Floating) */
+        .handle-info {
+            position: absolute;
+            bottom: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(15, 15, 20, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 4px 8px;
+            border-radius: 6px;
+            text-align: center;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s, transform 0.2s;
+            transform: translateX(-50%) translateY(5px);
+            white-space: nowrap;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+        }
+
+        .handle:hover .handle-info,
+        .handle:active .handle-info {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .info-title {
+            display: block;
+            font-size: 10px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+
+        .info-val {
+            font-family: 'Inter', monospace;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.7);
+        }
+
+        /* Color Bar */
+        .footer-section {
+            position: relative;
+            margin-top: 10px;
+            padding: 0 10px;
+        }
+
+        .gradient-bar {
+            height: 8px;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .axis {
+            display: flex;
+            justify-content: space-between;
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.2);
+            font-weight: 500;
+        }
+
+        /* Glowing Lines in Chart */
+        /* Note: This is done via Chart.js config, but CSS sets the mood */
+    </style>
+</head>
+
+<body>
+
+    <div class="glass-card">
+        <h2>HCL Configurator</h2>
+        <p class="subtitle">v0.4.7 • Glass Precision UI</p>
+
+        <div class="toolbar">
+            <button class="btn-preset active" onclick="setPreset('default', this)">Standard</button>
+            <button class="btn-preset" onclick="setPreset('early', this)">Early Bird</button>
+            <button class="btn-preset" onclick="setPreset('late', this)">Night Owl</button>
+            <button class="btn-preset" onclick="setPreset('work', this)">Deep Focus</button>
+        </div>
+
+        <div class="charts-row">
+            <div class="chart-wrapper" id="wrap-b">
+                <span class="chart-label">Brightness</span>
+                <canvas id="chartB"></canvas>
+                <div class="handle-layer" id="handles-b"></div>
+            </div>
+
+            <div class="chart-wrapper" id="wrap-k">
+                <span class="chart-label">Temperature</span>
+                <canvas id="chartK"></canvas>
+                <div class="handle-layer" id="handles-k"></div>
+            </div>
+        </div>
+
+        <div class="footer-section">
+            <canvas id="colorBar" class="gradient-bar" width="800" height="20"></canvas>
+            <div class="axis">
+                <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- DATA & PRESETS ---
+        const PRESETS = {
+            default: [
+                { id: 1, name: "Wake", t: 420, b: 30, k: 2700 },
+                { id: 2, name: "Rise", t: 540, b: 50, k: 4500 },
+                { id: 3, name: "Peak", t: 600, b: 100, k: 6500 },
+                { id: 4, name: "Dip Start", t: 720, b: 100, k: 6500 },
+                { id: 5, name: "Regen", t: 750, b: 50, k: 4000 },
+                { id: 6, name: "Recovery", t: 810, b: 75, k: 6000 },
+                { id: 7, name: "Evening", t: 1080, b: 30, k: 2700 },
+                { id: 8, name: "Bedtime", t: 1320, b: 10, k: 2200 }
+            ],
+            early: [
+                { id: 1, name: "Wake", t: 330, b: 30, k: 2700 }, { id: 2, name: "Rise", t: 450, b: 50, k: 4500 },
+                { id: 3, name: "Peak", t: 510, b: 100, k: 6500 }, { id: 4, name: "Dip", t: 690, b: 100, k: 6500 },
+                { id: 5, name: "Regen", t: 720, b: 50, k: 4000 }, { id: 6, name: "Recov", t: 780, b: 75, k: 6000 },
+                { id: 7, name: "Eve", t: 1020, b: 30, k: 2700 }, { id: 8, name: "Bed", t: 1260, b: 10, k: 2200 }
+            ],
+            late: [
+                { id: 1, name: "Wake", t: 600, b: 30, k: 2700 }, { id: 2, name: "Rise", t: 720, b: 50, k: 4500 },
+                { id: 3, name: "Peak", t: 780, b: 100, k: 6500 }, { id: 4, name: "Dip", t: 900, b: 100, k: 6500 },
+                { id: 5, name: "Regen", t: 930, b: 50, k: 4000 }, { id: 6, name: "Recov", t: 990, b: 75, k: 6000 },
+                { id: 7, name: "Eve", t: 1260, b: 30, k: 2700 }, { id: 8, name: "Bed", t: 1500, b: 10, k: 2200 }
+            ],
+            work: [
+                { id: 1, name: "Wake", t: 420, b: 20, k: 2700 }, { id: 2, name: "Boost", t: 480, b: 100, k: 6000 },
+                { id: 3, name: "Focus", t: 540, b: 100, k: 6500 }, { id: 4, name: "Break", t: 750, b: 80, k: 5000 },
+                { id: 5, name: "Lunch", t: 780, b: 50, k: 3500 }, { id: 6, name: "Focus 2", t: 840, b: 90, k: 6000 },
+                { id: 7, name: "Relax", t: 1140, b: 40, k: 3000 }, { id: 8, name: "Sleep", t: 1380, b: 5, k: 2000 }
+            ]
+        };
+
+        let activePoints = [];
+        let chartB, chartK;
+
+        // --- CHART GRADIENTS ---
+        function createGradient(ctx, colorHex) {
+            const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+            gradient.addColorStop(0, hexToRgba(colorHex, 0.4));
+            gradient.addColorStop(1, hexToRgba(colorHex, 0.0));
+            return gradient;
+        }
+
+        function hexToRgba(hex, alpha) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
+        // --- MATH: PCHIP Interpolation (Monotone Cubic Spline) ---
+        // Matches Python hcl_math.py implementation
+        function pchip(tTarget, X, Y) {
+            // 1. Find segment
+            let i = 0;
+            while (i < X.length - 2 && tTarget > X[i + 1]) i++;
+
+            const t0 = X[i];
+            const t1 = X[i + 1];
+
+            // Exact match check
+            if (Math.abs(tTarget - t0) < 0.001) return Y[i];
+            if (Math.abs(tTarget - t1) < 0.001) return Y[i + 1];
+
+            // 2. Calculate Slopes (m0 at t0, m1 at t1)
+            // We need 4 points: prev, curr(t0), next(t1), next_next
+
+            // Helper to safely get point at index
+            const getPt = (idx) => ({ x: X[idx], y: Y[idx] });
+
+            // Current Segment endpoints
+            const curr = getPt(i);
+            const next = getPt(i + 1);
+
+            // Neighbors
+            const prev = (i > 0) ? getPt(i - 1) : { x: curr.x - (next.x - curr.x), y: curr.y }; // Extrapolate if edge
+            const next_next = (i < X.length - 2) ? getPt(i + 2) : { x: next.x + (next.x - curr.x), y: next.y };
+
+            const m0 = getPchipSlope(prev, curr, next);
+            const m1 = getPchipSlope(curr, next, next_next);
+
+            // 3. Evaluate Cubic Hermite
+            const h = t1 - t0;
+            const t = (tTarget - t0) / h; // 0..1
+
+            return evaluateHermite(t, h, curr.y, next.y, m0, m1);
+        }
+
+        function getPchipSlope(pPrev, pCurr, pNext) {
+            const dt_left = pCurr.x - pPrev.x;
+            const dt_right = pNext.x - pCurr.x;
+
+            if (dt_left === 0 || dt_right === 0) return 0;
+
+            const d_left = (pCurr.y - pPrev.y) / dt_left;
+            const d_right = (pNext.y - pCurr.y) / dt_right;
+
+            // Monotonicity check
+            if (d_left * d_right <= 0) return 0;
+
+            const w1 = 2 * dt_right + dt_left;
+            const w2 = dt_right + 2 * dt_left;
+
+            return (w1 + w2) / (w1 / d_left + w2 / d_right);
+        }
+
+        function evaluateHermite(t, h, y0, y1, m0, m1) {
+            const t2 = t * t;
+            const t3 = t2 * t;
+
+            const h00 = 2 * t3 - 3 * t2 + 1;
+            const h10 = t3 - 2 * t2 + t;
+            const h01 = -2 * t3 + 3 * t2;
+            const h11 = t3 - t2;
+
+            return h00 * y0 + h10 * h * m0 + h01 * y1 + h11 * h * m1;
+        }
+
+        function calculateCurve() {
+            let sorted = [...activePoints].sort((a, b) => a.t - b.t);
+            let X = [], B = [], K = [];
+
+            // Create wrapped context (-1440, 0, 1440)
+            [-1440, 0, 1440].forEach(offset => {
+                sorted.forEach(pt => {
+                    X.push(pt.t + offset);
+                    B.push(pt.b);
+                    K.push(pt.k);
+                });
+            });
+
+            // We scan 0..1440 (97 points)
+            // But strict PCHIP needs strictly increasing X.
+            // Our X array is strictly increasing (-1000... to +...2000)
+
+            let res = { t: [], b: [], k: [] };
+            for (let i = 0; i <= 96; i++) {
+                let t = i * 15;
+                res.t.push(t);
+                // Clamp results
+                res.b.push(Math.max(0, Math.min(100, pchip(t, X, B))));
+                res.k.push(Math.max(2000, Math.min(7000, pchip(t, X, K))));
+            }
+            return res;
+        }
+
+        // --- INIT ---
+        function init() {
+            const commonOpts = {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                // Zero internal padding because we use CSS Padding on wrapper
+                layout: { padding: 0 },
+                scales: {
+                    x: { type: 'linear', min: 0, max: 1440, display: false },
+                    y: {
+                        display: true, position: 'right',
+                        grid: { color: 'rgba(255,255,255,0.05)', drawBorder: false },
+                        ticks: { color: 'rgba(255,255,255,0.3)', font: { family: 'Inter', size: 9 }, padding: 5 }
+                    }
+                },
+                plugins: { legend: false, tooltip: false },
+                elements: { point: { radius: 0 } }
+            };
+
+            const ctxB = document.getElementById('chartB').getContext('2d');
+            chartB = new Chart(ctxB, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        data: [],
+                        borderColor: '#FFD700',
+                        backgroundColor: createGradient(ctxB, '#FFD700'),
+                        fill: true, tension: 0.4, borderWidth: 1.5
+                    }]
+                },
+                options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } } }
+            });
+
+            const ctxK = document.getElementById('chartK').getContext('2d');
+            chartK = new Chart(ctxK, {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        data: [],
+                        borderColor: '#00E5FF',
+                        backgroundColor: createGradient(ctxK, '#00E5FF'),
+                        fill: true, tension: 0.4, borderWidth: 1.5
+                    }]
+                },
+                options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 2000, max: 7000, ...commonOpts.scales.y } } }
+            });
+
+            setPreset('default', document.querySelector('.btn-preset'));
+
+            // Re-calc on resize
+            window.addEventListener('resize', () => {
+                chartB.resize(); chartK.resize();
+                updateUI();
+            });
+        }
+
+        function setPreset(key, btn) {
+            document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+
+            activePoints = JSON.parse(JSON.stringify(PRESETS[key]));
+            rebuildHandles();
+            // Allow Chart to render first, then update UI positions
+            requestAnimationFrame(() => updateUI());
+        }
+
+        // --- HANDLES ---
+        function rebuildHandles() {
+            ['b', 'k'].forEach(type => {
+                const container = document.getElementById(`handles-${type}`);
+                container.innerHTML = '';
+
+                activePoints.forEach(pt => {
+                    const el = document.createElement('div');
+                    el.className = `handle type-${type}`;
+                    el.dataset.id = pt.id;
+
+                    const info = document.createElement('div');
+                    info.className = 'handle-info';
+                    info.innerHTML = `<span class="info-title">${pt.name}</span><span class="info-val">--</span>`;
+                    el.appendChild(info);
+
+                    // Drag Events
+                    el.addEventListener('pointerdown', (e) => {
+                        e.preventDefault();
+                        el.setPointerCapture(e.pointerId);
+
+                        const chart = (type === 'b') ? chartB : chartK;
+                        const layer = document.getElementById(`handles-${type}`);
+                        const rect = layer.getBoundingClientRect();
+
+                        const onMove = (ev) => {
+                            // Calc relative to the Handle Layer (which matches Canvas area)
+                            const mx = ev.clientX - rect.left;
+                            const my = ev.clientY - rect.top;
+
+                            const tVal = chart.scales.x.getValueForPixel(mx);
+                            const yVal = chart.scales.y.getValueForPixel(my);
+
+                            const ptRef = activePoints.find(p => p.id === pt.id);
+                            if (ptRef) {
+                                ptRef.t = Math.round(Math.max(0, Math.min(1440, tVal)));
+
+                                if (type === 'b') {
+                                    ptRef.b = Math.round(Math.max(0, Math.min(100, yVal)));
+                                } else {
+                                    ptRef.k = Math.round(Math.max(2000, Math.min(7000, yVal)));
+                                }
+                            }
+                            updateUI(true);
+                        };
+
+                        const onUp = () => {
+                            window.removeEventListener('pointermove', onMove);
+                            window.removeEventListener('pointerup', onUp);
+                            updateUI(false);
+                        };
+
+                        window.addEventListener('pointermove', onMove);
+                        window.addEventListener('pointerup', onUp);
+                    });
+
+                    container.appendChild(el);
+                });
+            });
+        }
+
+        // --- RENDER ---
+        function updateUI(isDragging = false) {
+            const data = calculateCurve();
+
+            chartB.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.b[i] }));
+            chartK.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.k[i] }));
+
+            chartB.update('none');
+            chartK.update('none');
+
+            activePoints.forEach(pt => {
+                syncHandlePosition(pt, 'b', chartB);
+                syncHandlePosition(pt, 'k', chartK);
+            });
+
+            if (!isDragging || Math.random() > 0.5) drawGradient(data.k);
+        }
+
+        function syncHandlePosition(pt, type, chart) {
+            const el = document.querySelector(`#handles-${type} .handle[data-id="${pt.id}"]`);
+            if (!el) return;
+
+            // Chart.js getPixelForValue returns coordinate relative to Canvas element
+            // Since HandleLayer is exactly on top of Canvas (same inset), this matches perfectly.
+            const xPix = chart.scales.x.getPixelForValue(pt.t);
+            const yVal = (type === 'b') ? pt.b : pt.k;
+            const yPix = chart.scales.y.getPixelForValue(yVal);
+
+            el.style.left = `${xPix}px`;
+            el.style.top = `${yPix}px`;
+
+            const timeStr = minToTime(pt.t);
+            const valStr = (type === 'b') ? `${Math.round(pt.b)}%` : `${Math.round(pt.k)}K`;
+            el.querySelector('.info-val').innerText = `${timeStr} | ${valStr}`;
+        }
+
+        // --- HELPERS ---
+        function minToTime(m) {
+            let h = Math.floor(m / 60); let min = m % 60;
+            return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        }
+
+        function drawGradient(kArr) {
+            const cvs = document.getElementById('colorBar');
+            const ctx = cvs.getContext('2d');
+            const gr = ctx.createLinearGradient(0, 0, cvs.width, 0);
+            for (let i = 0; i < kArr.length; i += 4) {
+                gr.addColorStop(i / (kArr.length - 1), kToRgb(kArr[i]));
+            }
+            ctx.fillStyle = gr; ctx.fillRect(0, 0, cvs.width, cvs.height);
+        }
+
+        function kToRgb(k) {
+            let temp = k / 100; let r, g, b;
+            if (temp <= 66) {
+                r = 255;
+                g = temp <= 66 ? 99.47 * Math.log(temp) - 161.1 : 0;
+                b = temp <= 19 ? 0 : 138.5 * Math.log(temp - 10) - 305.0;
+            } else {
+                r = 329.6 * Math.pow(temp - 60, -0.133);
+                g = 288.1 * Math.pow(temp - 60, -0.075);
+                b = 255;
+            }
+            const c = v => Math.min(255, Math.max(0, Math.floor(v)));
+            return `rgb(${c(r)},${c(g)},${c(b)})`;
+        }
+
+        window.addEventListener('load', init);
+
+    </script>
+</body>
+
+</html>

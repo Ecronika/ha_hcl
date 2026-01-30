@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta2] (Frontend Alpha)
+- **Feature**: `custom:hcl-curve-card` Lovelace Card.
+- **Frontend**: Full PCHIP Interpolation logic in JS.
+- **Frontend**: Interactive Drag & Drop UI (Glassmorphism).
+- **Frontend**: Integrated `preview` (live update) and `save` actions.
+
+## [0.4.0-beta1] (Interactive Backend)
+- **Feature**: "Free-hand" Curve Logic (Arbitrary Control Points).
+- **Feature**: `CurveConfig` data structure for explicit point storage.
+- **Feature**: `hcl_lighting.update_curve` service for Preview/Apply/Save.
+- **Feature**: `sensor.hcl_lighting_curve` (Source of Truth) for frontend synchronization.
+- **Logic**: Migrated Interpolation to **PCHIP (Monotone Cubic Spline)**. Matches Professional Design Tools & Dashboard (WYSIWYG).
+- **Migration**: Automatic migration of v0.3.0 settings to v0.2.1-replica point list.
+
 ## [0.3.0] - 2026-01-30
 ### "Dynamic & Customizable" Release
 

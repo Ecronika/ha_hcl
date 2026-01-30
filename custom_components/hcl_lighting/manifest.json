@@ -5,7 +5,8 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://www.home-assistant.io/",
+  "funding_url": "https://github.com/Ecronika/ha_hcl",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "0.3.0"
+  "version": "0.4.0-beta2"
 }

@@ -53,7 +53,21 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 2. Extract the `custom_components/hcl_lighting` folder to your Home Assistant `custom_components` directory
 3. Restart Home Assistant
 
-## Configuration
+## 🎨 Frontend Installation (v0.4.0+)
+
+The new **Interactive Curve Editor** is a custom Lovelace card.
+
+1.  **Copy Resource**: Ensure `www/hcl_lighting/hcl-curve-card.js` is in your configuration directory.
+2.  **Add Resource**: Go to **Settings > Dashboards > ... > Resources** and add:
+    *   **URL**: `/local/hcl_lighting/hcl-curve-card.js`
+    *   **Type**: JavaScript Module
+3.  **Add Card**: In your dashboard, add a "Manual" card:
+    ```yaml
+    type: 'custom:hcl-curve-card'
+    entity: 'sensor.hcl_lighting_curve'
+    ```
+
+## ⚙️ Configuration
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **Add Integration**
