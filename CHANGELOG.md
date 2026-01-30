@@ -6,52 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.3.0] - 2026-01-30
-### Added
-- **Custom Instance Naming**: Ability to name instances during setup (e.g. "HCL Living Room").
-- **Smart Constraints Logic**: Foundation for future UI updates (documented in v0.4.0 plan).
+### "Dynamic & Customizable" Release
 
-### Fixed
-- **HCL Curve**: Tuned default curve generation to match the popular v0.2.1 profile (Simpler phases, centered Midday Dip).
-- **Brightness Stability**: Resolved "Ping-Pong" brightness updates by strictly preventing `int()` truncation overwrites.
-- **Shared State Bug**: Fixed critical issue where active curve data leaked between instances.
-- **Null Safety**: Improved error handling in `override_manager.py` to prevent crashes on startup.
+This major release empowers users to tailor the HCL curve to their specific daily schedule while improving stability and supporting multiple independent instances.
 
-### Changed
-- **Rounding Logic**: All brightness calculations now use `round()` for consistent percentage-to-byte conversion.
-- **Documentation**: Updated README with "Multiple Instances" guide.
+### 🌟 Major Features
+- **User-Customizable Schedule**:
+    - **Dynamic Anchors**: Define your own `Wake Time`, `Midday (Dip)`, and `Sleep Time`. The curve automatically stretches and adapts to your rhythm.
+    - **Shift Work Support**: Handles schedules that wrap around midnight (e.g., Sleep at 01:00 AM) seamlessly.
+    - **Elastic Intervals**: Intelligent math prevents "impossible" curves if times are set too close together.
+- **Custom Instance Naming**:
+    - Assign unique names (e.g., "HCL Living Room", "HCL Kids") during setup for easier identification in the Device Registry.
+- **Refined Default Curve**:
+    - Tuned the default generation logic to match the popular, natural profile of **v0.2.1**:
+        - **Centered Midday Dip**: The configured "Midday" time is now the lowest point of the dip (4000K).
+        - **Simpler Phases**: Removed complex "Social Evening" offsets in favor of a smooth, linear wind-down.
 
-## [0.3.0-rc3] (Release Candidate 3)
-- **Verified Fix**: Explicitly verified removal of `int()` overwrite in `light_controller.py` to ensure stable brightness logic.
-- **Cleanup**: Added code comments to prevent regression.
-
-## [0.3.0-rc1] (Release Candidate)
-- **Fix**: Resolved "Ping-Pong" brightness updates by enforcing consistent rounding logic in `light_controller.py`.
-- **Note**: This Release Candidate includes all critical fixes from beta6.
-
-## [0.3.0-beta6] (Critical Fixes)
-- **Shared State Fix**: Active curve is now properly isolated per instance (Fixed critical HCLCalculator bug).
-- **Stability**: Added protections against None/TypeError in OverrideManager.
-- **Safety**: Robust float->int conversions in LightController.
-- **Cleanup**: Removed duplicate imports.
-
-## [0.3.0-beta5] (Smooth Midday)
-- **Math**: Extended "Midday Dip" duration to 60m (was 30m) and "Re-Activation" to 120m (was 90m) to ensure brightness change < 1%/min and limit "thunderstorm" effect.
-
-## [0.3.0-beta4] (Spline Tuning)
-- **Improvement**: Softened the Midday Dip to 4400K/65% (was 4000K/50%) for a less aggressive transition.
-- **Improvement**: Added a "Night Clamp" at `Wake - 30m` to keep the room dark until shortly before wake-up.
-
-## [0.3.0-beta3] (Cozy Evening Optimization)
-- **Feature**: Refined Evening Curve with a new "Social Evening" phase (-4h before sleep @ 3800K/60%) for a warmer atmosphere.
-- **Logic**: Adjusted "Wind-Down" phase (-2h before sleep) to be cozier (2700K/30%).
-
-## [0.3.0-beta2] (Stable Dynamic Curves)
-- **Fix**: Added missing translations for configuration options.
-- **Fix**: Implemented "Elastic Interval" logic to prevent overlapped curve sectors and corrected midnight wrapping.
-
-## [0.3.0-beta1] (Dynamic Curves)
-- **Feature**: User-Customizable Curve! You can now define your `Wake Time`, `Social Midday`, and `Sleep Time` in the configuration.
-- **Logic**: The HCL curve is no longer static. It dynamically generates tailored phases (Warm-up, Focus, Dip, Wind-down) based on your schedule.
+### 🛠️ Improvements & Fixes
+- **Stability**:
+    - **Brightness Ping-Pong**: Fixed a rounding issue where brightness would oscillate by ±1%.
+    - **Shared State Isolation**: Critical fix ensuring multiple HCL instances do not leak curve data to each other.
+    - **Null Safety**: Hardened `OverrideManager` against startup race conditions.
+- **Translations**: Added full English and German translations for all new configuration options.
+- **Math**: Improved Midnight wrapping logic to effectively handle day crossings.
 
 ## [0.2.1] - 2026-01-28
 ### "Architecture & Intelligence" Release

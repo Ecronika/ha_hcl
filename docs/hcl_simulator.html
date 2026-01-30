@@ -111,7 +111,7 @@
 <body>
 
     <div class="container">
-        <h1>HCL Lighting Simulator (v0.3.0-beta5 Logic)</h1>
+        <h1>HCL Lighting Simulator (v0.3.0 / v0.2.1 Logic)</h1>
 
         <div class="controls">
             <div class="control-group">
@@ -182,52 +182,32 @@
                 const m_min = this.toMin(middayStr);
                 const s_min = this.toMin(sleepStr);
 
-                // --- Elastic Logic Port ---
-                const dur_wake_to_midday = this.getDuration(w_min, m_min);
-                const dur_midday_to_sleep = this.getDuration(m_min, s_min);
+                // --- v0.2.1 Standard Logic Port (Simplified) ---
+                // No complex elastic offsets - just simple relative points.
 
-                const DEFAULT_WAKE_PEAK_OFFSET = 120; // +2h
-                const DEFAULT_MIDDAY_PRE_OFFSET = 30; // -30m
-
-                // Wake Sector Elasticity
-                const needed_wm = DEFAULT_WAKE_PEAK_OFFSET + DEFAULT_MIDDAY_PRE_OFFSET;
-                let factor_wm = 1.0;
-                if (dur_wake_to_midday < needed_wm + 30) {
-                    factor_wm = dur_wake_to_midday / (needed_wm + 30);
-                }
-
-                const wake_peak_off = Math.floor(DEFAULT_WAKE_PEAK_OFFSET * factor_wm);
-                const midday_pre_off = Math.floor(DEFAULT_MIDDAY_PRE_OFFSET * factor_wm);
-
-                // Midday Sector Elasticity
-                const needed_ms = 120 + 240; // Re-Act(120) + SocialEve(240)
-                let factor_ms = 1.0;
-                if (dur_midday_to_sleep < needed_ms + 30) {
-                    factor_ms = dur_midday_to_sleep / (needed_ms + 30);
-                }
-
-                const midday_dip_off = Math.floor(60 * factor_ms);
-                const midday_post_off = Math.floor(120 * factor_ms);
-                const social_evening_off = Math.floor(240 * factor_ms);
-                const wind_down_off = Math.floor(120 * factor_ms);
+                const wake_peak_off = 120; // +2h
 
                 // Construct Points (Minute, Kelvin, Brightness)
+                // Exactly matching hcl_math.py v0.3.0 final
                 let points = [
-                    [w_min - 30, 2200, 10],             // Pre-Wake Clamp
-                    [w_min, 2700, 30],                  // Wake Up
-                    [w_min + wake_peak_off, 6500, 100], // Full Activation
+                    // Wake Sector
+                    [w_min, 2700, 30],                  // Wake Up (Start)
+                    [w_min + wake_peak_off, 6500, 100], // Full Activation (+2h)
 
-                    [m_min - midday_pre_off, 6500, 100],// Pre-Lunch Peak
-                    [m_min, 5000, 80],                  // Lunch Start
-                    [m_min + midday_dip_off, 4000, 50], // Dip (Extended 60m)
-                    [m_min + midday_post_off, 6000, 75],// Re-Activation (Extended 120m)
+                    // Midday Sector
+                    // Midday IS the dip
+                    [m_min - 30, 6500, 100],            // Pre-Dip Peak (-30m)
+                    [m_min, 4000, 50],                  // Midday Dip (Target Time)
+                    [m_min + 60, 6500, 100],            // Re-Activation (+60m)
 
-                    [s_min - social_evening_off, 3800, 60], // Social Evening
-                    [s_min - wind_down_off, 2700, 30],      // Wind Down
-                    [s_min, 2200, 10]                       // Bedtime
+                    // Sleep Sector
+                    // Standard Wind-Down
+                    [s_min - 120, 2700, 30],            // Wind-Down Start (-2h)
+                    [s_min, 2200, 10],                  // Bedtime
                 ];
 
                 // Add Anchors for 0 and 1440 (Virtual Midnight)
+                // Just to help the spline close the loop
                 points.push([0, 2200, 10]);
                 points.push([1440, 2200, 10]);
 
