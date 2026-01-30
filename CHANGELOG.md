@@ -5,11 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.0-rc3] (Release Candidate 3)
-- **Feature**: Added ability to name HCL instances during setup (e.g. "HCL Living Room").
-- **UX**: Device Registry now reflects the custom instance name.
+## [0.3.0] - 2026-01-30
+### Added
+- **Custom Instance Naming**: Ability to name instances during setup (e.g. "HCL Living Room").
+- **Smart Constraints Logic**: Foundation for future UI updates (documented in v0.4.0 plan).
 
-## [0.3.0-rc2] (Release Candidate 2)
+### Fixed
+- **HCL Curve**: Tuned default curve generation to match the popular v0.2.1 profile (Simpler phases, centered Midday Dip).
+- **Brightness Stability**: Resolved "Ping-Pong" brightness updates by strictly preventing `int()` truncation overwrites.
+- **Shared State Bug**: Fixed critical issue where active curve data leaked between instances.
+- **Null Safety**: Improved error handling in `override_manager.py` to prevent crashes on startup.
+
+### Changed
+- **Rounding Logic**: All brightness calculations now use `round()` for consistent percentage-to-byte conversion.
+- **Documentation**: Updated README with "Multiple Instances" guide.
+
+## [0.3.0-rc3] (Release Candidate 3)
 - **Verified Fix**: Explicitly verified removal of `int()` overwrite in `light_controller.py` to ensure stable brightness logic.
 - **Cleanup**: Added code comments to prevent regression.
 

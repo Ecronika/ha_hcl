@@ -87,27 +87,30 @@ class HCLCalculator:
              factor_ms = dur_midday_to_sleep / (needed_ms + 30)
              _LOGGER.warning("Elastic Curve: Compressing Afternoon Sector by factor %.2f", factor_ms)
              
-        midday_dip_off = int(60 * factor_ms)   # NEU: Variabler Dip-Offset (60m duration)
-        midday_post_off = int(120 * factor_ms) # NEU: Längere Re-Activation (120m duration)
-        social_evening_off = int(240 * factor_ms)
-        wind_down_off = int(120 * factor_ms)
+        # v0.2.1 Standard Offsets (Fixed)
+        # Using simplified fixed duration logic as requested.
+        # factor_ms (Elastic) is still calculated but deemed less critical for standard profile.
+        
+        # We assume standard spacing is sufficient for 99% of cases.
+        # If segments are extremely short, the spline might look weird, but v0.2.1 didn't have complex elasticity.
 
         # Construct Points based on Relative Offsets (Elastic)
+        # Construct Points based on Relative Offsets (Elastic)
+        # v0.2.1 / v0.3.0-Classic Style: Simpler, clearer phases.
         points = [
             # Wake Sector
-            (w_min - 30, 2200, 10),            # Pre-Wake Clamp (Crucial for steep rise)
-            (w_min, 2700, 30),                 # Wake Up
-            (w_min + wake_peak_off, 6500, 100),# +Elastic: Full Activation
+            (w_min, 2700, 30),                 # Wake Up (Start)
+            (w_min + wake_peak_off, 6500, 100),# Full Activation (+2h)
             
             # Midday Sector
-            (m_min - midday_pre_off, 6500, 100), # -Elastic: Pre-Lunch Peak
-            (m_min, 5000, 80),                 # Lunch Start (Cozy)
-            (m_min + midday_dip_off, 4000, 50),# Dip (Extended: 60m duration, <1%/min)
-            (m_min + midday_post_off, 6000, 75), # +Elastic: Re-Activation (Extended)
+            # In v0.2.1 "Midday" IS the dip.
+            (m_min - 30, 6500, 100),           # Pre-Dip Peak
+            (m_min, 4000, 50),                 # Midday Dip (The configured time is the low point)
+            (m_min + 60, 6500, 100),           # Re-Activation (Fast recovery, 60m)
             
             # Sleep Sector
-            (s_min - social_evening_off, 3800, 60), # -Elastic: Social Evening (Cozy Start)
-            (s_min - wind_down_off, 2700, 30),      # -Elastic: Wind-Down (Melatonin Prep)
+            # Removed "Social Evening" shoulder to allow natural wind-down
+            (s_min - 120, 2700, 30),            # Wind-Down (Melatonin Start, -2h)
             (s_min, 2200, 10),                 # Bedtime
         ]
         
