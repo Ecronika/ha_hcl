@@ -2,6 +2,13 @@ update_curve:
   name: Update Curve
   description: Update the HCL control points (used by Frontend UI).
   fields:
+    entity_id:
+      name: Entity
+      description: The HCL Switch or Sensor entity.
+      required: true
+      selector:
+        entity:
+          integration: hcl_lighting
     points:
       name: Control Points
       description: List of control points [{t, b, k}].

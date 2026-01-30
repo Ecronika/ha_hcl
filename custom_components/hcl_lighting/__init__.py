@@ -62,6 +62,63 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     entry.async_on_unload(entry.add_update_listener(update_listener))
     
+    # Register Global Service
+    async def async_update_curve_service(call):
+        """Handle global update_curve service."""
+        _LOGGER.debug(f"Service update_curve called (data={call.data})")
+        points = call.data.get("points")
+        mode = call.data.get("mode", "preview")
+        entity_id = call.data.get("entity_id")
+        
+        if not entity_id:
+            _LOGGER.error("update_curve called without entity_id")
+            return
+            
+        # Resolve Entry ID from Entity ID
+        # Support both switch.hcl_lighting and sensor.hcl_lighting_curve
+        ent_reg = hass.helpers.entity_registry.async_get(hass)
+        entity_entry = ent_reg.async_get(entity_id)
+        
+        if not entity_entry:
+             # Fallback: Try to find config entry if only one exists?
+             # But entity_id is provided by UI
+             _LOGGER.error(f"Entity not found: {entity_id}")
+             return
+             
+        entry_id = entity_entry.config_entry_id
+        if not entry_id or entry_id not in hass.data[DOMAIN]:
+             _LOGGER.error(f"Config Entry not found for entity: {entity_id}")
+             return
+        
+        hcl_calc: HCLCalculator = hass.data[DOMAIN][entry_id]
+        
+        # 1. Update In-Memory Calculator
+        if points:
+            hcl_calc.calculate_curve_from_points(points)
+            
+        # 2. Handle Save
+        if mode == "save":
+            config_entry = hass.config_entries.async_get_entry(entry_id)
+            new_options = {**config_entry.options}
+            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+            await hass.config_entries.async_update_entry(config_entry, options=new_options)
+            return
+
+        # 3. Notify Updates (Preview/Apply)
+        from homeassistant.helpers.dispatcher import async_dispatcher_send
+        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+        
+        # Trigger Switch Update if 'apply'
+        if mode == "apply":
+            # We need to find the switch entity for this entry to trigger logic
+            # Or just signal the switch to update?
+            # switch listens to the dispatcher? No, switch usually just runs loop or listens to state.
+            # But we can dispatch a "force_update" signal.
+            pass # Currently implemented in switch.py as dispatcher listener? No.
+            # Ideally the switch should subscribe to this update too.
+
+    hass.services.async_register(DOMAIN, "update_curve", async_update_curve_service)
+
     return True
 
 from homeassistant.components.http import StaticPathConfig

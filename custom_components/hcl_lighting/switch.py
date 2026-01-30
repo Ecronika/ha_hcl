@@ -61,18 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     
     async_add_entities([switch])
 
-    # Register Service
-    platform = async_get_current_platform()
-    
-    platform.async_register_entity_service(
-        SERVICE_UPDATE_CURVE,
-        {
-            vol.Required("points"): list, # List of dicts
-            vol.Optional("mode", default="preview"): vol.In(["preview", "apply", "save"]),
-            vol.Optional("drive_lights", default=False): bool,
-        },
-        "async_update_curve_service"
-    )
+    # Service is now registered globally in __init__.py
 
 class HCLSwitch(RestoreEntity, SwitchEntity):
     """Representation of a HCL Lighting Switch."""
@@ -149,41 +138,20 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             await self._update_hcl() # Trigger immediate update with new curve
         self.async_write_ha_state() # Ensure UI updates if needed
 
-    async def async_update_curve_service(self, points: list, mode: str = "preview", drive_lights: bool = False):
-        """Handle update_curve service call."""
-        _LOGGER.debug(f"Service update_curve called (mode={mode}, points={len(points)})")
-        
-        # 1. Update In-Memory Calculator (Source of Truth for Sensor)
-        # Assuming points are list of dicts {t, b, k}
-        self.hcl_calc.calculate_curve_from_points(points)
-        
-        # 2. Mode Handling
-        if mode == "save":
-            # Persist to Options -> Will trigger reload
-            new_options = {**self._entry.options}
-            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
-            
-            await self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-            # Return early as reload will happen
-            return
+        # Subscribe to global updates (from service)
+        from homeassistant.helpers.dispatcher import async_dispatcher_connect
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, 
+                f"{DOMAIN}_{self._entry.entry_id}_update",
+                self._handle_global_update
+            )
+        )
 
-        elif mode == "apply":
-            # Force Light Update
-            if self._is_on:
-                await self._update_hcl()
-        
-        # Preview mode just updates the calculator, 
-        # which informs the Sensor (via callback or polling? Sensor needs to know).
-        # We need to notify the sensor to update its state.
-        # But wait, Sensor is separate entity.
-        # Ideally HCLCalculator emits an event, or we interact with the sensor entity.
-        # Or simpler: The Sensor just exposes `hcl_calc.active_curve`.
-        # We need to tell Home Assistant that the Sensor state has changed.
-        # We can fire an event `hcl_lighting_curve_updated`?
-        # Or async_dispatcher_send?
-        
-        from homeassistant.helpers.dispatcher import async_dispatcher_send
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
+    @callback
+    def _handle_global_update(self):
+        """Handle global update signal (e.g. from Preview/Apply)."""
+        self.hass.async_create_task(self._update_hcl())
 
     @property
     def is_on(self) -> bool:

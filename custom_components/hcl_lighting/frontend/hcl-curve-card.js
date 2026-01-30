@@ -250,6 +250,7 @@ class HCLCurveCard extends HTMLElement {
         if (this._debouncer) clearTimeout(this._debouncer);
         this._debouncer = setTimeout(() => {
             this._hass.callService('hcl_lighting', 'update_curve', {
+                entity_id: this.config.entity,
                 points: this._points,
                 mode: 'preview'
             });
@@ -258,6 +259,7 @@ class HCLCurveCard extends HTMLElement {
 
     _saveCurve() {
         this._hass.callService('hcl_lighting', 'update_curve', {
+            entity_id: this.config.entity,
             points: this._points,
             mode: 'save'
         });
