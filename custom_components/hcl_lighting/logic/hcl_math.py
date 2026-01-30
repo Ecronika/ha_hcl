@@ -97,7 +97,8 @@ class HCLCalculator:
         seen = set()
         for p in sorted_points:
             if p['t'] not in seen:
-                 unique_points.append((p['t'], p['k'], p['b']))
+                 # Store as internal DICT for frontend compatibility + readability
+                 unique_points.append({"t": p['t'], "k": p['k'], "b": p['b']})
                  seen.add(p['t'])
         
         self.active_curve = unique_points
@@ -195,6 +196,18 @@ class HCLCalculator:
         if not points:
             return min_brightness, 2700
 
+        # Guard: Need at least 2 points for PCHIP
+        if len(points) < 2:
+            # Fallback to single point value or default
+            val = points[0]
+            # Use clamping logic for result
+            b = max(1, min(100, val['b']))
+            k = max(2000, min(7000, val['k']))
+            
+            # Apply user bounds to brightness
+            out_b = max(min_brightness, min(max_brightness, b))
+            return out_b, k
+
         # PCHIP requires context of the whole curve or at least neighbors.
         # Since we have relatively few points (e.g. 10-20), we can just PCHIP the whole 24h cycle
         # effectively or find the segment + slopes.
@@ -207,7 +220,7 @@ class HCLCalculator:
         
         # Check normal segments
         for i in range(len(points) - 1):
-            if points[i][0] <= current_minutes < points[i+1][0]:
+            if points[i]['t'] <= current_minutes < points[i+1]['t']:
                 idx = i
                 break
         
@@ -228,10 +241,10 @@ class HCLCalculator:
         
         # Calculate slope at Current Point (idx) using (idx-1, idx, idx+1)
         # Times relative to curr_pt
-        t_prev_rel = prev_pt[0] - curr_pt[0]
+        t_prev_rel = prev_pt['t'] - curr_pt['t']
         if t_prev_rel >= 0: t_prev_rel -= 1440 # Previous is in past
         
-        t_next_rel = next_pt[0] - curr_pt[0]
+        t_next_rel = next_pt['t'] - curr_pt['t']
         if t_next_rel <= 0: t_next_rel += 1440 # Next is in future
         
         # Calculate slope pairs
@@ -242,46 +255,42 @@ class HCLCalculator:
         def safe_div(n, d): return n / d if d != 0 else 0
         
         # Kelvin Slopes
-        dk_0 = safe_div(curr_pt[1] - prev_pt[1], -t_prev_rel) # Note: t_prev_rel is negative, so diff is 0 - t_prev
-        dk_0_raw = safe_div(curr_pt[1] - prev_pt[1], 0 - t_prev_rel) 
-        # Wait, simple: d_Left = (y_curr - y_prev) / (t_curr - t_prev)
-        
         # Let's standardize input for _pchip_slope
         
         # Slope at Current Point
         mk_curr = self._pchip_slope(
-            prev_pt[0], prev_pt[1], 
-            curr_pt[0], curr_pt[1], 
-            next_pt[0], next_pt[1]
+            prev_pt['t'], prev_pt['k'], 
+            curr_pt['t'], curr_pt['k'], 
+            next_pt['t'], next_pt['k']
         )
         mb_curr = self._pchip_slope(
-            prev_pt[0], prev_pt[2], 
-            curr_pt[0], curr_pt[2], 
-            next_pt[0], next_pt[2]
+            prev_pt['t'], prev_pt['b'], 
+            curr_pt['t'], curr_pt['b'], 
+            next_pt['t'], next_pt['b']
         )
 
         # Slope at Next Point (idx+1)
         mk_next = self._pchip_slope(
-            curr_pt[0], curr_pt[1], 
-            next_pt[0], next_pt[1], 
-            next_next_pt[0], next_next_pt[1]
+            curr_pt['t'], curr_pt['k'], 
+            next_pt['t'], next_pt['k'], 
+            next_next_pt['t'], next_next_pt['k']
         )
         mb_next = self._pchip_slope(
-            curr_pt[0], curr_pt[2], 
-            next_pt[0], next_pt[2], 
-            next_next_pt[0], next_next_pt[2]
+            curr_pt['t'], curr_pt['b'], 
+            next_pt['t'], next_pt['b'], 
+            next_next_pt['t'], next_next_pt['b']
         )
 
         # 3. Cubic Hermite Interpolation using PCHIP slopes
         # Valid for interval [curr_pt, next_pt]
         
         # Normalized Time t (0..1)
-        t0 = curr_pt[0]
-        t1 = next_pt[0]
+        t0 = curr_pt['t']
+        t1 = next_pt['t']
         dt = t1 - t0
         if dt < 0: dt += 1440
         
-        if dt == 0: return curr_pt[2], curr_pt[1] # Fail safe
+        if dt == 0: return curr_pt['b'], curr_pt['k'] # Fail safe
 
         # Current time relative to t0
         dist = current_minutes - t0
@@ -290,8 +299,8 @@ class HCLCalculator:
         t = dist / dt
         
         # Evaluate
-        kelvin = self._evaluate_hermite(t, dt, curr_pt[1], next_pt[1], mk_curr, mk_next)
-        brightness = self._evaluate_hermite(t, dt, curr_pt[2], next_pt[2], mb_curr, mb_next)
+        kelvin = self._evaluate_hermite(t, dt, curr_pt['k'], next_pt['k'], mk_curr, mk_next)
+        brightness = self._evaluate_hermite(t, dt, curr_pt['b'], next_pt['b'], mb_curr, mb_next)
         
         # 4. Clamp Results
         # Clamping (WYSIWYG)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -71,24 +72,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entity_id = call.data.get("entity_id")
         
         if not entity_id:
-            _LOGGER.error("update_curve called without entity_id")
-            return
+            raise HomeAssistantError("update_curve called without entity_id")
             
         # Resolve Entry ID from Entity ID
-        # Support both switch.hcl_lighting and sensor.hcl_lighting_curve
-        ent_reg = hass.helpers.entity_registry.async_get(hass)
+        ent_reg = er.async_get(hass)
         entity_entry = ent_reg.async_get(entity_id)
         
         if not entity_entry:
-             # Fallback: Try to find config entry if only one exists?
-             # But entity_id is provided by UI
-             _LOGGER.error(f"Entity not found: {entity_id}")
-             return
+             raise HomeAssistantError(f"Entity not found: {entity_id}")
              
         entry_id = entity_entry.config_entry_id
-        if not entry_id or entry_id not in hass.data[DOMAIN]:
-             _LOGGER.error(f"Config Entry not found for entity: {entity_id}")
-             return
+        if not entry_id:
+             raise HomeAssistantError(f"Entity {entity_id} is not linked to a Config Entry.")
+
+        if entry_id not in hass.data[DOMAIN]:
+             raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
         
         hcl_calc: HCLCalculator = hass.data[DOMAIN][entry_id]
         
@@ -122,6 +120,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.helpers import entity_registry as er
 
 async def _async_register_lovelace_resource(hass: HomeAssistant):
     """Register the Lovelace card resource if not already present."""

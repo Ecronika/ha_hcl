@@ -294,8 +294,14 @@ class HCLLightController:
 
         # 4. Attribute Validation (NO CACHE if invalid)
         supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
-        # Type safety check
-        if supported_modes and not isinstance(supported_modes, (list, tuple)):
+        
+        # Explicit None Check
+        if supported_modes is None:
+             _LOGGER.debug("Entity %s has no 'supported_color_modes'", entity_id)
+             return "onoff"
+
+        # Type safety: ensure iterable
+        if not isinstance(supported_modes, (list, tuple)):
              _LOGGER.warning("Entity %s has invalid supported_color_modes type: %s", entity_id, type(supported_modes))
              return "onoff"
         
@@ -367,8 +373,11 @@ class HCLLightController:
         """Calculate capability without caching (for unsafe states)."""
         supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
         
+        if supported_modes is None:
+            return "onoff"
+        
         # Type safety: ensure iterable
-        if supported_modes and not isinstance(supported_modes, (list, tuple)):
+        if not isinstance(supported_modes, (list, tuple)):
             # Invalid type (e.g. string) -> onoff
             return "onoff"
 

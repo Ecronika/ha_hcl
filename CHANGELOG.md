@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta10] (Stability Hardening)
+- **Fix**: Prevents "ZeroDivisionError" crash in PCHIP if fewer than 2 control points exist.
+- **Fix**: Resolves critical "Dispatcher Leak" causing multiple redundant update cycles per save.
+- **Fix**: Ensures "Update Curve" service raises visible errors in UI if Entity/Config is invalid.
+- **Improved**: Hardened `light_controller` against invalid `supported_color_modes` (NoneType).
+
+## [0.4.0-beta9] (Release Candidate Fixes)
+- **Fix**: Backend now stores Control Points as Dicts (not Tuples), fixing "Points at 0,0" bug in Frontend.
+- **Fix**: Corrected API call `hass.helpers.entity_registry.async_get` -> `er.async_get` in Service.
+
 ## [0.4.0-beta8] (Hotfix: Service Resolution)
 - **Fix**: Card now sends `entity_id` to `update_curve` service.
 - **Fix**: Service `update_curve` is now a Global Service (accepting Switch or Sensor entity) to resolve the correct config entry.

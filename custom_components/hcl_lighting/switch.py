@@ -106,6 +106,16 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 self._is_on = True
                 await self.async_turn_on()
 
+        # Subscribe to global updates (from service)
+        from homeassistant.helpers.dispatcher import async_dispatcher_connect
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, 
+                f"{DOMAIN}_{self._entry.entry_id}_update",
+                self._handle_global_update
+            )
+        )
+
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
         self._is_on = False # Prevent further updates
@@ -117,36 +127,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
 
-    async def async_options_updated(self, entry: ConfigEntry) -> None:
-        """Handle options update."""
-        _LOGGER.debug("HCL Switch options updated. Re-evaluating targets.")
-        self._entry = entry # Update the entry reference
-        
-        # Regenerate Curve (Check for new config or legacy)
-        curve_config = entry.options.get(CONF_CURVE_CONFIG)
-        if curve_config:
-             self.hcl_calc.generate_curve_from_config(curve_config)
-        else:
-             wake = entry.options.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)
-             midday = entry.options.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)
-             sleep = entry.options.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)
-             self.hcl_calc.generate_curve(wake, midday, sleep)
-        
-        # Re-resolve targets immediately if the switch is on
-        if self._is_on:
-            await self._re_evaluate_targets_and_listeners()
-            await self._update_hcl() # Trigger immediate update with new curve
-        self.async_write_ha_state() # Ensure UI updates if needed
-
-        # Subscribe to global updates (from service)
-        from homeassistant.helpers.dispatcher import async_dispatcher_connect
-        self.async_on_remove(
-            async_dispatcher_connect(
-                self.hass, 
-                f"{DOMAIN}_{self._entry.entry_id}_update",
-                self._handle_global_update
-            )
-        )
+    # async_options_updated is handled by reload in __init__.py
 
     @callback
     def _handle_global_update(self):
