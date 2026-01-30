@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta4] (Self-Contained)
+- **Refactor**: Frontend assets now served internally via `/hcl_lighting_static/`.
+- **UX**: No longer requires manual file copying to `www/`. Fully self-contained integration.
+
 ## [0.4.0-beta3] (Auto-Registration)
 - **Feature**: Auto-register `hcl-curve-card.js` as Lovelace Resource on startup.
 - **UX**: Eliminates manual installation step for Dashboard Card.

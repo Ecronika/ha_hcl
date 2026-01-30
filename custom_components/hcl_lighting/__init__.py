@@ -66,12 +66,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def _async_register_lovelace_resource(hass: HomeAssistant):
     """Register the Lovelace card resource if not already present."""
+    # 1. Register Static Path
+    # This maps /hcl_lighting_static/ -> custom_components/hcl_lighting/frontend/
+    # We do this every setup to ensure it works even after restarts
+    path = hass.config.path("custom_components/hcl_lighting/frontend")
+    hass.http.register_static_path("/hcl_lighting_static", path, cache_headers=False)
+    
+    # 2. Register Lovelace Resource
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
     
-    URL = "/local/hcl_lighting/hcl-curve-card.js"
+    URL = "/hcl_lighting_static/hcl-curve-card.js"
     
-    # We need to access the Lovelace resources collection
-    # Only if Lovelace maps are loaded
     if "lovelace" not in hass.data:
         return
 
@@ -83,6 +88,13 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     for resource in resources.async_items():
         if resource["url"] == URL:
             return
+            
+    # Clean up old /local/ path if it exists
+    OLD_URL = "/local/hcl_lighting/hcl-curve-card.js"
+    for resource in resources.async_items():
+        if resource["url"] == OLD_URL:
+            _LOGGER.info("Removing old HCL Curve Card resource: %s", OLD_URL)
+            await resources.async_delete_item(resource["id"])
 
     _LOGGER.info("Auto-registering HCL Curve Card resource: %s", URL)
     try:
