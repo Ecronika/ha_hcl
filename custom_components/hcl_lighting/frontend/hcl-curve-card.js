@@ -41,17 +41,33 @@ class HCLCurveCard extends HTMLElement {
     }
 
     async connectedCallback() {
-        // Load Chart.js if needed
         if (!window.Chart) {
             await import('https://cdn.jsdelivr.net/npm/chart.js');
         }
         this.render();
         this._initialized = true;
 
-        // Delay calculation until layout is stable
-        requestAnimationFrame(() => {
-            this._refreshCharts();
+        // Neu: ResizeObserver überwacht die tatsächliche Größe der Karte
+        this._resizeObserver = new ResizeObserver(() => {
+            if (this._initialized && !this._isDragging) {
+                this._updateVisuals();
+            }
         });
+
+        const container = this.shadowRoot.querySelector('.charts-container');
+        if (container) {
+            this._resizeObserver.observe(container);
+        }
+
+        // Initialer Render-Versuch
+        requestAnimationFrame(() => this._refreshCharts());
+    }
+
+    // Neu: Cleanup beim Entfernen der Karte
+    disconnectedCallback() {
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+        }
     }
 
     render() {

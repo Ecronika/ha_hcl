@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta12] (Robust Layout Fix)
+- **Fix**: Implemented `ResizeObserver` in Frontend Card. Handles now correctly reposition when the card resizes or loads in a dynamic dashboard (fixing the "0,0" bug robustly).
+
 ## [0.4.0-beta11] (Save & Render Fixes)
 - **Fix**: Removed invalid `await` from `async_update_entry` which caused "bool object not awaitable" errors during Save.
 - **Fix**: Frontend now waits for layout (requestAnimationFrame) before calculating initial handle positions, fixing handles appearing at (0,0).
