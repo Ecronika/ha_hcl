@@ -64,6 +64,20 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
    - **Maximum Brightness**: Highest brightness level (default: 100%)
    - **Smart Transition Mode**: Enable for better compatibility with some lights (default: disabled)
 
+## Multiple Areas / Instances
+
+You can create **multiple independent HCL instances** to control different areas with different schedules (e.g. "Living Room" vs "Home Office" or "Shift Work" vs "Normal").
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **Add Integration** again
+3. Select **HCL Lighting**
+4. Configure the new instance with its own:
+   - **Target Lights**: Select the lights for this specific zone
+   - **Schedule**: Define unique Wake/Sleep times for this area
+   - **Brightness Limits**: Set appropriate min/max brightness
+
+Each instance creates its own Switch entity (e.g., `switch.hcl_lighting_living_room`, `switch.hcl_lighting_office`) which can be toggled independently.
+
 ## Usage
 
 Once configured, the integration creates a switch entity:
