@@ -64,13 +64,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     return True
 
+from homeassistant.components.http import StaticPathConfig
+
 async def _async_register_lovelace_resource(hass: HomeAssistant):
     """Register the Lovelace card resource if not already present."""
     # 1. Register Static Path
     # This maps /hcl_lighting_static/ -> custom_components/hcl_lighting/frontend/
-    # We do this every setup to ensure it works even after restarts
     path = hass.config.path("custom_components/hcl_lighting/frontend")
-    hass.http.register_static_path("/hcl_lighting_static", path, cache_headers=False)
+    
+    await hass.http.async_register_static_paths([
+        StaticPathConfig(
+            url_path="/hcl_lighting_static",
+            path=path,
+            cache_headers=False
+        )
+    ])
     
     # 2. Register Lovelace Resource
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
