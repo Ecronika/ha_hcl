@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc3] (Mobile UX Polish)
+- **UX**: **Scrolling Fix**. Enabled scrolling on chart backgrounds, restricted `touch-action: none` only to handles.
+- **UX**: **Better Touch Targets**. Increased handle hit-area using pseudo-elements for easier grabbing on mobile.
+
 ## [0.4.0-rc2] (Dependency Hardening)
 - **Security**: **Local Chart.js**. Replaced external CDN dependency with local `chart.js` bundle to ensure offline functionality and stability.
 - **Perf**: **Drag Throttling**. Implemented `requestAnimationFrame` throttling for drag operations to reduce layout thrashing on lower-end devices.

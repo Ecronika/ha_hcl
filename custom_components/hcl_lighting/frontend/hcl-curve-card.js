@@ -278,7 +278,7 @@ class HCLCurveCard extends HTMLElement {
               display: grid;
               grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
               gap: 20px;
-              touch-action: none;
+              /* touch-action: none; Removed to allow scrolling on background */
           }
           .chart-wrapper {
               position: relative;
@@ -318,6 +318,13 @@ class HCLCurveCard extends HTMLElement {
               pointer-events: auto;
               z-index: 10;
               transition: width 0.1s, height 0.1s;
+              touch-action: none; /* Only disable scroll on handles */
+          }
+          /* Increase Hit Area for Touch */
+          .handle::after {
+              content: '';
+              position: absolute;
+              top: -10px; right: -10px; bottom: -10px; left: -10px;
           }
           .handle:hover { transform: translate(-50%, -50%) scale(1.3); }
           .handle:active { cursor: grabbing; }
