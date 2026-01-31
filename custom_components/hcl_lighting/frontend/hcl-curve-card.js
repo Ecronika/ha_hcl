@@ -11,6 +11,19 @@ class HCLCurveCard extends HTMLElement {
         // Cache für JSON String um unnötige Cycles zu sparen
         this._lastPointsJSON = "";
 
+        // Validator State
+        this._validationResult = { errors: [], warnings: [] };
+
+        // Settings for Validation
+        this._valSettings = {
+            nightStart: 1320, // 22:00
+            nightEnd: 360,    // 06:00
+            minDailyPeakDuration: 240, // 4 hours
+            maxSlopeB: 2.0,   // % per min
+            maxSlopeK: 100,   // K per min
+            windDownDuration: 180 // 3 hours
+        };
+
         // Presets: Scientifically inspired 12-point profiles
         // T: Minutes, B: Brightness (%), K: Kelvin
         this._presets = {
@@ -53,16 +66,16 @@ class HCLCurveCard extends HTMLElement {
             "relax": [
                 { t: 480, b: 20, k: 2200 }, // 08:00 Slow Start
                 { t: 600, b: 50, k: 3000 }, // 10:00
-                { t: 720, b: 70, k: 4000 }, // 12:00 Max "Daylight" (Neutral)
-                { t: 840, b: 70, k: 4000 }, // 14:00
-                { t: 960, b: 50, k: 3000 }, // 16:00 Tea Time
+                { t: 720, b: 71, k: 5001 }, // 12:00 Max "Daylight" (Neutral)
+                { t: 840, b: 71, k: 5001 }, // 14:00
+                { t: 960, b: 70, k: 5001 }, // 16:00 Tea Time
                 { t: 1080, b: 40, k: 2700 }, // 18:00
                 { t: 1200, b: 30, k: 2200 }, // 20:00
                 { t: 1260, b: 20, k: 2000 }, // 21:00 Fireplace
                 { t: 1320, b: 10, k: 2000 }, // 22:00
                 { t: 1439, b: 5, k: 2000 },
                 { t: 0, b: 5, k: 2000 },
-                { t: 300, b: 10, k: 2000 }
+                { t: 315, b: 10, k: 2000 }
             ],
 
             // 4. EARLY BIRD: Default shifted -90 Minutes
@@ -111,11 +124,16 @@ class HCLCurveCard extends HTMLElement {
             if (!this._isDragging) {
                 // Optimization: Referenz-Check zuerst, falls HA das Objekt cached
                 const rawPoints = stateObj.attributes.control_points;
+
+                // PERFORMANCE FIX: Check reference equality first
+                if (this._rawPointsRef === rawPoints) return;
+
                 const newPointsJSON = JSON.stringify(rawPoints);
 
                 if (this._lastPointsJSON !== newPointsJSON) {
                     this._points = JSON.parse(newPointsJSON);
                     this._lastPointsJSON = newPointsJSON;
+                    this._rawPointsRef = rawPoints; // Cache Ref
                     this._refreshCharts();
                 }
             }
@@ -175,6 +193,10 @@ class HCLCurveCard extends HTMLElement {
         if (this._resizeObserver) {
             this._resizeObserver.disconnect();
         }
+        // STABILITY FIX: Destroy charts to prevent memory leaks
+        if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
+        if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
+        this._initialized = false;
     }
 
     render() {
@@ -201,8 +223,25 @@ class HCLCurveCard extends HTMLElement {
               overflow: hidden;
               color: var(--text-main);
               padding-bottom: 16px;
+              padding-bottom: 16px;
+              position: relative; /* Anchor for absolute overlay */
           }
-          .card-header {
+          /* Overlay Validation Messages */
+          #validation-area {
+              position: absolute;
+              top: 76px; /* Below header */
+              left: 24px; right: 24px;
+              z-index: 20;
+              pointer-events: none; /* Let clicks pass through to charts */
+              display: flex;
+              flex-direction: column;
+              gap: 4px;
+          }
+          #validation-area > div {
+              pointer-events: auto; /* Re-enable clicks on messages */
+              box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+              backdrop-filter: blur(4px);
+          }
               padding: 20px 24px;
               display: flex;
               justify-content: space-between;
@@ -313,7 +352,8 @@ class HCLCurveCard extends HTMLElement {
               position: absolute;
               width: 12px; height: 12px;
               border-radius: 50%;
-              transform: translate(-50%, -50%);
+              /* transform: translate(-50%, -50%); REMOVED for GPU Drag Performance */
+              margin-left: -6px; margin-top: -6px; /* Centering replacement */
               cursor: grab;
               pointer-events: auto;
               z-index: 10;
@@ -373,13 +413,18 @@ class HCLCurveCard extends HTMLElement {
                  </select>
              </div>
              <div class="controls-row">
-                <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
+                <button id="btn-sanitize" title="Fix sorting/duplicates" style="display:none;">FIX</button>
+                 <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
                 <button id="btn-test" title="Apply without saving">TEST</button>
                 <button id="btn-save" title="Save to disk" style="border-color:var(--accent-blue); color:var(--accent-blue);">SAVE</button>
              </div>
           </div>
 
-          <div class="charts-container">
+          <!-- Validation Messages -->
+                      <!-- Validation Messages (Overlay) -->
+           <div id="validation-area" style="display: none;"></div>
+
+           <div class="charts-container">
              <div class="chart-wrapper">
                  <span class="chart-label">Brightness</span>
                  <canvas id="chartB"></canvas>
@@ -407,6 +452,7 @@ class HCLCurveCard extends HTMLElement {
     `;
 
         // Bind Controls
+        this.shadowRoot.getElementById('btn-sanitize').addEventListener('click', () => this._sanitizeCurve());
         this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this._saveCurve());
         this.shadowRoot.getElementById('btn-test').addEventListener('click', () => this._testCurve());
         this.shadowRoot.getElementById('btn-revert').addEventListener('click', () => this._revertCurve());
@@ -429,46 +475,60 @@ class HCLCurveCard extends HTMLElement {
             },
             plugins: {
                 legend: false, tooltip: false,
-                // Custom Plugin for Clamped Shading (Visual Feedback)
                 annotation: {
-                    beforeDraw: (chart) => {
-                        // Only shading for Brightness Chart
-                        if (chart.canvas.id !== 'chartB') return;
-
-                        const ctx = chart.ctx;
-                        const yAxis = chart.scales.y;
-                        const xAxis = chart.scales.x;
-
-                        // Get Limits
-                        let minB = 0; let maxB = 100;
-                        if (this._hass && this.config && this.config.entity) {
-                            const attr = this._hass.states[this.config.entity].attributes;
-                            if (attr.min_brightness !== undefined) minB = attr.min_brightness;
-                            if (attr.max_brightness !== undefined) maxB = attr.max_brightness;
-                        }
-
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; // Shading color
-
-                        // Top Shade (above max)
-                        if (maxB < 100) {
-                            const yMax = yAxis.getPixelForValue(maxB);
-                            const yTop = yAxis.getPixelForValue(100);
-                            ctx.fillRect(xAxis.left, yTop, xAxis.width, yMax - yTop);
-                        }
-
-                        // Bottom Shade (below min)
-                        if (minB > 0) {
-                            const yMin = yAxis.getPixelForValue(minB);
-                            const yBot = yAxis.getPixelForValue(0);
-                            ctx.fillRect(xAxis.left, yMin, xAxis.width, yBot - yMin);
-                        }
+                    annotations: {}, // Will be populated dynamically
+                    common: {
+                        drawTime: 'beforeDatasetsDraw',
                     }
                 }
             }
         };
 
+        // Register inline plugin for Shading + Validation Backgrounds
+        const customBackgroundPlugin = {
+            id: 'customBackground',
+            beforeDraw: (chart) => {
+                const ctx = chart.ctx;
+                const yAxis = chart.scales.y;
+                const xAxis = chart.scales.x;
+
+                // 1. Min/Max Shading (Legacy Logic)
+                if (chart.canvas.id === 'chartB') {
+                    // Get Limits
+                    let minB = 0; let maxB = 100;
+                    if (this._hass && this.config && this.config.entity) {
+                        const attr = this._hass.states[this.config.entity].attributes;
+                        if (attr.min_brightness !== undefined) minB = attr.min_brightness;
+                        if (attr.max_brightness !== undefined) maxB = attr.max_brightness;
+                    }
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                    if (maxB < 100) ctx.fillRect(xAxis.left, yAxis.getPixelForValue(100), xAxis.width, yAxis.getPixelForValue(maxB) - yAxis.getPixelForValue(100));
+                    if (minB > 0) ctx.fillRect(xAxis.left, yAxis.getPixelForValue(minB), xAxis.width, yAxis.getPixelForValue(0) - yAxis.getPixelForValue(minB));
+                }
+
+                // 2. Validation Highlights (Visual Feedback)
+                // We draw these on both charts if relevant
+                const annotations = this._getValidationAnnotations(chart.canvas.id === 'chartB' ? 'b' : 'k');
+                annotations.forEach(anno => {
+                    ctx.fillStyle = anno.color;
+                    const xStart = xAxis.getPixelForValue(anno.xMin);
+                    const xEnd = xAxis.getPixelForValue(anno.xMax);
+
+                    // Allow wrapping (drawing 2 boxes if needed)
+                    // Simplified: just drawing simple range for now.
+                    // If xMin > xMax (wrap), draw two boxes?
+                    if (anno.xMin > anno.xMax) {
+                        // Wrap Case: xMin->1440 AND 0->xMax
+                        ctx.fillRect(xStart, yAxis.top, xAxis.right - xStart, yAxis.bottom - yAxis.top);
+                        ctx.fillRect(xAxis.left, yAxis.top, xAxis.getPixelForValue(anno.xMax) - xAxis.left, yAxis.bottom - yAxis.top);
+                    } else {
+                        ctx.fillRect(xStart, yAxis.top, xEnd - xStart, yAxis.bottom - yAxis.top);
+                    }
+                });
+            }
+        };
+
         // Register inline plugin
-        const shadingPlugin = { id: 'shading', beforeDraw: commonOpts.plugins.annotation.beforeDraw };
 
         const ctxB = this.shadowRoot.getElementById('chartB').getContext('2d');
         this._chartB = new Chart(ctxB, {
@@ -479,7 +539,7 @@ class HCLCurveCard extends HTMLElement {
                 elements: { point: { radius: 0, hoverRadius: 0 }, line: { borderWidth: 2, tension: 0.4 } },
                 scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } }
             },
-            plugins: [shadingPlugin]
+            plugins: [customBackgroundPlugin]
         });
 
         const ctxK = this.shadowRoot.getElementById('chartK').getContext('2d');
@@ -680,13 +740,20 @@ class HCLCurveCard extends HTMLElement {
         }
     }
 
-    _updateVisuals() {
+    _updateVisuals(retryCount = 0) {
         if (!this._chartB || !this._chartK) return; // Guard
+
+        // STABILITY FIX: Guard against disconnected state
+        if (!this.isConnected) return;
 
         const data = this._calculateCurve();
 
         this._chartB.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.b[i] }));
         this._chartK.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.k[i] }));
+
+        // Update Validation UI
+        this._runValidation(data);
+        this._updateValidationUI();
 
         // Diagramme aktualisieren
         this._chartB.update('none');
@@ -694,13 +761,15 @@ class HCLCurveCard extends HTMLElement {
 
         // NEU: Sicherstellen, dass die Scales fertig berechnet sind
         // Wenn getPixelForValue(0) immer noch 0 liefert, ist das Chart noch nicht bereit
-        // NEU: Sicherstellen, dass die Scales fertig berechnet sind
-        // Wenn getPixelForValue(0) immer noch 0 liefert, oder undefined ist
         const xAxis = this._chartB.scales.x;
         // Robust check: width must be > 0 and scale initialized
         if (!xAxis || xAxis.width <= 0 || xAxis.getPixelForValue(0) === undefined) {
-            // Retry after next frame to prevent (0,0) stacking
-            requestAnimationFrame(() => this._updateVisuals());
+            // STABILITY FIX: Prevent infinite loop if card is hidden or layout fails
+            if (retryCount < 50) {
+                requestAnimationFrame(() => this._updateVisuals(retryCount + 1));
+            } else {
+                console.warn("HCL Card: Chart scaling timed out or card hidden.");
+            }
             return;
         }
 
@@ -762,8 +831,10 @@ class HCLCurveCard extends HTMLElement {
         const yVal = type === 'b' ? pt.b : pt.k;
         const y = chart.scales.y.getPixelForValue(yVal);
 
-        el.style.left = `${x}px`;
-        el.style.top = `${y}px`;
+        // PERFORMANCE FIX: Use transform for GPU composition instead of layout reflow
+        el.style.transform = `translate(${x}px, ${y}px)`;
+        // el.style.left = ... (removed)
+        // el.style.top = ... (removed)
 
         // A11y Update
         el.setAttribute('aria-valuenow', yVal);
@@ -836,6 +907,259 @@ class HCLCurveCard extends HTMLElement {
         const t2 = t * t;
         const t3 = t2 * t;
         return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m1;
+    }
+
+
+    // --- Validator Engine (v0.4.0-rc4) ---
+    _runValidation(data) {
+        this._validationResult = { errors: [], warnings: [] };
+
+        // 1. Technical Errors
+        if (this._points.length < 2) {
+            this._validationResult.errors.push({ msg: "Curve needs at least 2 points." });
+        }
+
+        // Check for duplicates/unsorted
+        let lastT = -1;
+        let needsSanitize = false;
+
+        // Copy and sort for logic check
+        const sorted = [...this._points].sort((a, b) => a.t - b.t);
+
+        for (let i = 0; i < sorted.length; i++) {
+            if (sorted[i].t === lastT) {
+                this._validationResult.errors.push({ msg: `Duplicate time at ${minToTime(sorted[i].t)}.` });
+                needsSanitize = true;
+            }
+            lastT = sorted[i].t;
+        }
+
+        // Check original order
+        for (let i = 0; i < this._points.length - 1; i++) {
+            if (this._points[i].t > this._points[i + 1].t) {
+                this._validationResult.errors.push({ msg: "Points are not sorted by time." });
+                needsSanitize = true;
+                break;
+            }
+        }
+
+        const btnSanitize = this.shadowRoot.getElementById('btn-sanitize');
+        if (btnSanitize) btnSanitize.style.display = needsSanitize ? 'block' : 'none';
+
+        if (this._validationResult.errors.length > 0) return; // Stop if hard errors
+
+        // 2. HCL Heuristics
+
+        // A) Steilheit Check (Slopes)
+        for (let i = 0; i < data.t.length - 1; i++) {
+            const dt = data.t[i + 1] - data.t[i];
+            if (dt <= 0) continue;
+
+            const slopeB = Math.abs(data.b[i + 1] - data.b[i]) / dt;
+            const slopeK = Math.abs(data.k[i + 1] - data.k[i]) / dt;
+
+            if (slopeB > this._valSettings.maxSlopeB) {
+                this._validationResult.warnings.push({
+                    type: 'slope',
+                    msg: `Brightness jump too steep (>2%/min) at ${minToTime(data.t[i])}`,
+                    xMin: data.t[i], xMax: data.t[i + 1]
+                });
+            }
+            if (slopeK > this._valSettings.maxSlopeK) {
+                this._validationResult.warnings.push({
+                    type: 'slope',
+                    msg: `Color Temp jump too steep (>100K/min) at ${minToTime(data.t[i])}`,
+                    xMin: data.t[i], xMax: data.t[i + 1]
+                });
+            }
+        }
+
+        // B) Daily Peak Check
+        let peakMinutes = 0;
+        data.t.forEach((t, i) => {
+            if (data.b[i] > 70 && data.k[i] > 5000) {
+                peakMinutes += 15; // Resolution is 15m
+            }
+        });
+
+        if (peakMinutes < this._valSettings.minDailyPeakDuration) {
+            // Smart Strategy: Find "Mismatches" to guide user
+            // 1. High Brightness (>70%), Low Kelvin (<=5000) -> Needs more K
+            // 2. High Kelvin (>5000), Low Brightness (<=70) -> Needs more B
+
+            let rangesNeedK = [];
+            let rangesNeedB = [];
+
+            // Helper to add ranges
+            const addRange = (list, t) => {
+                if (list.length > 0 && t === list[list.length - 1].end) {
+                    list[list.length - 1].end += 15; // Extend
+                } else {
+                    list.push({ start: t, end: t + 15 });
+                }
+            };
+
+            data.t.forEach((t, i) => {
+                const bHigh = data.b[i] > 70;
+                const kHigh = data.k[i] > 5000;
+                if (bHigh && !kHigh) addRange(rangesNeedK, t);
+                if (kHigh && !bHigh) addRange(rangesNeedB, t);
+            });
+
+            let hasAdvice = false;
+
+            rangesNeedK.forEach(r => {
+                if (r.end - r.start >= 30) { // Only warn for significant blocks (>30m)
+                    this._validationResult.warnings.push({
+                        type: 'peak', targetChart: 'k',
+                        msg: `Active Phase: Temp too low here. Increase to >5000K.`,
+                        xMin: r.start, xMax: r.end
+                    });
+                    hasAdvice = true;
+                }
+            });
+
+            rangesNeedB.forEach(r => {
+                if (r.end - r.start >= 30) {
+                    this._validationResult.warnings.push({
+                        type: 'peak', targetChart: 'b',
+                        msg: `Active Phase: Brightness too low here. Increase to >70%.`,
+                        xMin: r.start, xMax: r.end
+                    });
+                    hasAdvice = true;
+                }
+            });
+
+            if (!hasAdvice) {
+                // Fallback: Just mark the middle of the day (10:00 - 14:00) as a suggestion
+                this._validationResult.warnings.push({
+                    type: 'peak', targetChart: 'b',
+                    msg: `Active Phase too short (<4h). Try high B/K around noon.`,
+                    xMin: 600, xMax: 840
+                });
+                this._validationResult.warnings.push({
+                    type: 'peak', targetChart: 'k',
+                    msg: `Active Phase too short (<4h). Try high B/K around noon.`,
+                    xMin: 600, xMax: 840
+                });
+            }
+        }
+
+        // C) Night Checks (Sleep Window)
+        const isNight = (t) => t >= this._valSettings.nightStart || t < this._valSettings.nightEnd;
+        let nightViolationsB = [];
+        let nightViolationsK = [];
+
+        data.t.forEach((t, i) => {
+            if (isNight(t)) {
+                if (data.b[i] > 10) nightViolationsB.push(t); // > 10%
+                if (data.k[i] > 3000) nightViolationsK.push(t); // > 3000K
+            }
+        });
+
+        if (nightViolationsB.length > 2) {
+            // Group into ranges
+            this._addNightWarnings(nightViolationsB, 'b', 'bright', '>10%');
+        }
+        if (nightViolationsK.length > 2) {
+            this._addNightWarnings(nightViolationsK, 'k', 'cold', '>3000K');
+        }
+    }
+
+    _addNightWarnings(times, chartType, typeLabel, valLabel) {
+        if (times.length === 0) return;
+        // Simple clustering: if diff > 15, start new block
+        let start = times[0];
+        let prev = times[0];
+
+        for (let i = 1; i < times.length; i++) {
+            if (times[i] - prev > 15) {
+                // End of block
+                this._validationResult.warnings.push({
+                    type: 'night',
+                    targetChart: chartType,
+                    msg: `Night too ${typeLabel} (${valLabel}) at ${minToTime(start)}-${minToTime(prev + 15)}.`,
+                    xMin: start, xMax: prev + 15
+                });
+                start = times[i];
+            }
+            prev = times[i];
+        }
+        // Last block
+        this._validationResult.warnings.push({
+            type: 'night',
+            targetChart: chartType,
+            msg: `Night too ${typeLabel} (${valLabel}) at ${minToTime(start)}-${minToTime(prev + 15)}.`,
+            xMin: start, xMax: prev + 15
+        });
+    }
+
+    _getValidationAnnotations(chartType) {
+        // chartType: 'b' (Brightness) or 'k' (Kelvin)
+        const list = [];
+        this._validationResult.warnings.forEach(w => {
+            // 1. Filter by Chart Specifics
+            if (w.targetChart && w.targetChart !== chartType) return;
+
+            // 2. Add Annotation
+            if (w.xMin !== undefined && w.xMax !== undefined) {
+                let color = 'rgba(255, 165, 0, 0.15)'; // Default orange
+                if (w.type === 'slope') color = 'rgba(255, 69, 0, 0.3)'; // Red-Orange
+
+                list.push({ xMin: w.xMin, xMax: w.xMax, color });
+            }
+        });
+        return list;
+    }
+
+    _updateValidationUI() {
+        const area = this.shadowRoot.getElementById('validation-area');
+        const btnSave = this.shadowRoot.getElementById('btn-save');
+
+        if (!area || !btnSave) return;
+
+        if (this._validationResult.errors.length > 0) {
+            area.style.display = 'block';
+            area.innerHTML = this._validationResult.errors.map(e =>
+                `<div style="background:rgba(255,0,0,0.2); border-left:4px solid red; padding:8px; margin-bottom:4px; font-size:12px;">🚫 ${e.msg}</div>`
+            ).join('');
+            btnSave.disabled = true;
+            btnSave.style.opacity = 0.5;
+            return;
+        }
+
+        btnSave.disabled = false;
+        btnSave.style.opacity = 1;
+
+        if (this._validationResult.warnings.length > 0) {
+            area.style.display = 'block';
+            area.innerHTML = this._validationResult.warnings.map(w =>
+                `<div style="background:rgba(255,165,0,0.2); border-left:4px solid orange; padding:8px; margin-bottom:4px; font-size:12px;">⚠️ ${w.msg}</div>`
+            ).join('');
+        } else {
+            area.style.display = 'none';
+        }
+    }
+
+    _sanitizeCurve() {
+        // Fix Sorting & Duplicates
+        let newPoints = [...this._points];
+
+        // 1. Sort
+        newPoints.sort((a, b) => a.t - b.t);
+
+        // 2. Dedupe
+        const unique = [];
+        if (newPoints.length > 0) unique.push(newPoints[0]);
+        for (let i = 1; i < newPoints.length; i++) {
+            if (newPoints[i].t !== unique[unique.length - 1].t) {
+                unique.push(newPoints[i]);
+            }
+        }
+
+        this._points = unique;
+        this._refreshCharts();
+        this._schedulePreview();
     }
 }
 

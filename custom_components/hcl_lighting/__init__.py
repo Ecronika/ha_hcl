@@ -165,7 +165,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.4.0-rc3"
+    FULL_URL = f"{BASE_URL}?v=0.4.0-rc4"
     
     if "lovelace" not in hass.data:
         return
