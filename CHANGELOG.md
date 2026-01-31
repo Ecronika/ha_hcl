@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0-rc6 (IKEA Compatibility)
+- **Bug Fix**: **IKEA Transition Glitch**. Removed `transition` parameter from all `color_temp` commands to prevent brightness "dips" on Zigbee consumer bulbs.
+- **Optimization**: **Redundant Checks**. Filtered out redundant "Snap" commands in Smart Transition mode to reduce Zigbee traffic.
+
 ## v0.4.0-rc5 (Stability & UX Polish)
 - **Performance**: **GPU Rendering**. Migrated drag-handles to hardware-accelerated `translate` to eliminate layout thrashing.
 - **Stability**: **Infinite Loop Safeguard**. Added recursion guards and visibility checks to `_updateVisuals` to prevent background freeze.
