@@ -7,6 +7,9 @@ class HCLCurveCard extends HTMLElement {
         this._chartK = null;
         this._updatesPending = false;
         this._debouncer = null;
+        this._isDragging = false;
+        // Cache für JSON String um unnötige Cycles zu sparen
+        this._lastPointsJSON = "";
     }
 
     set hass(hass) {
@@ -14,13 +17,15 @@ class HCLCurveCard extends HTMLElement {
         if (!this.config || !this.config.entity) return;
 
         const stateObj = hass.states[this.config.entity];
+        // Defensive check: stateObj existiert
         if (stateObj && stateObj.attributes.control_points) {
-            // Only update if points differ and we aren't dragging
             if (!this._isDragging) {
-                // JSON stringify compare for deep check
-                const newPointsJSON = JSON.stringify(stateObj.attributes.control_points);
+                // Optimization: Referenz-Check zuerst, falls HA das Objekt cached
+                const rawPoints = stateObj.attributes.control_points;
+                const newPointsJSON = JSON.stringify(rawPoints);
+
                 if (this._lastPointsJSON !== newPointsJSON) {
-                    this._points = JSON.parse(newPointsJSON); // Deep copy
+                    this._points = JSON.parse(newPointsJSON);
                     this._lastPointsJSON = newPointsJSON;
                     this._refreshCharts();
                 }
@@ -41,20 +46,29 @@ class HCLCurveCard extends HTMLElement {
     }
 
     async connectedCallback() {
+        // Robustness: Try/Catch for CDN load failure
         if (!window.Chart) {
-            await import('https://cdn.jsdelivr.net/npm/chart.js');
+            try {
+                // WARNUNG: Externe Abhängigkeit. Sollte idealerweise lokal liegen.
+                await import('https://cdn.jsdelivr.net/npm/chart.js');
+            } catch (e) {
+                this.shadowRoot.innerHTML = `<ha-card style="padding:16px; color:red;">Error loading Chart.js: ${e.message}. Check internet connection.</ha-card>`;
+                return;
+            }
         }
+
         this.render();
         this._initialized = true;
 
-        // Neu: ResizeObserver überwacht die tatsächliche Größe der Karte
         this._resizeObserver = new ResizeObserver(() => {
-            if (this._initialized && !this._isDragging) {
-                // WICHTIG: Erst Chart-Layout erzwingen, dann zeichnen
-                if (this._chartB) this._chartB.resize();
-                if (this._chartK) this._chartK.resize();
-                this._updateVisuals();
-            }
+            // Perf: rAF um Resize-Loop Errors zu vermeiden
+            requestAnimationFrame(() => {
+                if (this._initialized && !this._isDragging) {
+                    if (this._chartB) this._chartB.resize();
+                    if (this._chartK) this._chartK.resize();
+                    this._updateVisuals();
+                }
+            });
         });
 
         const container = this.shadowRoot.querySelector('.charts-container');
@@ -62,7 +76,7 @@ class HCLCurveCard extends HTMLElement {
             this._resizeObserver.observe(container);
         }
 
-        // Einmaliger verzögerter Start als Sicherheitsnetz für langsame Dashboards
+        // Fallback Initialisierung
         setTimeout(() => this._refreshCharts(), 300);
     }
 
@@ -88,8 +102,6 @@ class HCLCurveCard extends HTMLElement {
         }
         ha-card {
            background: var(--ha-card-background, var(--glass-bg));
-           backdrop-filter: blur(20px);
-           -webkit-backdrop-filter: blur(20px);
            border: 1px solid var(--glass-border);
            border-radius: 12px;
            overflow: hidden;
@@ -103,10 +115,7 @@ class HCLCurveCard extends HTMLElement {
            justify-content: space-between;
            align-items: center;
         }
-        .toolbar {
-           display: flex;
-           gap: 8px;
-        }
+        .toolbar { display: flex; gap: 8px; }
         button {
            background: rgba(255,255,255,0.1);
            border: 1px solid rgba(255,255,255,0.2);
@@ -121,6 +130,8 @@ class HCLCurveCard extends HTMLElement {
            display: grid;
            grid-template-rows: 1fr 1fr;
            gap: 16px;
+           /* UX: Prevent scrolling while dragging charts */
+           touch-action: none; 
         }
         .chart-wrapper {
            position: relative;
@@ -130,16 +141,14 @@ class HCLCurveCard extends HTMLElement {
            border: 1px solid rgba(255,255,255,0.05);
            padding: 10px;
         }
-        canvas {
-            width: 100%;
-            height: 100%;
-        }
+        canvas { width: 100%; height: 100%; display: block; }
         .handle-layer {
            position: absolute;
            top: 10px; left: 10px; right: 10px; bottom: 10px;
            pointer-events: none;
            overflow: visible;
         }
+        /* A11y & UX: Larger touch target via pseudo-element, clear focus styles */
         .handle {
            position: absolute;
            width: 12px; height: 12px;
@@ -148,6 +157,12 @@ class HCLCurveCard extends HTMLElement {
            cursor: grab;
            pointer-events: auto;
            z-index: 10;
+           outline: none; /* Focus handled via box-shadow below */
+        }
+        .handle:focus-visible {
+           outline: 2px solid white;
+           outline-offset: 2px;
+           z-index: 20;
         }
         .handle.type-b { background: var(--accent-gold); box-shadow: 0 0 5px rgba(255,215,0,0.5); }
         .handle.type-k { background: var(--accent-blue); box-shadow: 0 0 5px rgba(0,229,255,0.5); }
@@ -215,39 +230,84 @@ class HCLCurveCard extends HTMLElement {
     _rebuildHandles() {
         ['b', 'k'].forEach(type => {
             const container = this.shadowRoot.getElementById(`handles-${type}`);
-            container.innerHTML = '';
+            container.innerHTML = ''; // Reset for now to ensure clean state with correct indices
 
             this._points.forEach((pt, idx) => {
                 const el = document.createElement('div');
                 el.className = `handle type-${type}`;
                 el.dataset.idx = idx;
 
-                // Interaction
+                // Accessibility Attributes
+                el.setAttribute('role', 'slider');
+                el.setAttribute('tabindex', '0');
+                el.setAttribute('aria-label', `${type === 'b' ? 'Brightness' : 'Kelvin'} Point ${idx + 1}`);
+                el.setAttribute('aria-valuemin', type === 'b' ? '0' : '2000');
+                el.setAttribute('aria-valuemax', type === 'b' ? '100' : '7000');
+                el.setAttribute('aria-valuenow', type === 'b' ? pt.b : pt.k);
+                el.setAttribute('aria-valuetext', `${minToTime(pt.t)}, ${type === 'b' ? pt.b + '%' : pt.k + 'K'}`);
+
+                // Mouse/Touch Interaction
                 el.addEventListener('pointerdown', (e) => this._onDragStart(e, idx, type, el));
+
+                // Keyboard Interaction
+                el.addEventListener('keydown', (e) => this._onKeyDown(e, idx, type));
+
                 container.appendChild(el);
             });
         });
+    }
+
+    _onKeyDown(e, idx, type) {
+        const pt = this._points[idx];
+        let changed = false;
+        const shift = e.shiftKey ? 10 : 1; // Modifier for faster movement
+
+        switch (e.key) {
+            case 'ArrowLeft': pt.t = Math.max(0, pt.t - 15); changed = true; break;
+            case 'ArrowRight': pt.t = Math.min(1440, pt.t + 15); changed = true; break;
+            case 'ArrowUp':
+                if (type === 'b') pt.b = Math.min(100, pt.b + shift);
+                else pt.k = Math.min(7000, pt.k + (shift * 50));
+                changed = true;
+                break;
+            case 'ArrowDown':
+                if (type === 'b') pt.b = Math.max(0, pt.b - shift);
+                else pt.k = Math.max(2000, pt.k - (shift * 50));
+                changed = true;
+                break;
+        }
+
+        if (changed) {
+            e.preventDefault();
+            this._updateVisuals();
+            this._schedulePreview();
+            // Focus behalten
+            e.target.focus();
+        }
     }
 
     _onDragStart(e, idx, type, el) {
         e.preventDefault();
         el.setPointerCapture(e.pointerId);
         this._isDragging = true;
+        // Visual feedback for grabbing not strictly needed via class if cursor: grabbing works, 
+        // but beneficial for state tracking.
 
         const chart = (type === 'b') ? this._chartB : this._chartK;
         const layer = this.shadowRoot.getElementById(`handles-${type}`);
         const rect = layer.getBoundingClientRect();
 
         const onMove = (ev) => {
+            // throttle via rAF not strictly needed for mouse move, but good practice
             const mx = ev.clientX - rect.left;
             const my = ev.clientY - rect.top;
 
             const tVal = chart.scales.x.getValueForPixel(mx);
             const yVal = chart.scales.y.getValueForPixel(my);
 
-            // Update Point
             const pt = this._points[idx];
-            pt.t = Math.round(Math.max(0, Math.min(1440, tVal)));
+            // Snap to grid (15min) helps aligning
+            pt.t = Math.round(Math.max(0, Math.min(1440, tVal)) / 15) * 15;
 
             if (type === 'b') {
                 pt.b = Math.round(Math.max(0, Math.min(100, yVal)));
@@ -263,6 +323,7 @@ class HCLCurveCard extends HTMLElement {
             this._isDragging = false;
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
+            // Save final state logic if needed, or just leave at preview
         };
 
         window.addEventListener('pointermove', onMove);
@@ -316,10 +377,17 @@ class HCLCurveCard extends HTMLElement {
     _syncHandle(idx, pt, type, chart) {
         const el = this.shadowRoot.querySelector(`#handles-${type} .handle[data-idx="${idx}"]`);
         if (!el) return;
+
         const x = chart.scales.x.getPixelForValue(pt.t);
-        const y = chart.scales.y.getPixelForValue(type === 'b' ? pt.b : pt.k);
+        const yVal = type === 'b' ? pt.b : pt.k;
+        const y = chart.scales.y.getPixelForValue(yVal);
+
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
+
+        // A11y Update
+        el.setAttribute('aria-valuenow', yVal);
+        el.setAttribute('aria-valuetext', `${minToTime(pt.t)}, ${type === 'b' ? pt.b + '%' : pt.k + 'K'}`);
     }
 
     // --- PCHIP Logic (Ported from Dashboard) ---
@@ -382,6 +450,13 @@ class HCLCurveCard extends HTMLElement {
         const t3 = t2 * t;
         return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m0 + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m1;
     }
+}
+
+// Helper Funktion muss im Scope oder in der Klasse sein
+function minToTime(m) {
+    let h = Math.floor(m / 60);
+    let min = m % 60;
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
 
 customElements.define('hcl-curve-card', HCLCurveCard);

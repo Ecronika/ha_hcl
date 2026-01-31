@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta14] (Frontend Polish & Accessibility)
+- **Feat**: Added full Keyboard Navigation (Arrow Keys) for handles.
+- **Feat**: Added ARIA labels/attributes for screen readers (Accessibility).
+- **Fix**: Added `touch-action: none` to prevent page scrolling while dragging handles on mobile.
+- **Fix**: Wrapped external Chart.js import in try/catch for offline robustness.
+- **Perf**: Optimized `set hass` to avoid unnecessary JSON parsing.
+
 ## [0.4.0-beta13] (Final Layout Fix)
 - **Fix**: Forces Chart resize in observer and adds fallback timeout (300ms) to guarantee Chart initialization before positioning handles.
 
