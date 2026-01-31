@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc2] (Dependency Hardening)
+- **Security**: **Local Chart.js**. Replaced external CDN dependency with local `chart.js` bundle to ensure offline functionality and stability.
+- **Perf**: **Drag Throttling**. Implemented `requestAnimationFrame` throttling for drag operations to reduce layout thrashing on lower-end devices.
+- **Fix**: **Chart Init Race**. Hardened `scaleReady` check in visual update loop to strictly wait for `xAxis.width > 0`.
+
 ## [0.4.0-rc1] (Stability Hardening)
 - **Fix**: **PCHIP Reliability**. Added zero-division guards to PCHIP implementation to prevent crashes with flat line segments.
 - **Fix**: **Frontend Race Condition**. Added robust checks to wait until Chart scales are fully initialized before positioning handles (prevents "0,0 stack" bug).

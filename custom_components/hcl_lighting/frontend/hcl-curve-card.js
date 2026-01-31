@@ -136,12 +136,13 @@ class HCLCurveCard extends HTMLElement {
 
     async connectedCallback() {
         // Robustness: Try/Catch for CDN load failure
+        // Robustness: Try/Catch for CDN load failure
         if (!window.Chart) {
             try {
-                // WARNUNG: Externe Abhängigkeit. Sollte idealerweise lokal liegen.
-                await import('https://cdn.jsdelivr.net/npm/chart.js');
+                // Local Import (Robustness)
+                await import('/hcl_lighting_static/chart.js');
             } catch (e) {
-                this.shadowRoot.innerHTML = `<ha-card style="padding:16px; color:red;">Error loading Chart.js: ${e.message}. Check internet connection.</ha-card>`;
+                this.shadowRoot.innerHTML = `<ha-card style="padding:16px; color:red;">Error loading Chart.js: ${e.message}. Check integration installation.</ha-card>`;
                 return;
             }
         }
@@ -605,7 +606,14 @@ class HCLCurveCard extends HTMLElement {
                 pt.k = Math.round(Math.max(2000, Math.min(7000, yVal)));
             }
 
-            this._updateVisuals();
+            // Performance: Throttle visual updates to screen refresh rate
+            if (!this._rafInFlight) {
+                this._rafInFlight = true;
+                requestAnimationFrame(() => {
+                    this._updateVisuals();
+                    this._rafInFlight = false;
+                });
+            }
             this._schedulePreview();
         };
 
@@ -681,8 +689,9 @@ class HCLCurveCard extends HTMLElement {
         // Wenn getPixelForValue(0) immer noch 0 liefert, ist das Chart noch nicht bereit
         // NEU: Sicherstellen, dass die Scales fertig berechnet sind
         // Wenn getPixelForValue(0) immer noch 0 liefert, oder undefined ist
-        const scaleReady = this._chartB.scales.x.getPixelForValue(0) > 0;
-        if (!scaleReady) {
+        const xAxis = this._chartB.scales.x;
+        // Robust check: width must be > 0 and scale initialized
+        if (!xAxis || xAxis.width <= 0 || xAxis.getPixelForValue(0) === undefined) {
             // Retry after next frame to prevent (0,0) stacking
             requestAnimationFrame(() => this._updateVisuals());
             return;
