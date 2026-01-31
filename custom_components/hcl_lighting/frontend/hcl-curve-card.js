@@ -181,129 +181,184 @@ class HCLCurveCard extends HTMLElement {
 
         this.shadowRoot.innerHTML = `
       <style>
-        :host {
-           display: block;
-           --glass-bg: rgba(255, 255, 255, 0.03);
-           --glass-border: rgba(255, 255, 255, 0.08);
-           --accent-gold: #FFD700;
-           --accent-blue: #00E5FF;
-           --text-main: #ffffff;
-        }
-        ha-card {
-           background: var(--ha-card-background, var(--glass-bg));
-           border: 1px solid var(--glass-border);
-           border-radius: 12px;
-           overflow: hidden;
-           color: var(--text-main);
-        }
-        .card-header {
-           padding: 16px;
-           font-size: 18px;
-           font-weight: 500;
-           display: flex;
-           justify-content: space-between;
-           align-items: center;
-        }
-        .toolbar { display: flex; gap: 8px; }
-        button {
-           background: rgba(255,255,255,0.1);
-           border: 1px solid rgba(255,255,255,0.2);
-           color: white;
-           padding: 6px 12px;
-           border-radius: 6px;
-           cursor: pointer;
-        }
-        button:hover { background: rgba(255,255,255,0.2); }
-        .charts-container {
-           padding: 0 16px 16px 16px;
-           display: grid;
-           grid-template-rows: 1fr 1fr;
-           gap: 16px;
-           /* UX: Prevent scrolling while dragging charts */
-           touch-action: none; 
-        }
-        .chart-wrapper {
-           position: relative;
-           height: 200px;
-           background: rgba(0,0,0,0.2);
-           border-radius: 12px;
-           border: 1px solid rgba(255,255,255,0.05);
-           padding: 10px;
-        }
-        canvas { width: 100%; height: 100%; display: block; }
-        .handle-layer {
-           position: absolute;
-           top: 10px; left: 10px; right: 10px; bottom: 10px;
-           pointer-events: none;
-           overflow: visible;
-        }
-        /* A11y & UX: Larger touch target via pseudo-element, clear focus styles */
-        .handle {
-           position: absolute;
-           width: 12px; height: 12px;
-           border-radius: 50%;
-           transform: translate(-50%, -50%);
-           cursor: grab;
-           pointer-events: auto;
-           z-index: 10;
-           outline: none; /* Focus handled via box-shadow below */
-        }
-        .handle:focus-visible {
-           outline: 2px solid white;
-           outline-offset: 2px;
-           z-index: 20;
-        }
-        .handle.type-b { background: var(--accent-gold); box-shadow: 0 0 5px rgba(255,215,0,0.5); }
-        .handle.type-k { background: var(--accent-blue); box-shadow: 0 0 5px rgba(0,229,255,0.5); }
-        
-        .color-bar {
-            height: 12px;
-            margin: 0 16px 16px 16px;
-            border-radius: 6px;
-            border: 1px solid rgba(255,255,255,0.1);
-            background: linear-gradient(90deg, #ff8c00, #fffae0, #ffffff, #cceeff);
-        }
-        select {
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: white;
-            padding: 4px 8px;
-            border-radius: 6px;
-            outline: none;
-            cursor: pointer;
-        }
-        option { background: #2c2c2c; color: white; }
+          :host {
+              display: block;
+              --glass-bg: rgba(20, 20, 25, 0.6); /* Dunkler für Kontrast */
+              --glass-border: rgba(255, 255, 255, 0.1);
+              --chart-bg: rgba(0, 0, 0, 0.3);
+              --accent-gold: #FFD700;
+              --accent-blue: #00E5FF;
+              --text-main: #ffffff;
+              --text-muted: rgba(255, 255, 255, 0.4);
+          }
+          ha-card {
+              background: var(--ha-card-background, var(--glass-bg));
+              backdrop-filter: blur(20px);
+              -webkit-backdrop-filter: blur(20px);
+              border: 1px solid var(--glass-border);
+              border-radius: 24px; /* Design Study Match */
+              overflow: hidden;
+              color: var(--text-main);
+              padding-bottom: 16px;
+          }
+          .card-header {
+              padding: 20px 24px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              border-bottom: 1px solid rgba(255,255,255,0.05);
+              margin-bottom: 16px;
+          }
+          .controls-row {
+              display: flex;
+              gap: 12px;
+              align-items: center;
+              flex-wrap: wrap;
+          }
+          /* "Pill" Buttons wie im Design */
+          button, select {
+              background: rgba(255, 255, 255, 0.05);
+              border: 1px solid rgba(255, 255, 255, 0.1);
+              color: rgba(255, 255, 255, 0.8);
+              padding: 6px 16px;
+              border-radius: 20px; /* Pill shape */
+              font-size: 12px;
+              font-weight: 500;
+              cursor: pointer;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
+              transition: all 0.2s ease;
+          }
+          button:hover, select:hover {
+              background: rgba(255, 255, 255, 0.15);
+              border-color: rgba(255, 255, 255, 0.3);
+              color: #fff;
+          }
+          
+          /* Responsive Grid: Nebeneinander wenn Platz, sonst untereinander */
+          .charts-container {
+              padding: 0 20px;
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+              gap: 20px;
+              touch-action: none;
+          }
+          .chart-wrapper {
+              position: relative;
+              height: 240px;
+              background: var(--chart-bg);
+              border-radius: 20px;
+              border: 1px solid rgba(255, 255, 255, 0.05);
+              padding: 16px; /* Wichtig für Alignment */
+          }
+          /* Overlay Labels (Brightness/Temp) */
+          .chart-label {
+              position: absolute;
+              top: 16px; left: 24px;
+              font-size: 11px;
+              color: var(--text-muted);
+              text-transform: uppercase;
+              letter-spacing: 1px;
+              font-weight: 600;
+              pointer-events: none;
+              z-index: 5;
+          }
+          canvas { width: 100%; height: 100%; display: block; }
+          
+          /* Handles: Glow Effects */
+          .handle-layer {
+              position: absolute;
+              top: 16px; left: 16px; right: 16px; bottom: 16px; /* Muss Padding matchen */
+              pointer-events: none;
+              overflow: visible;
+          }
+          .handle {
+              position: absolute;
+              width: 12px; height: 12px;
+              border-radius: 50%;
+              transform: translate(-50%, -50%);
+              cursor: grab;
+              pointer-events: auto;
+              z-index: 10;
+              transition: width 0.1s, height 0.1s;
+          }
+          .handle:hover { transform: translate(-50%, -50%) scale(1.3); }
+          .handle:active { cursor: grabbing; }
+          /* Spezifische Glows aus Design */
+          .handle.type-b { 
+              background: var(--accent-gold); 
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 10px rgba(255, 215, 0, 0.6); 
+          }
+          .handle.type-k { 
+              background: var(--accent-blue); 
+              box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 10px rgba(0, 229, 255, 0.6); 
+          }
+
+          /* Footer / Color Bar */
+          .footer-section {
+              margin-top: 20px;
+              padding: 0 24px;
+          }
+          .color-bar {
+              height: 8px;
+              border-radius: 4px;
+              width: 100%;
+              box-shadow: 0 0 10px rgba(0,0,0,0.3);
+              border: 1px solid rgba(255,255,255,0.1);
+          }
+          .axis-labels {
+              display: flex;
+              justify-content: space-between;
+              margin-top: 6px;
+              font-size: 10px;
+              color: var(--text-muted);
+              font-family: monospace;
+          }
       </style>
       <ha-card>
-        <div class="card-header">
-           <div style="display:flex; align-items:center; gap:8px;">
-               <span>HCL Curve</span>
-               <select id="preset-select" aria-label="Presets">
-                 <option value="" disabled selected>Presets...</option>
-                 <option value="default">Default (Balanced)</option>
-                 <option value="focus">Focus (Home Office)</option>
-                 <option value="relax">Relax (Wellness)</option>
-                 <option value="early_bird">Early Bird</option>
-                 <option value="night_owl">Night Owl</option>
-               </select>
-           </div>
-           <div class="toolbar">
-              <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
-              <button id="btn-test" title="Apply without saving">TEST</button>
-              <button id="btn-save" title="Save to disk">SAVE</button>
-           </div>
-        </div>
-        <div class="charts-container">
-           <div class="chart-wrapper">
-               <canvas id="chartB"></canvas>
-               <div class="handle-layer" id="handles-b"></div>
-           </div>
-           <div class="chart-wrapper">
-               <canvas id="chartK"></canvas>
-               <div class="handle-layer" id="handles-k"></div>
-           </div>
-        </div>
-        <div class="color-bar" id="color-bar-gradient"></div>
+          <div class="card-header">
+             <div class="controls-row">
+                 <span style="font-weight:600; font-size:16px;">HCL Configurator</span>
+                 <select id="preset-select" aria-label="Presets">
+                   <option value="" disabled selected>PRESETS</option>
+                   <option value="default">Default (Balanced)</option>
+                   <option value="focus">Focus (Home Office)</option>
+                   <option value="relax">Relax (Wellness)</option>
+                   <option value="early_bird">Early Bird</option>
+                   <option value="night_owl">Night Owl</option>
+                 </select>
+             </div>
+             <div class="controls-row">
+                <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
+                <button id="btn-test" title="Apply without saving">TEST</button>
+                <button id="btn-save" title="Save to disk" style="border-color:var(--accent-blue); color:var(--accent-blue);">SAVE</button>
+             </div>
+          </div>
+
+          <div class="charts-container">
+             <div class="chart-wrapper">
+                 <span class="chart-label">Brightness</span>
+                 <canvas id="chartB"></canvas>
+                 <div class="handle-layer" id="handles-b"></div>
+             </div>
+             
+             <div class="chart-wrapper">
+                 <span class="chart-label">Color Temp</span>
+                 <canvas id="chartK"></canvas>
+                 <div class="handle-layer" id="handles-k"></div>
+             </div>
+          </div>
+
+          <div class="footer-section">
+              <div class="color-bar" id="color-bar-gradient"></div>
+              <div class="axis-labels">
+                  <span>00:00</span>
+                  <span>06:00</span>
+                  <span>12:00</span>
+                  <span>18:00</span>
+                  <span>24:00</span>
+              </div>
+          </div>
       </ha-card>
     `;
 
