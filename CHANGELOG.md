@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta20] (Visual Refinements)
+- **UI**: Removed chart points ("Pearl Chain") for a cleaner look.
+- **UI**: Improved Dropdown readability with dark background.
+- **UX**: Added **Live Tooltips** to drag handles showing Time & Value.
+
 ## [0.4.0-beta19] (Cache Buster)
 - **Fix**: Added version query parameter to frontend resource URL to force browser cache refresh.
 

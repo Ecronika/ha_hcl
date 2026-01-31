@@ -234,6 +234,42 @@ class HCLCurveCard extends HTMLElement {
               border-color: rgba(255, 255, 255, 0.3);
               color: #fff;
           }
+          /* FIX: Dropdown Option Styling */
+          select {
+             background: rgba(255, 255, 255, 0.05);
+             border: 1px solid rgba(255, 255, 255, 0.1);
+             color: var(--text-main); 
+          }
+          option {
+             background-color: #222; /* Dark background */
+             color: white;
+          }
+
+          /* Tooltip for Handles */
+          .handle-info {
+             position: absolute;
+             bottom: 18px; 
+             left: 50%;
+             transform: translateX(-50%);
+             background: rgba(10, 10, 15, 0.9);
+             border: 1px solid rgba(255, 255, 255, 0.2);
+             padding: 4px 8px;
+             border-radius: 6px;
+             font-size: 10px;
+             font-family: monospace;
+             color: white;
+             white-space: nowrap;
+             opacity: 0; 
+             pointer-events: none;
+             transition: opacity 0.2s;
+             z-index: 100;
+             box-shadow: 0 4px 8px rgba(0,0,0,0.5);
+          }
+          .handle:hover .handle-info,
+          .handle:active .handle-info,
+          .handle:focus .handle-info {
+              opacity: 1;
+          }
           
           /* Responsive Grid: Nebeneinander wenn Platz, sonst untereinander */
           .charts-container {
@@ -430,7 +466,11 @@ class HCLCurveCard extends HTMLElement {
         this._chartB = new Chart(ctxB, {
             type: 'line',
             data: { datasets: [{ data: [], borderColor: '#FFD700', fill: true, backgroundColor: 'rgba(255,215,0,0.1)', tension: 0.4 }] },
-            options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } } },
+            options: {
+                ...commonOpts,
+                elements: { point: { radius: 0, hoverRadius: 0 }, line: { borderWidth: 2, tension: 0.4 } },
+                scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } }
+            },
             plugins: [shadingPlugin]
         });
 
@@ -438,7 +478,11 @@ class HCLCurveCard extends HTMLElement {
         this._chartK = new Chart(ctxK, {
             type: 'line',
             data: { datasets: [{ data: [], borderColor: '#00E5FF', fill: true, backgroundColor: 'rgba(0,229,255,0.1)', tension: 0.4 }] },
-            options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 2000, max: 7000, ...commonOpts.scales.y } } }
+            options: {
+                ...commonOpts,
+                elements: { point: { radius: 0, hoverRadius: 0 }, line: { borderWidth: 2, tension: 0.4 } },
+                scales: { ...commonOpts.scales, y: { min: 2000, max: 7000, ...commonOpts.scales.y } }
+            }
         });
     }
 
@@ -458,6 +502,16 @@ class HCLCurveCard extends HTMLElement {
                 const el = document.createElement('div');
                 el.className = `handle type-${type}`;
                 el.dataset.idx = idx;
+
+                // Tooltip Element
+                const tooltip = document.createElement('div');
+                tooltip.className = 'handle-info';
+
+                // Initial Text
+                const valText = type === 'b' ? `${Math.round(pt.b)}%` : `${Math.round(pt.k)}K`;
+                tooltip.innerText = `${minToTime(pt.t)} | ${valText}`;
+
+                el.appendChild(tooltip);
 
                 // Accessibility Attributes
                 el.setAttribute('role', 'slider');
@@ -693,6 +747,13 @@ class HCLCurveCard extends HTMLElement {
         // A11y Update
         el.setAttribute('aria-valuenow', yVal);
         el.setAttribute('aria-valuetext', `${minToTime(pt.t)}, ${type === 'b' ? pt.b + '%' : pt.k + 'K'}`);
+
+        // Update Tooltip
+        const tooltip = el.querySelector('.handle-info');
+        if (tooltip) {
+            const valText = type === 'b' ? `${Math.round(pt.b)}%` : `${Math.round(pt.k)}K`;
+            tooltip.innerText = `${minToTime(pt.t)} | ${valText}`;
+        }
     }
 
     // --- PCHIP Logic (Ported from Dashboard) ---
