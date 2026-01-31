@@ -5,6 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta19] (Cache Buster)
+- **Fix**: Added version query parameter to frontend resource URL to force browser cache refresh.
+
 ## [0.4.0-beta18] (Glass Precision UI)
 - **UI**: **Complete Redesign**. Implemented "Glass Precision" style with frosted glass backgrounds.
 - **UI**: **Responsive Layout**. Charts now sit side-by-side on desktop (Grid) and stack on mobile.

@@ -156,7 +156,9 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     # 2. Register Lovelace Resource
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
     
-    URL = "/hcl_lighting_static/hcl-curve-card.js"
+    BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
+    # Append version to URL to force cache bust on update
+    FULL_URL = f"{BASE_URL}?v=0.4.0-beta19"
     
     if "lovelace" not in hass.data:
         return
@@ -173,23 +175,30 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     if not resources:
         return
 
-    # Check if exists
+    # Check for existing and cleanup old versions
+    found = False
+    # Collect items to delete to avoid modifying while iterating
+    to_delete = []
+    
     for resource in resources.async_items():
-        if resource["url"] == URL:
-            return
-            
-    # Clean up old /local/ path if it exists
-    OLD_URL = "/local/hcl_lighting/hcl-curve-card.js"
-    for resource in resources.async_items():
-        if resource["url"] == OLD_URL:
-            _LOGGER.info("Removing old HCL Curve Card resource: %s", OLD_URL)
-            await resources.async_delete_item(resource["id"])
-
-    _LOGGER.info("Auto-registering HCL Curve Card resource: %s", URL)
-    try:
-        await resources.async_create_item({"res_type": "module", "url": URL})
-    except Exception as e:
-        _LOGGER.warning("Failed to auto-register HCL Curve Card: %s", e)
+        if resource["url"].startswith(BASE_URL):
+            if resource["url"] == FULL_URL:
+                found = True
+            else:
+                to_delete.append(resource["id"])
+                
+    # Remove old versions
+    for res_id in to_delete:
+        _LOGGER.info("Removing old HCL Curve Card resource (cache cleanup): %s", res_id)
+        await resources.async_delete_item(res_id)
+        
+    # Create if not found
+    if not found:
+        _LOGGER.info("Auto-registering HCL Curve Card resource: %s", FULL_URL)
+        try:
+            await resources.async_create_item({"res_type": "module", "url": FULL_URL})
+        except Exception as e:
+            _LOGGER.warning("Failed to auto-register HCL Curve Card: %s", e)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
