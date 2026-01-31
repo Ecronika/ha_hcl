@@ -11,27 +11,92 @@ class HCLCurveCard extends HTMLElement {
         // Cache für JSON String um unnötige Cycles zu sparen
         this._lastPointsJSON = "";
 
-        // Presets (Early Bird, Night Owl, etc.)
+        // Presets: Scientifically inspired 12-point profiles
+        // T: Minutes, B: Brightness (%), K: Kelvin
         this._presets = {
+            // 1. DEFAULT: The "True" DIN-inspired Curve (v0.2.1 Replica)
+            // Balance between Activation, Regeneration (Dip), and Sleep.
             "default": [
-                { t: 360, b: 0, k: 2700 }, { t: 420, b: 100, k: 4500 },
-                { t: 720, b: 100, k: 6500 }, { t: 1080, b: 100, k: 4500 },
-                { t: 1200, b: 50, k: 2700 }, { t: 1320, b: 0, k: 2200 }
+                { t: 420, b: 30, k: 2700 }, // 07:00 Wake
+                { t: 540, b: 50, k: 4500 }, // 09:00 Rise
+                { t: 570, b: 75, k: 5500 }, // 09:30
+                { t: 600, b: 100, k: 6500 }, // 10:00 Peak Focus
+                { t: 720, b: 100, k: 6500 }, // 12:00
+                { t: 750, b: 50, k: 4000 }, // 12:30 Regeneration Dip (Lunch)
+                { t: 780, b: 50, k: 4000 }, // 13:00
+                { t: 810, b: 75, k: 6000 }, // 13:30 Re-Activation
+                { t: 840, b: 75, k: 6000 }, // 14:00
+                { t: 960, b: 50, k: 4000 }, // 16:00
+                { t: 1080, b: 30, k: 2700 }, // 18:00 Wind Down
+                { t: 1320, b: 10, k: 2200 }  // 22:00 Bedtime
             ],
+
+            // 2. FOCUS (Work from Home): High Performance
+            // Sustained high Kelvin for alertness, minimal dip to maintain concentration.
+            "focus": [
+                { t: 420, b: 30, k: 3500 }, // 07:00 Wake (Cold Shower)
+                { t: 480, b: 80, k: 5500 }, // 08:00 Fast Ramp Up
+                { t: 540, b: 100, k: 6500 }, // 09:00 Deep Work Start
+                { t: 720, b: 100, k: 6500 }, // 12:00
+                { t: 780, b: 80, k: 5500 }, // 13:00 Lunch (Brief relax, stay alert)
+                { t: 840, b: 100, k: 6000 }, // 14:00 Afternoon Push
+                { t: 1020, b: 80, k: 5500 }, // 17:00 End Work
+                { t: 1080, b: 50, k: 3500 }, // 18:00 Transition
+                { t: 1200, b: 30, k: 2700 }, // 20:00
+                { t: 1320, b: 10, k: 2200 }, // 22:00
+                { t: 1439, b: 5, k: 2000 }, // Midnight
+                { t: 0, b: 5, k: 2000 }  // Loop
+            ],
+
+            // 3. RELAX (Wellness / Weekend): Hygge
+            // Never exceeds 4500K. Softer brightness. Early warm evening.
+            "relax": [
+                { t: 480, b: 20, k: 2200 }, // 08:00 Slow Start
+                { t: 600, b: 50, k: 3000 }, // 10:00
+                { t: 720, b: 70, k: 4000 }, // 12:00 Max "Daylight" (Neutral)
+                { t: 840, b: 70, k: 4000 }, // 14:00
+                { t: 960, b: 50, k: 3000 }, // 16:00 Tea Time
+                { t: 1080, b: 40, k: 2700 }, // 18:00
+                { t: 1200, b: 30, k: 2200 }, // 20:00
+                { t: 1260, b: 20, k: 2000 }, // 21:00 Fireplace
+                { t: 1320, b: 10, k: 2000 }, // 22:00
+                { t: 1439, b: 5, k: 2000 },
+                { t: 0, b: 5, k: 2000 },
+                { t: 300, b: 10, k: 2000 }
+            ],
+
+            // 4. EARLY BIRD: Default shifted -90 Minutes
+            // Wake 05:30, Sleep 20:30
             "early_bird": [
-                { t: 300, b: 0, k: 2700 }, { t: 360, b: 100, k: 4500 },
-                { t: 660, b: 100, k: 6500 }, { t: 1020, b: 100, k: 4500 },
-                { t: 1140, b: 50, k: 2700 }, { t: 1260, b: 0, k: 2200 }
+                { t: 330, b: 30, k: 2700 }, // 05:30
+                { t: 450, b: 50, k: 4500 },
+                { t: 480, b: 75, k: 5500 },
+                { t: 510, b: 100, k: 6500 },
+                { t: 630, b: 100, k: 6500 },
+                { t: 660, b: 50, k: 4000 }, // 11:00 Lunch
+                { t: 690, b: 50, k: 4000 },
+                { t: 720, b: 75, k: 6000 },
+                { t: 750, b: 75, k: 6000 },
+                { t: 870, b: 50, k: 4000 },
+                { t: 990, b: 30, k: 2700 }, // 16:30 Wind Down
+                { t: 1230, b: 10, k: 2200 }  // 20:30 Sleep
             ],
+
+            // 5. NIGHT OWL: Default shifted +120 Minutes
+            // Wake 09:00, Sleep 00:00
             "night_owl": [
-                { t: 480, b: 0, k: 2700 }, { t: 540, b: 100, k: 4500 },
-                { t: 840, b: 100, k: 6500 }, { t: 1200, b: 100, k: 4500 },
-                { t: 1320, b: 50, k: 2700 }, { t: 1439, b: 0, k: 2200 }
-            ],
-            "cozy": [
-                { t: 420, b: 0, k: 2200 }, { t: 540, b: 80, k: 3000 },
-                { t: 720, b: 80, k: 4000 }, { t: 1140, b: 80, k: 3000 },
-                { t: 1260, b: 20, k: 2200 }, { t: 1380, b: 0, k: 2000 }
+                { t: 540, b: 30, k: 2700 }, // 09:00
+                { t: 660, b: 50, k: 4500 },
+                { t: 690, b: 75, k: 5500 },
+                { t: 720, b: 100, k: 6500 },
+                { t: 840, b: 100, k: 6500 },
+                { t: 870, b: 50, k: 4000 }, // 14:30 Lunch
+                { t: 900, b: 50, k: 4000 },
+                { t: 930, b: 75, k: 6000 },
+                { t: 960, b: 75, k: 6000 },
+                { t: 1080, b: 50, k: 4000 },
+                { t: 1200, b: 30, k: 2700 }, // 20:00 Wind Down
+                { t: 1440, b: 10, k: 2200 }  // 00:00 Sleep
             ]
         };
     }
@@ -215,10 +280,11 @@ class HCLCurveCard extends HTMLElement {
                <span>HCL Curve</span>
                <select id="preset-select" aria-label="Presets">
                  <option value="" disabled selected>Presets...</option>
-                 <option value="default">Default</option>
+                 <option value="default">Default (Balanced)</option>
+                 <option value="focus">Focus (Home Office)</option>
+                 <option value="relax">Relax (Wellness)</option>
                  <option value="early_bird">Early Bird</option>
                  <option value="night_owl">Night Owl</option>
-                 <option value="cozy">Cozy</option>
                </select>
            </div>
            <div class="toolbar">
