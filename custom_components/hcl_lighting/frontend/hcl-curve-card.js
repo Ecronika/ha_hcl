@@ -10,6 +10,30 @@ class HCLCurveCard extends HTMLElement {
         this._isDragging = false;
         // Cache für JSON String um unnötige Cycles zu sparen
         this._lastPointsJSON = "";
+
+        // Presets (Early Bird, Night Owl, etc.)
+        this._presets = {
+            "default": [
+                { t: 360, b: 0, k: 2700 }, { t: 420, b: 100, k: 4500 },
+                { t: 720, b: 100, k: 6500 }, { t: 1080, b: 100, k: 4500 },
+                { t: 1200, b: 50, k: 2700 }, { t: 1320, b: 0, k: 2200 }
+            ],
+            "early_bird": [
+                { t: 300, b: 0, k: 2700 }, { t: 360, b: 100, k: 4500 },
+                { t: 660, b: 100, k: 6500 }, { t: 1020, b: 100, k: 4500 },
+                { t: 1140, b: 50, k: 2700 }, { t: 1260, b: 0, k: 2200 }
+            ],
+            "night_owl": [
+                { t: 480, b: 0, k: 2700 }, { t: 540, b: 100, k: 4500 },
+                { t: 840, b: 100, k: 6500 }, { t: 1200, b: 100, k: 4500 },
+                { t: 1320, b: 50, k: 2700 }, { t: 1439, b: 0, k: 2200 }
+            ],
+            "cozy": [
+                { t: 420, b: 0, k: 2200 }, { t: 540, b: 80, k: 3000 },
+                { t: 720, b: 80, k: 4000 }, { t: 1140, b: 80, k: 3000 },
+                { t: 1260, b: 20, k: 2200 }, { t: 1380, b: 0, k: 2000 }
+            ]
+        };
     }
 
     set hass(hass) {
@@ -166,12 +190,40 @@ class HCLCurveCard extends HTMLElement {
         }
         .handle.type-b { background: var(--accent-gold); box-shadow: 0 0 5px rgba(255,215,0,0.5); }
         .handle.type-k { background: var(--accent-blue); box-shadow: 0 0 5px rgba(0,229,255,0.5); }
+        
+        .color-bar {
+            height: 12px;
+            margin: 0 16px 16px 16px;
+            border-radius: 6px;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: linear-gradient(90deg, #ff8c00, #fffae0, #ffffff, #cceeff);
+        }
+        select {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 6px;
+            outline: none;
+            cursor: pointer;
+        }
+        option { background: #2c2c2c; color: white; }
       </style>
       <ha-card>
         <div class="card-header">
-           <span>HCL Curve</span>
+           <div style="display:flex; align-items:center; gap:8px;">
+               <span>HCL Curve</span>
+               <select id="preset-select" aria-label="Presets">
+                 <option value="" disabled selected>Presets...</option>
+                 <option value="default">Default</option>
+                 <option value="early_bird">Early Bird</option>
+                 <option value="night_owl">Night Owl</option>
+                 <option value="cozy">Cozy</option>
+               </select>
+           </div>
            <div class="toolbar">
-              <button id="btn-save">SAVE</button>
+              <button id="btn-test" title="Apply without saving">TEST</button>
+              <button id="btn-save" title="Save to disk">SAVE</button>
            </div>
         </div>
         <div class="charts-container">
@@ -184,11 +236,17 @@ class HCLCurveCard extends HTMLElement {
                <div class="handle-layer" id="handles-k"></div>
            </div>
         </div>
+        <div class="color-bar" id="color-bar-gradient"></div>
       </ha-card>
     `;
 
-        // Bind Save
+        // Bind Controls
         this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this._saveCurve());
+        this.shadowRoot.getElementById('btn-test').addEventListener('click', () => this._testCurve());
+        this.shadowRoot.getElementById('preset-select').addEventListener('change', (e) => {
+            this._applyPreset(e.target.value);
+            e.target.value = ""; // Reset dropdown
+        });
 
         // Initialize Charts
         this._initCharts();
@@ -202,14 +260,55 @@ class HCLCurveCard extends HTMLElement {
                 x: { type: 'linear', min: 0, max: 1440, display: false },
                 y: { display: true, position: 'right', grid: { color: 'rgba(255,255,255,0.05)' } }
             },
-            plugins: { legend: false, tooltip: false }
+            plugins: {
+                legend: false, tooltip: false,
+                // Custom Plugin for Clamped Shading (Visual Feedback)
+                annotation: {
+                    beforeDraw: (chart) => {
+                        // Only shading for Brightness Chart
+                        if (chart.canvas.id !== 'chartB') return;
+
+                        const ctx = chart.ctx;
+                        const yAxis = chart.scales.y;
+                        const xAxis = chart.scales.x;
+
+                        // Get Limits
+                        let minB = 0; let maxB = 100;
+                        if (this._hass && this.config && this.config.entity) {
+                            const attr = this._hass.states[this.config.entity].attributes;
+                            if (attr.min_brightness !== undefined) minB = attr.min_brightness;
+                            if (attr.max_brightness !== undefined) maxB = attr.max_brightness;
+                        }
+
+                        ctx.fillStyle = 'rgba(0, 0, 0, 0.4)'; // Shading color
+
+                        // Top Shade (above max)
+                        if (maxB < 100) {
+                            const yMax = yAxis.getPixelForValue(maxB);
+                            const yTop = yAxis.getPixelForValue(100);
+                            ctx.fillRect(xAxis.left, yTop, xAxis.width, yMax - yTop);
+                        }
+
+                        // Bottom Shade (below min)
+                        if (minB > 0) {
+                            const yMin = yAxis.getPixelForValue(minB);
+                            const yBot = yAxis.getPixelForValue(0);
+                            ctx.fillRect(xAxis.left, yMin, xAxis.width, yBot - yMin);
+                        }
+                    }
+                }
+            }
         };
+
+        // Register inline plugin
+        const shadingPlugin = { id: 'shading', beforeDraw: commonOpts.plugins.annotation.beforeDraw };
 
         const ctxB = this.shadowRoot.getElementById('chartB').getContext('2d');
         this._chartB = new Chart(ctxB, {
             type: 'line',
             data: { datasets: [{ data: [], borderColor: '#FFD700', fill: true, backgroundColor: 'rgba(255,215,0,0.1)', tension: 0.4 }] },
-            options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } } }
+            options: { ...commonOpts, scales: { ...commonOpts.scales, y: { min: 0, max: 100, ...commonOpts.scales.y } } },
+            plugins: [shadingPlugin]
         });
 
         const ctxK = this.shadowRoot.getElementById('chartK').getContext('2d');
@@ -305,9 +404,19 @@ class HCLCurveCard extends HTMLElement {
             const tVal = chart.scales.x.getValueForPixel(mx);
             const yVal = chart.scales.y.getValueForPixel(my);
 
-            const pt = this._points[idx];
-            // Snap to grid (15min) helps aligning
-            pt.t = Math.round(Math.max(0, Math.min(1440, tVal)) / 15) * 15;
+            // Drag Constraint: Min Distance to Neighbors
+            const prevPoint = idx > 0 ? this._points[idx - 1] : null;
+            const nextPoint = idx < this._points.length - 1 ? this._points[idx + 1] : null;
+
+            const minT = prevPoint ? prevPoint.t + 15 : 0;
+            const maxT = nextPoint ? nextPoint.t - 15 : 1440; // Hard max, can be 1440
+
+            const rawT = chart.scales.x.getValueForPixel(mx);
+            // Snap & Clamp
+            let newT = Math.round(rawT / 15) * 15;
+            newT = Math.max(minT, Math.min(maxT, newT));
+
+            this._points[idx].t = newT;
 
             if (type === 'b') {
                 pt.b = Math.round(Math.max(0, Math.min(100, yVal)));
@@ -349,6 +458,24 @@ class HCLCurveCard extends HTMLElement {
         });
     }
 
+    _testCurve() {
+        this._hass.callService('hcl_lighting', 'update_curve', {
+            entity_id: this.config.entity,
+            points: this._points,
+            mode: 'apply', // Apply runtime state
+            // driving lights is implicit in apply mode usually, or we can explicit it if backed supports
+        });
+    }
+
+    _applyPreset(name) {
+        if (this._presets[name]) {
+            // Deep copy to break references
+            this._points = JSON.parse(JSON.stringify(this._presets[name]));
+            this._refreshCharts();
+            this._schedulePreview();
+        }
+    }
+
     _updateVisuals() {
         if (!this._chartB || !this._chartK) return; // Guard
 
@@ -372,6 +499,49 @@ class HCLCurveCard extends HTMLElement {
             this._syncHandle(idx, pt, 'b', this._chartB);
             this._syncHandle(idx, pt, 'k', this._chartK);
         });
+
+        // Update Color Bar Gradient
+        this._updateColorBar(data);
+    }
+
+    _updateColorBar(data) {
+        const bar = this.shadowRoot.getElementById('color-bar-gradient');
+        if (!bar) return;
+
+        // Create CSS Gradient from PCHIP data (approximate)
+        // We pick ~10 stops to keep style string short but accurate
+        const stops = [];
+        for (let i = 0; i <= 96; i += 8) { // Every 2 hours (8 * 15m)
+            const k = data.k[i];
+            const percent = (i / 96) * 100;
+            stops.push(`${this._kelvinToRgb(k)} ${percent.toFixed(1)}%`);
+        }
+        bar.style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+    }
+
+    _kelvinToRgb(k) {
+        // Simple approx algorithm or just map to predefined colors
+        // Using a cheap approximation for UI feedback
+        let temp = k / 100;
+        let r, g, b;
+
+        if (temp <= 66) {
+            r = 255;
+            g = temp;
+            g = 99.4708025861 * Math.log(g) - 161.1195681661;
+            if (temp <= 19) b = 0;
+            else {
+                b = temp - 10;
+                b = 138.5177312231 * Math.log(b) - 305.0447927307;
+            }
+        } else {
+            r = temp - 60;
+            r = 329.698727446 * Math.pow(r, -0.1332047592);
+            g = temp - 60;
+            g = 288.1221695283 * Math.pow(g, -0.0755148492);
+            b = 255;
+        }
+        return `rgb(${Math.min(255, Math.max(0, r))}, ${Math.min(255, Math.max(0, g))}, ${Math.min(255, Math.max(0, b))})`;
     }
 
     _syncHandle(idx, pt, type, chart) {

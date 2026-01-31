@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta15] (Feature Complete UI)
+- **Feat**: **Presets**! Added drop-down with "Night Owl", "Early Bird", "Cozy", and "Default" profiles.
+- **Feat**: **Visual Feedback**: Added Color Bar (Gradient) showing resulting Kelvin color below charts.
+- **Feat**: **Clamped Shading**: Areas outside configured Brightness Min/Max are now shaded grey.
+- **Feat**: **Test Button**: Added "TEST" button to apply curve to lights *without* saving to disk.
+- **UX**: **Drag Constraints**: Points can no longer cross each other (min 15 min distance enforced).
+
 ## [0.4.0-beta14] (Frontend Polish & Accessibility)
 - **Feat**: Added full Keyboard Navigation (Arrow Keys) for handles.
 - **Feat**: Added ARIA labels/attributes for screen readers (Accessibility).
