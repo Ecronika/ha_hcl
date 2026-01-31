@@ -50,6 +50,9 @@ class HCLCurveCard extends HTMLElement {
         // Neu: ResizeObserver überwacht die tatsächliche Größe der Karte
         this._resizeObserver = new ResizeObserver(() => {
             if (this._initialized && !this._isDragging) {
+                // WICHTIG: Erst Chart-Layout erzwingen, dann zeichnen
+                if (this._chartB) this._chartB.resize();
+                if (this._chartK) this._chartK.resize();
                 this._updateVisuals();
             }
         });
@@ -59,8 +62,8 @@ class HCLCurveCard extends HTMLElement {
             this._resizeObserver.observe(container);
         }
 
-        // Initialer Render-Versuch
-        requestAnimationFrame(() => this._refreshCharts());
+        // Einmaliger verzögerter Start als Sicherheitsnetz für langsame Dashboards
+        setTimeout(() => this._refreshCharts(), 300);
     }
 
     // Neu: Cleanup beim Entfernen der Karte
@@ -286,15 +289,24 @@ class HCLCurveCard extends HTMLElement {
     }
 
     _updateVisuals() {
+        if (!this._chartB || !this._chartK) return; // Guard
+
         const data = this._calculateCurve();
 
         this._chartB.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.b[i] }));
         this._chartK.data.datasets[0].data = data.t.map((t, i) => ({ x: t, y: data.k[i] }));
 
+        // Diagramme aktualisieren
         this._chartB.update('none');
         this._chartK.update('none');
 
-        // Update Handles
+        // NEU: Sicherstellen, dass die Scales fertig berechnet sind
+        // Wenn getPixelForValue(0) immer noch 0 liefert, ist das Chart noch nicht bereit
+        if (this._chartB.scales.x.getPixelForValue(0) <= 0) {
+            return;
+        }
+
+        // Jetzt erst Handles synchronisieren
         this._points.forEach((pt, idx) => {
             this._syncHandle(idx, pt, 'b', this._chartB);
             this._syncHandle(idx, pt, 'k', this._chartK);
