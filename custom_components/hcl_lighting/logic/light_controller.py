@@ -262,14 +262,19 @@ class HCLLightController:
                 )
                 del self._capability_cache[entity_id]
             else:
-                # Valid Cache: Check Dynamic XY
-                if (cached["type"] == "ct" and 
-                    cached.get("min_kelvin") and 
-                    cached.get("max_kelvin") and
-                    (kelvin < cached["min_kelvin"] or kelvin > cached["max_kelvin"]) and 
+                # Valid Cache
+                native_type = cached["type"]
+                
+                # Dynamic Check: If Native CT but out of range -> Simulate XY
+                if (native_type == "ct" and 
+                    cached.get("min_kelvin") is not None and 
+                    cached.get("max_kelvin") is not None and
                     cached.get("supports_color")):
-                    return "xy_sim"
-                return cached["type"]
+                    
+                    if kelvin < cached["min_kelvin"] or kelvin > cached["max_kelvin"]:
+                        return "xy_sim"
+                        
+                return native_type
 
         # 2. Get Current State
         state = state_obj or self.hass.states.get(entity_id)
@@ -331,41 +336,30 @@ class HCLLightController:
               (supported_modes and ColorMode.ONOFF not in supported_modes)):
             cap_type = "dim"
         
-        # Handle CT lights with missing min/max kelvin or target kelvin out of range
+        # Handle CT lights with missing min/max kelvin
         if cap_type == "ct":
-            # If we have color_temp mode but no limits, assume standard range to avoid crash
-            # This happens with some MQTT/Template lights
-            if min_kelvin is None:
-                min_kelvin = 2000
-            if max_kelvin is None:
-                max_kelvin = 6500
-            
-            # If target kelvin is outside the light's reported range, simulate with XY if possible
-            if (kelvin < min_kelvin or kelvin > max_kelvin) and supports_color:
-                cap_type = "xy_sim" # Simulate CT using XY if target is out of range
+            if min_kelvin is None: min_kelvin = 2000
+            if max_kelvin is None: max_kelvin = 6500
 
-        # Store in Cache with Version
+        # Store NATIVE Capability in Cache
         cap_data = {
-            "type": cap_type,
+            "type": cap_type, # Always store native type (ct, xy_sim, dim)
             "min_kelvin": min_kelvin,
             "max_kelvin": max_kelvin,
             "supports_color": supports_color,
-            "version": self._cache_version  # MIGRATION TAG
+            "version": self._cache_version
         }
         self._capability_cache[entity_id] = cap_data
 
         _LOGGER.debug(
             "Capability cached for %s: %s (v%s, modes=%s)", 
-            entity_id, 
-            cap_type, 
-            self._cache_version,
-            supported_modes
+            entity_id, cap_type, self._cache_version, supported_modes
         )
 
-        # 6. Recursive Check for Dynamic XY (if it was originally CT but switched to XY_SIM)
-        # This ensures the logic for out-of-range kelvin is applied immediately after caching
-        if cap_type == "xy_sim" and cap_data["type"] == "ct": # If it was originally CT but we decided to simulate
-            return self._get_capability(entity_id, kelvin) # Recalculate with the new kelvin range logic
+        # Dynamic Override (Runtime Only, do not cache simulation type)
+        if (cap_type == "ct" and supports_color and 
+            (kelvin < min_kelvin or kelvin > max_kelvin)):
+             return "xy_sim"
         
         return cap_type
 

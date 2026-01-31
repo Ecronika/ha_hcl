@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.4.0-rc5 (Stability & UX Polish)
+- **Performance**: **GPU Rendering**. Migrated drag-handles to hardware-accelerated `translate` to eliminate layout thrashing.
+- **Stability**: **Infinite Loop Safeguard**. Added recursion guards and visibility checks to `_updateVisuals` to prevent background freeze.
+- **Stability**: **Memory Leak Fix**. Chart instances are now properly destroyed when the card is removed.
+- **UX**: **Overlay Validation**. Validation messages now float over the chart instead of shifting the layout.
+- **UX**: **Smart Active Phase**. Validation now detects mismatches (e.g., "Bright enough but too cold") and highlights specific actionable areas.
+- **Bug Fix**: **Sticky XY Mode**. Fixed an issue where out-of-range color commands permanently locked lights into XY mode (until restart).
+
 ## [0.4.0-rc4] (Validation & Visual Guardrails)
 - **Feat**: **Validation Engine**. Live checks for "Errors" (save blocked) and "Warnings" (advisory).
 - **Feat**: **Visual Feedback**. Warning zones (e.g., steep slopes, bright nights) are now visually highlighted in the chart.
