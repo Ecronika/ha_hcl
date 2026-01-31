@@ -537,16 +537,22 @@ class HCLLightController:
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
             
             if delta_k > delta_b:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": transition}, blocking=True)
+                # Check if brightness change is significant enough to warrant a snap
+                if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
+                    await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
+                # Send color without transition to avoid glitches on IKEA bulbs
+                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
             else:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True)
+                # Only snap color if delta is significant. NEVER send transition with color_temp.
+                if abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
+                    await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
                 await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
         except Exception as e:
             _LOGGER.error("Smart CT error %s: %s", entity_id, e)
             # Fallback
             try:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True)
+                # Fallback: Send everything, NO transition (safest)
+                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin}, blocking=True)
             except Exception:
                 pass
 
