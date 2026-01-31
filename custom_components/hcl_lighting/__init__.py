@@ -101,6 +101,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
             hass.config_entries.async_update_entry(config_entry, options=new_options)
             return
+        # 2b. Handle Revert
+        if mode == "revert":
+            config_entry = hass.config_entries.async_get_entry(entry_id)
+            curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
+            if curve_config:
+                 hcl_calc.generate_curve_from_config(curve_config)
+            else:
+                 # Revert to legacy logic if no curve config
+                 wake = config_entry.options.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
+                 midday = config_entry.options.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
+                 sleep = config_entry.options.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
+                 hcl_calc.generate_curve(wake, midday, sleep)
+            _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
+            # Notify frontend to refresh
+            from homeassistant.helpers.dispatcher import async_dispatcher_send
+            async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+            return
 
         # 3. Notify Updates (Preview/Apply)
         from homeassistant.helpers.dispatcher import async_dispatcher_send

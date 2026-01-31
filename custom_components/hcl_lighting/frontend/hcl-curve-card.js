@@ -222,6 +222,7 @@ class HCLCurveCard extends HTMLElement {
                </select>
            </div>
            <div class="toolbar">
+              <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
               <button id="btn-test" title="Apply without saving">TEST</button>
               <button id="btn-save" title="Save to disk">SAVE</button>
            </div>
@@ -243,6 +244,7 @@ class HCLCurveCard extends HTMLElement {
         // Bind Controls
         this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this._saveCurve());
         this.shadowRoot.getElementById('btn-test').addEventListener('click', () => this._testCurve());
+        this.shadowRoot.getElementById('btn-revert').addEventListener('click', () => this._revertCurve());
         this.shadowRoot.getElementById('preset-select').addEventListener('change', (e) => {
             this._applyPreset(e.target.value);
             e.target.value = ""; // Reset dropdown
@@ -389,6 +391,10 @@ class HCLCurveCard extends HTMLElement {
         e.preventDefault();
         el.setPointerCapture(e.pointerId);
         this._isDragging = true;
+
+        // Fix: Variable pt definieren!
+        const pt = this._points[idx];
+
         // Visual feedback for grabbing not strictly needed via class if cursor: grabbing works, 
         // but beneficial for state tracking.
 
@@ -455,6 +461,14 @@ class HCLCurveCard extends HTMLElement {
             entity_id: this.config.entity,
             points: this._points,
             mode: 'save'
+        });
+    }
+
+    _revertCurve() {
+        if (!confirm('Discard all unsaved changes and reload from disk?')) return;
+        this._hass.callService('hcl_lighting', 'update_curve', {
+            entity_id: this.config.entity,
+            mode: 'revert'
         });
     }
 

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-beta16] (Bug Fixes & Revert)
+- **Fix**: Resolved `ReferenceError` preventing Drag & Drop of points.
+- **Feat**: Added **REVERT** button to discard unsaved changes and reload from disk.
+- **Feat**: Added `mode: revert` to `update_curve` service.
+
 ## [0.4.0-beta15] (Feature Complete UI)
 - **Feat**: **Presets**! Added drop-down with "Night Owl", "Early Bird", "Cozy", and "Default" profiles.
 - **Feat**: **Visual Feedback**: Added Color Bar (Gradient) showing resulting Kelvin color below charts.
