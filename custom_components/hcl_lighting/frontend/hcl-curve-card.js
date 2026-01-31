@@ -234,14 +234,14 @@ class HCLCurveCard extends HTMLElement {
               border-color: rgba(255, 255, 255, 0.3);
               color: #fff;
           }
-          /* FIX: Dropdown Option Styling */
+          /* FIX: Dropdown Option Styling (Robust) */
           select {
-             background: rgba(255, 255, 255, 0.05);
+             background: rgba(20, 20, 25, 0.95); /* Contrast against Glass */
              border: 1px solid rgba(255, 255, 255, 0.1);
              color: var(--text-main); 
           }
           option {
-             background-color: #222; /* Dark background */
+             background-color: #1a1a1a; /* Safety for Safari/Mobile */
              color: white;
           }
 
@@ -679,7 +679,12 @@ class HCLCurveCard extends HTMLElement {
 
         // NEU: Sicherstellen, dass die Scales fertig berechnet sind
         // Wenn getPixelForValue(0) immer noch 0 liefert, ist das Chart noch nicht bereit
-        if (this._chartB.scales.x.getPixelForValue(0) <= 0) {
+        // NEU: Sicherstellen, dass die Scales fertig berechnet sind
+        // Wenn getPixelForValue(0) immer noch 0 liefert, oder undefined ist
+        const scaleReady = this._chartB.scales.x.getPixelForValue(0) > 0;
+        if (!scaleReady) {
+            // Retry after next frame to prevent (0,0) stacking
+            requestAnimationFrame(() => this._updateVisuals());
             return;
         }
 

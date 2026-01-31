@@ -126,6 +126,16 @@ class HCLCalculator:
         m_min = to_min(midday_time)
         s_min = to_min(sleep_time)
 
+        # Sanity Check: Prevent invalid or compressed spans
+        # Calculate active day duration (accounting for midnight wrap)
+        total_span = (s_min - w_min) % 1440
+        if total_span <= 360: # Less than 6 hours active day is suspicious
+            _LOGGER.warning(
+                "Legacy config has very short wake-sleep span (%d min). Using safe defaults.", 
+                total_span
+            )
+            w_min, m_min, s_min = 420, 750, 1320 # Fallback 07:00, 12:30, 22:00
+
         # v0.2.1 Replica Logic (Offsets)
         # Structure: time, kelvin, brightness
         raw_points = [
@@ -331,7 +341,13 @@ class HCLCalculator:
         
         # PCHIP Logic:
         # If signs differ (peak/valley), slope is 0 to enforce monotonicity
+        # PCHIP Logic:
+        # If signs differ (peak/valley), slope is 0 to enforce monotonicity
         if d_left * d_right <= 0:
+            return 0
+            
+        # PCHIP Zero-Division Guard (Flat lines)
+        if abs(d_left) < 1e-9 or abs(d_right) < 1e-9:
             return 0
         
         # Harmonic Mean for slope (Weighted by interval lengths)

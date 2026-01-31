@@ -8,5 +8,5 @@
   "funding_url": "https://github.com/Ecronika/ha_hcl",
   "iot_class": "calculated",
   "requirements": [],
-  "version": "0.4.0-beta20"
+  "version": "0.4.0-rc1"
 }

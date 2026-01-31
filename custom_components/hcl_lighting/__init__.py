@@ -80,7 +80,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         
         if not entity_entry:
              raise HomeAssistantError(f"Entity not found: {entity_id}")
+        
+        # Hardening: Validate Entity Type
+        if entity_entry.domain not in ["sensor", "switch"]:
+             raise HomeAssistantError(f"Invalid entity '{entity_id}'. Must be an HCL sensor or switch.")
              
+        if entity_entry.platform != DOMAIN:
+             raise HomeAssistantError(f"Entity '{entity_id}' is not an HCL Lighting entity.")
+              
         entry_id = entity_entry.config_entry_id
         if not entry_id:
              raise HomeAssistantError(f"Entity {entity_id} is not linked to a Config Entry.")
@@ -158,7 +165,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.4.0-beta20"
+    FULL_URL = f"{BASE_URL}?v=0.4.0-rc1"
     
     if "lovelace" not in hass.data:
         return

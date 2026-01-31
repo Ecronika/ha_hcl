@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc1] (Stability Hardening)
+- **Fix**: **PCHIP Reliability**. Added zero-division guards to PCHIP implementation to prevent crashes with flat line segments.
+- **Fix**: **Frontend Race Condition**. Added robust checks to wait until Chart scales are fully initialized before positioning handles (prevents "0,0 stack" bug).
+- **Fix**: **Service Validation**. `update_curve` service now strictly validates entity domain (must contain `sensor` or `switch`) and platform.
+- **Fix**: **Migration Safety**. Added sanity checks to `migrate_legacy_config` to prevent invalid or compressed timelines (< 6h wake span).
+- **UI**: **Dropdown Contrast**. Improved CSS for preset dropdowns for better cross-browser readability.
+
 ## [0.4.0-beta20] (Visual Refinements)
 - **UI**: Removed chart points ("Pearl Chain") for a cleaner look.
 - **UI**: Improved Dropdown readability with dark background.
