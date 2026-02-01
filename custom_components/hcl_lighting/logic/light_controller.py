@@ -46,14 +46,20 @@ class HCLLightController:
         self.override_manager = override_manager
         self.config_entry = config_entry
         self._capability_cache = {}
+        self._result_cache = {} # (entity_id, k_bucket) -> result
         self._cache_version = CAPABILITY_CACHE_VERSION
 
     def prune_cache(self, valid_entity_ids: set[str]) -> None:
         """Prune capability cache of invalid/removed entities."""
+        # Prune main cache
         to_remove = [eid for eid in self._capability_cache if eid not in valid_entity_ids]
-        
         for eid in to_remove:
             del self._capability_cache[eid]
+            
+        # Prune result cache (Keys are (entity_id, bucket))
+        to_remove_res = [k for k in self._result_cache if k[0] not in valid_entity_ids]
+        for k in to_remove_res:
+             del self._result_cache[k]
             
         if to_remove:
             _LOGGER.debug("Pruned %d stale entities from capability cache", len(to_remove))
@@ -247,6 +253,26 @@ class HCLLightController:
     def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
         """Determine capabilities of a light (Cached with Migration Safety)."""
         
+        # 0. Optimization: Result Cache (Bucket: 500K)
+        # Avoids repeating logic checks every cycle for static states.
+        k_bucket = kelvin // 500
+        res_key = (entity_id, k_bucket)
+        
+        if res_key in self._result_cache and not state_obj:
+            # Only use cache if not forcing state_obj update
+            return self._result_cache[res_key]
+
+        result = self._get_capability_internal(entity_id, kelvin, state_obj)
+        
+        # Store result
+        if not state_obj:
+             self._result_cache[res_key] = result
+             
+        return result
+
+    def _get_capability_internal(self, entity_id: str, kelvin: int, state_obj=None) -> str:
+        """Internal capability resolution logic."""
+        
         # 1. Check Cache + Version Migration
         if entity_id in self._capability_cache:
             cached = self._capability_cache[entity_id]
@@ -261,6 +287,9 @@ class HCLLightController:
                     self._cache_version
                 )
                 del self._capability_cache[entity_id]
+                # Also clear result cache for this entity as properties might change
+                keys_to_clear = [k for k in self._result_cache if k[0] == entity_id]
+                for k in keys_to_clear: del self._result_cache[k]
             else:
                 # Valid Cache
                 native_type = cached["type"]

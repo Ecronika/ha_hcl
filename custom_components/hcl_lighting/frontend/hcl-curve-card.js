@@ -189,10 +189,19 @@ class HCLCurveCard extends HTMLElement {
     }
 
     // Neu: Cleanup beim Entfernen der Karte
+    // Neu: Cleanup beim Entfernen der Karte
     disconnectedCallback() {
         if (this._resizeObserver) {
             this._resizeObserver.disconnect();
         }
+
+        // Remove Event Listeners
+        this.shadowRoot.getElementById('btn-sanitize')?.removeEventListener('click', this._boundSanitize);
+        this.shadowRoot.getElementById('btn-save')?.removeEventListener('click', this._boundSave);
+        this.shadowRoot.getElementById('btn-test')?.removeEventListener('click', this._boundTest);
+        this.shadowRoot.getElementById('btn-revert')?.removeEventListener('click', this._boundRevert);
+        this.shadowRoot.getElementById('preset-select')?.removeEventListener('change', this._boundPreset);
+
         // STABILITY FIX: Destroy charts to prevent memory leaks
         if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
         if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
@@ -451,15 +460,21 @@ class HCLCurveCard extends HTMLElement {
       </ha-card>
     `;
 
-        // Bind Controls
-        this.shadowRoot.getElementById('btn-sanitize').addEventListener('click', () => this._sanitizeCurve());
-        this.shadowRoot.getElementById('btn-save').addEventListener('click', () => this._saveCurve());
-        this.shadowRoot.getElementById('btn-test').addEventListener('click', () => this._testCurve());
-        this.shadowRoot.getElementById('btn-revert').addEventListener('click', () => this._revertCurve());
-        this.shadowRoot.getElementById('preset-select').addEventListener('change', (e) => {
+        // Bind Controls (Store references for cleanup)
+        this._boundSanitize = () => this._sanitizeCurve();
+        this._boundSave = () => this._saveCurve();
+        this._boundTest = () => this._testCurve();
+        this._boundRevert = () => this._revertCurve();
+        this._boundPreset = (e) => {
             this._applyPreset(e.target.value);
             e.target.value = ""; // Reset dropdown
-        });
+        };
+
+        this.shadowRoot.getElementById('btn-sanitize').addEventListener('click', this._boundSanitize);
+        this.shadowRoot.getElementById('btn-save').addEventListener('click', this._boundSave);
+        this.shadowRoot.getElementById('btn-test').addEventListener('click', this._boundTest);
+        this.shadowRoot.getElementById('btn-revert').addEventListener('click', this._boundRevert);
+        this.shadowRoot.getElementById('preset-select').addEventListener('change', this._boundPreset);
 
         // Initialize Charts
         this._initCharts();
@@ -1118,10 +1133,20 @@ class HCLCurveCard extends HTMLElement {
 
         if (!area || !btnSave) return;
 
+        // Security: Escape HTML to prevent XSS
+        const escapeHtml = (unsafe) => {
+            return String(unsafe)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        };
+
         if (this._validationResult.errors.length > 0) {
             area.style.display = 'block';
             area.innerHTML = this._validationResult.errors.map(e =>
-                `<div style="background:rgba(255,0,0,0.2); border-left:4px solid red; padding:8px; margin-bottom:4px; font-size:12px;">🚫 ${e.msg}</div>`
+                `<div style="background:rgba(255,0,0,0.2); border-left:4px solid red; padding:8px; margin-bottom:4px; font-size:12px;">🚫 ${escapeHtml(e.msg)}</div>`
             ).join('');
             btnSave.disabled = true;
             btnSave.style.opacity = 0.5;
@@ -1134,7 +1159,7 @@ class HCLCurveCard extends HTMLElement {
         if (this._validationResult.warnings.length > 0) {
             area.style.display = 'block';
             area.innerHTML = this._validationResult.warnings.map(w =>
-                `<div style="background:rgba(255,165,0,0.2); border-left:4px solid orange; padding:8px; margin-bottom:4px; font-size:12px;">⚠️ ${w.msg}</div>`
+                `<div style="background:rgba(255,165,0,0.2); border-left:4px solid orange; padding:8px; margin-bottom:4px; font-size:12px;">⚠️ ${escapeHtml(w.msg)}</div>`
             ).join('');
         } else {
             area.style.display = 'none';

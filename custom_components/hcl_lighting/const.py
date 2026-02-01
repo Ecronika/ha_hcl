@@ -46,3 +46,7 @@ ATTR_CURVE_VERSION = "curve_version"
 ATTR_CURVE_HASH = "curve_hash"
 ATTR_SAMPLE_COUNT = "sample_count"
 ATTR_SAMPLES = "samples"
+
+# Release Hardening Constants
+XY_COLOR_DISTANCE_THRESHOLD = 0.05 # Euclidean distance in CIE 1931 space
+IGNORE_WINDOW_SECONDS = 2.0        # Seconds to ignore events after setting a value

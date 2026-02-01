@@ -185,8 +185,8 @@ class HCLCalculator:
         """
         # Defensive Input Validation & Coercion
         try:
-            min_brightness = int(min_brightness) if min_brightness is not None else DEFAULT_MIN_BRIGHTNESS
-            max_brightness = int(max_brightness) if max_brightness is not None else DEFAULT_MAX_BRIGHTNESS
+            min_brightness = int(float(min_brightness)) if min_brightness is not None else DEFAULT_MIN_BRIGHTNESS
+            max_brightness = int(float(max_brightness)) if max_brightness is not None else DEFAULT_MAX_BRIGHTNESS
         except (ValueError, TypeError):
              _LOGGER.error("Invalid config types for brightness. Using defaults.")
              min_brightness = DEFAULT_MIN_BRIGHTNESS
@@ -325,13 +325,30 @@ class HCLCalculator:
         return brightness, kelvin
 
     def _pchip_slope(self, t_prev, y_prev, t_curr, y_curr, t_next, y_next):
-        """Calculate monotonic slope at t_curr given neighbors."""
-        # Handle wrapping for time diffs
-        dt_left = t_curr - t_prev
-        if dt_left <= 0: dt_left += 1440
+        """Calculate PCHIP (Piecewise Cubic Hermite Interpolating Polynomial) slope.
         
-        dt_right = t_next - t_curr
-        if dt_right <= 0: dt_right += 1440
+        Uses weighted harmonic mean to ensure monotonicity (no overshoots).
+        
+        Args:
+            t_prev, t_curr, t_next: Time in minutes (0-1439, wraps at midnight)
+            y_prev, y_curr, y_next: Values (Brightness 0-100 or Kelvin 2000-7000)
+        
+        Returns:
+            float: Slope (dy/dt) at t_curr, zero if local extremum detected
+            
+        Edge Cases:
+            - Midnight wrap: 1430 -> 10 normalized to 1430 -> 1450
+            - Flat segments: Returns 0 if |slope| < 1e-9
+        """
+        # Normalize time differences (handle midnight wrap)
+        def normalize_diff(t_to, t_from):
+            diff = t_to - t_from
+            if diff <= -720: diff += 1440 # Wrapped forward (e.g. 1430 -> 10)
+            elif diff > 720: diff -= 1440 # Wrapped backward
+            return diff
+
+        dt_left = normalize_diff(t_curr, t_prev)
+        dt_right = normalize_diff(t_next, t_curr)
         
         # Secants
         if dt_left == 0 or dt_right == 0: return 0
@@ -339,8 +356,6 @@ class HCLCalculator:
         d_left = (y_curr - y_prev) / dt_left
         d_right = (y_next - y_curr) / dt_right
         
-        # PCHIP Logic:
-        # If signs differ (peak/valley), slope is 0 to enforce monotonicity
         # PCHIP Logic:
         # If signs differ (peak/valley), slope is 0 to enforce monotonicity
         if d_left * d_right <= 0:

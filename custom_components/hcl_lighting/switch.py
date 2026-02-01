@@ -37,7 +37,9 @@ from .const import (
     DEFAULT_MIDDAY_TIME,
     DEFAULT_SLEEP_TIME,
     SERVICE_UPDATE_CURVE,
-    CONF_CURVE_CONFIG
+    SERVICE_UPDATE_CURVE,
+    CONF_CURVE_CONFIG,
+    IGNORE_WINDOW_SECONDS
 )
 
 from .logic.hcl_math import HCLCalculator
@@ -273,8 +275,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             except Exception:
                  _LOGGER.exception("Error in HCL update loop")
 
-    @callback
-    def _handle_light_state_change(self, event: Event) -> None:
+    async def _handle_light_state_change(self, event: Event) -> None:
         """Handle state changes of monitored lights."""
         try:
             if not self._is_on:
@@ -307,15 +308,14 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
                      
                      # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
-                     self.override_manager.set_ignore_window(entity_id, 2.0)
+                     self.override_manager.set_ignore_window(entity_id, IGNORE_WINDOW_SECONDS)
 
-                     self.hass.async_create_task(
-                         self.controller.apply_fast(
-                             entity_id, 
-                             fresh_b, 
-                             fresh_k,
-                             state_obj=new_state
-                         )
+                     # Await immediately to block handling of subsequent events until command is sent
+                     await self.controller.apply_fast(
+                         entity_id, 
+                         fresh_b, 
+                         fresh_k,
+                         state_obj=new_state
                      )
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return

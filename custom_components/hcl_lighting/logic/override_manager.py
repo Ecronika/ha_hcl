@@ -11,6 +11,7 @@ from ..const import (
     OVERRIDE_TIMEOUT_HOURS,
     OVERRIDE_BRIGHTNESS_DELTA,
     OVERRIDE_KELVIN_DELTA,
+    XY_COLOR_DISTANCE_THRESHOLD,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -176,7 +177,7 @@ class OverrideManager:
                     # Euclidean distance
                     dist_xy = ((curr_x - exp_x)**2 + (curr_y - exp_y)**2)**0.5
                     
-                    if dist_xy > 0.05:
+                    if dist_xy > XY_COLOR_DISTANCE_THRESHOLD:
                         is_override = True
                         reasons.append(f"XY Color (d:{dist_xy:.3f})")
                 except Exception:

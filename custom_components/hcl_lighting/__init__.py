@@ -141,6 +141,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.services.async_register(DOMAIN, "update_curve", async_update_curve_service)
 
+    # 4. Create Setup Issue (Onboarding)
+    # This guides the user to add the dashboard card
+    from homeassistant.helpers import issue_registry as ir
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        "setup_curve_card",
+        is_fixable=False,
+        severity=ir.IssueSeverity.NOTICE,
+        translation_key="setup_curve_card"
+    )
+
     return True
 
 from homeassistant.components.http import StaticPathConfig
