@@ -6,175 +6,103 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 [![GitHub release](https://img.shields.io/github/release/Ecronika/ha_hcl.svg)](https://github.com/Ecronika/ha_hcl/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## Features
+## ✨ Features
 
-✨ **Biologically-inspired light curves** based on DIN SPEC 67600 standard
-- Smooth transitions using cubic Hermite spline interpolation
-- Morning activation: gradual warm-up from 2200K → 6500K
-- Midday regeneration dip: brief reduction around 12:30 PM
-- Afternoon re-activation: second focus peak
-- Evening wind-down: smooth transition back to warm tones
+### 🎨 Interactive Dashboard (New in v0.4.0)
+- **Visual Editor**: Visualize and edit your lighting curve with an interactive, touch-friendly chart.
+- **Drag & Drop**: Simply drag control points to adjust Brightness and Color Temperature.
+- **Biologically Accurate Presets**: One-click profiles for **Early Bird**, **Night Owl**, or **Shift Work**.
+- **Live Validation**: Immediate feedback on "implausible" curves (e.g., bright blue light at midnight).
 
-🎯 **Flexible targeting**
-- Control lights by individual entities, devices, areas, or groups
-- Automatic group expansion to individual lights
-- Smart capability detection for each light
+### 🧬 Biologically Inspired Core
+- **PCHIP Interpolation**: Uses **Monotone Cubic Splines** for smooth, organic transitions without overshooting.
+- **HCL Phases**:
+    - **Morning**: Gradual warming up (Activating).
+    - **Midday Dip**: A natural "Regeneration" dip around 12:30 PM (4000K).
+    - **Focus**: High-Kelvin peaks for concentration.
+    - **Evening**: Smooth wind-down to warm, dim light.
 
-🧠 **Smart compatibility**
-- Automatic detection of light capabilities (color temp, brightness-only, etc.)
-- Extended warm white simulation using XY color for lights that don't support very low Kelvin values
-- Optional "Smart Transition" mode to prevent visual artifacts on incompatible lights
+### 🧠 Intelligent Control
+- **Smart Override 2.0**: Automatically detects manual changes (brightness or color) and pauses HCL control.
+- **Traffic Control**: Updates are only sent if values change significantly (reducing Zigbee/WiFi traffic by ~90%).
+- **Instant-On**: Lights turn on *immediately* with the correct circadian settings (no "Color Flash").
+- **Capabilities**: Auto-detects RGB/XY support to simulate Warm White (< 2000K) on capable bulbs.
 
-⚙️ **Configurable**
-- Set custom minimum and maximum brightness ranges
-- Enable/disable smart transition mode
-- Full UI configuration (no YAML required)
+---
 
-🔄 **Intelligent updates**
-- Periodic updates (~30s) with smart delta detection
-- Instant application when lights turn on (no color flash)
-- State restoration after Home Assistant restart
+## 🚀 Installation
 
-## Installation
+### 1. Install via HACS
+1. Open HACS in Home Assistant.
+2. Go to "Integrations" > Top Right Menu > "Custom repositories".
+3. Add `https://github.com/Ecronika/ha_hcl` as **Integration**.
+4. Click **Install**.
+5. **Restart Home Assistant**.
 
-### HACS (Recommended)
+### 2. Add Integration
+1. Go to **Settings** → **Devices & Services** → **Add Integration**.
+2. Search for **"HCL Lighting"**.
+3. Follow the setup wizard to name your instance (e.g., "Living Room") and select lights.
 
-1. Open HACS in Home Assistant
-2. Click on "Integrations"
-3. Click the three dots in the top right corner
-4. Select "Custom repositories"
-5. Add `https://github.com/Ecronika/ha_hcl` as repository with category "Integration"
-6. Click "Install" on the HCL Lighting card
-7. Restart Home Assistant
+### 3. Setup Dashboard Card
+**Automatic Setup (Recommended)**:
+After installation, HCL Lighting creates a **Repair Issue** notification in Home Assistant with a one-click guide to add the card.
 
-### Manual Installation
+**Manual Setup**:
+Add a "Manual" card to your dashboard with the following YAML:
+```yaml
+type: custom:hcl-curve-card
+entity: sensor.hcl_lighting_curve
+```
+*(The frontend resource `hcl-curve-card.js` is automatically registered.)*
 
-1. Download the latest release from the [releases page](https://github.com/Ecronika/ha_hcl/releases)
-2. Extract the `custom_components/hcl_lighting` folder to your Home Assistant `custom_components` directory
-3. Restart Home Assistant
-
-## 🎨 Frontend Installation (v0.4.0+)
-
-The new **Interactive Curve Editor** is a custom Lovelace card.
-
-1.  **Copy Resource**: Ensure `www/hcl_lighting/hcl-curve-card.js` is in your configuration directory.
-2.  **Add Resource**: Go to **Settings > Dashboards > ... > Resources** and add:
-    *   **URL**: `/local/hcl_lighting/hcl-curve-card.js`
-    *   **Type**: JavaScript Module
-3.  **Add Card**: In your dashboard, add a "Manual" card:
-    ```yaml
-    type: 'custom:hcl-curve-card'
-    entity: 'sensor.hcl_lighting_curve'
-    ```
+---
 
 ## ⚙️ Configuration
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for **"HCL Lighting"**
-4. **General Setup**:
-   - **Name**: Give this instance a unique name (e.g., "Living Room").
-   - **Target Lights**: Select lights, areas, or devices to control.
-5. **Schedule (Dynamic Curve)**:
-   - **Wake Time**: Start of the active day (Default: 07:00).
-   - **Midday Time**: Time of the "Regeneration Dip" (lowest midday point) (Default: 12:30).
-   - **Sleep Time**: End of the day (Wind down complete) (Default: 22:00).
-6. **options**:
-   - **Minimum Brightness**: Lowest brightness level (default: 10%)
-   - **Maximum Brightness**: Highest brightness level (default: 100%)
-   - **Smart Transition Mode**: Enable for better compatibility with some lights.
+### Global Scheduling Options
+Go to **Configure** on the integration entry to set your "Dynamic Anchors". These options generate the **Default Curve**:
 
-## Multiple Areas / Instances
+*   **Wake Time**: Start of the active day (Default: 07:00).
+*   **Midday Time**: The lowest point of the "Regeneration Dip" (Default: 12:30).
+*   **Sleep Time**: End of the day (Default: 22:00).
+*   **Min/Max Brightness**: Global scaling limits (e.g., 10% - 100%).
 
-You can create **multiple independent HCL instances** to control different areas with different schedules (e.g. "Living Room" vs "Home Office" or "Shift Work" vs "Normal"). Each instance operates completely independently.
+> **Note**: If you manually edit the curve in the Dashboard Card, your manual points take precedence over these time settings until you click **REVERT** in the UI.
 
-## Usage
+### Smart Options
+*   **Smart Transition Mode**: Enable this if your lights flash or stutter during updates. It separates Brightness and Color commands.
 
-Once configured, the integration creates a switch entity:
-- **Turn ON**: Lights will automatically follow the HCL curve
-- **Turn OFF**: Integration stops controlling lights
+---
 
-The switch entity provides attributes showing:
-- `calculated_brightness`: Current brightness percentage from HCL curve
-- `calculated_color_temp`: Current color temperature in Kelvin
-- `target_entities`: List of controlled lights
+## 📖 Usage
 
-## HCL Curve Details (v0.3.0 Profile)
+The integration creates a **Switch** entity (e.g., `switch.hcl_living_room`).
 
-The integration generates a custom 24-hour curve based on your configured **Wake**, **Midday**, and **Sleep** times. The default profile mimics natural daylight with a specific "Regeneration Dip" at midday.
+*   **ON**: HCL is active. Lights follow the curve.
+*   **OFF**: HCL is paused. Lights behave like normal smart lights.
+*   **Manual Override**: If you manually change a light (e.g., via Wall Switch or App), the HCL Switch turns **OFF** automatically. Turn it back **ON** to resume circadian control.
 
-**Key Control Points (Relative to your schedule):**
+---
 
-| Phase | Relative Time | Color Temp | Brightness | Description |
-|-------|---------------|------------|------------|-------------|
-| **Wake Up** | `Wake` | 2700K | 30% | Gentle start |
-| **Morning Rise** | `Wake + 2h` | 4500K | 50% | Energizing |
-| **Peak Focus** | `Wake + 3h` | 6500K | 100% | Maximum alertness |
-| **Dip Start** | `Midday - 30m` | 6500K | 100% | Pre-lunch peak |
-| **Regeneration** | `Midday` | **4000K** | **50%** | **Rest & Digest** |
-| **Recovery** | `Midday + 1h` | 6000K | 75% | Afternoon focus |
-| **Evening** | `Sleep - 4h` | 2700K | 30% | Warm atmosphere |
-| **Bedtime** | `Sleep` | 2200K | 10% | Melatonin ready |
+## 🔧 Technical Details
 
-*Transitions use **Cubic Hermite Spline** interpolation for smooth, organic changes.*
+*   **Update Loop**: Every **27 seconds** (periodic).
+*   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
+*   **Manual Detection Thresholds**:
+    *   Brightness: > 2% deviation
+    *   Color Temp: > 100K deviation
+    *   XY Color: > 0.05 Euclidean distance
+*   **Traffic Optimization**:
+    *   Brightness: Updates only if delta > 1%
+    *   Kelvin: Updates only if delta > 50K
 
-## Compatibility
+---
 
-Tested with:
-- Philips Hue lights
-- IKEA Trådfri lights
-- Generic Zigbee lights
-- Z-Wave lights
+## 🤝 Contributing & Support
 
-The integration automatically adapts to each light's capabilities:
-- **Color temperature support**: Full HCL control
-- **XY/RGB color support**: Warm white simulation for low Kelvin values
-- **Brightness only**: Brightness curve without color temperature
-- **On/Off only**: Skipped (no control possible)
+*   **Issues**: [GitHub Issue Tracker](https://github.com/Ecronika/ha_hcl/issues)
+*   **Discussion**: [Home Assistant Community](https://community.home-assistant.io/)
 
-## Technical Details
-
-- **Update interval**: 27 seconds (periodic)
-- **Transition duration**: 20 seconds (configurable via smart transition mode)
-- **Update Thresholds** (Traffic Control):
-  - Brightness: >1% change
-  - Color temperature: >50K change
-- **Override Thresholds** (Manual Detection):
-  - Brightness: >2% deviation (with divergence detection)
-  - Color temperature: >100K deviation (with steep slope tolerance)
-  - Color (XY): >0.05 vector distance
-- **Interpolation method**: Cubic Hermite splines with periodic boundary conditions
-
-## Troubleshooting
-
-**Lights don't update:**
-- Ensure the HCL switch is turned ON
-- Check that lights are turned on (integration only controls active lights)
-- Verify lights are included in your target selection
-
-**Color flashes when turning lights on:**
-- This is expected behavior - the integration applies HCL settings instantly
-- If undesired, you can disable the integration temporarily
-
-**Incompatible transitions:**
-- Enable "Smart Transition Mode" in the integration options
-- This splits brightness and color updates to prevent visual artifacts
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Credits
-
-- Inspired by DIN SPEC 67600 standard for biologically effective lighting
-- Built for the Home Assistant community
-
-## Support
-
-If you encounter issues or have questions:
-- Open an issue on [GitHub](https://github.com/Ecronika/ha_hcl/issues)
-- Share your experience in the [Home Assistant Community](https://community.home-assistant.io/)
+### License
+MIT License. Copyright (c) 2026.

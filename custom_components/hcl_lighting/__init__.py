@@ -143,14 +143,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 4. Create Setup Issue (Onboarding)
     # This guides the user to add the dashboard card
+    # Lookup the created sensor entity to be helpful
+    ent_reg = er.async_get(hass)
+    curve_sensor_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_curve")
+    
+    # Fallback if registry lookup fails (though it shouldn't if setup was successful)
+    if not curve_sensor_id:
+        normalized_name = entry.title.lower().replace(" ", "_").replace("-", "_")
+        curve_sensor_id = f"sensor.{normalized_name}_curve_data"
+
     from homeassistant.helpers import issue_registry as ir
     ir.async_create_issue(
         hass,
         DOMAIN,
-        "setup_curve_card",
+        f"setup_curve_card_{entry.entry_id}", # Unique per instance
         is_fixable=False,
-        severity=ir.IssueSeverity.NOTICE,
-        translation_key="setup_curve_card"
+        severity=ir.IssueSeverity.WARNING,
+        translation_key="setup_curve_card",
+        translation_placeholders={
+            "entity_id": curve_sensor_id
+        }
     )
 
     return True

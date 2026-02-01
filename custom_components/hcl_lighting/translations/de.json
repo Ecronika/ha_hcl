@@ -38,5 +38,11 @@
                 "name": "HCL Modus"
             }
         }
+    },
+    "issues": {
+        "setup_curve_card": {
+            "title": "HCL Kurven-Karte einrichten",
+            "description": "Um deine Lichtkurve anzupassen, füge bitte die **HCL Curve Card** zu deinem Dashboard hinzu.\n\n1. Gehe zu deinem Dashboard\n2. Dashboard bearbeiten -> Karte hinzufügen\n3. Wähle 'Manuell' und füge ein:\n\n```yaml\ntype: custom:hcl-curve-card\nentity: {entity_id}\n```"
+        }
     }
 }

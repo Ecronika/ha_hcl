@@ -5,220 +5,300 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## v0.4.0-rc6 (IKEA Compatibility)
-- **Bug Fix**: **IKEA Transition Glitch**. Removed `transition` parameter from all `color_temp` commands to prevent brightness "dips" on Zigbee consumer bulbs.
-- **Optimization**: **Redundant Checks**. Filtered out redundant "Snap" commands in Smart Transition mode to reduce Zigbee traffic.
+## [0.4.0-rc7] - 2026-02-02
+### Security
+- **XSS Prevention**: Fixed a vulnerability in the Validation UI by escaping HTML in error messages.
 
-## v0.4.0-rc5 (Stability & UX Polish)
-- **Performance**: **GPU Rendering**. Migrated drag-handles to hardware-accelerated `translate` to eliminate layout thrashing.
-- **Stability**: **Infinite Loop Safeguard**. Added recursion guards and visibility checks to `_updateVisuals` to prevent background freeze.
-- **Stability**: **Memory Leak Fix**. Chart instances are now properly destroyed when the card is removed.
-- **UX**: **Overlay Validation**. Validation messages now float over the chart instead of shifting the layout.
-- **UX**: **Smart Active Phase**. Validation now detects mismatches (e.g., "Bright enough but too cold") and highlights specific actionable areas.
-- **Bug Fix**: **Sticky XY Mode**. Fixed an issue where out-of-range color commands permanently locked lights into XY mode (until restart).
+### Added
+- **Expert Onboarding**: Added a "Repair Issue" notification to guide new users to set up the Dashboard Card via YAML.
+- **Dynamic Repair**: The onboarding message now dynamically detects the correct entity ID for each HCL instance.
+- **Visual Editor Support**: Added `getStubConfig` to the frontend card to support easier addition via the "Add Card" menu.
 
-## [0.4.0-rc4] (Validation & Visual Guardrails)
-- **Feat**: **Validation Engine**. Live checks for "Errors" (save blocked) and "Warnings" (advisory).
-- **Feat**: **Visual Feedback**. Warning zones (e.g., steep slopes, bright nights) are now visually highlighted in the chart.
-- **Feat**: **Plausibility Checks**. Warnings for Night Brightness (>10%), Night Color (>3000K), Daily Peak Duration (<4h), and Slopes.
-- **Feat**: **Sanitizer**. Auto-fix common data issues (duplicates, sorting) via new "Fix" button.
+### Fixed
+- **Startup Crash**: Fixed invalid `IssueSeverity.NOTICE` (replaced with `WARNING`) causing `AttributeError` during setup.
+- **Translations**: Added missing German translations for the "Setup Curve Card" repair issue.
+- **Race Condition**: Refactored `switch.py` to handle state changes synchronously, preventing override detection bugs.
+- **Memory Leak**: Properly remove event listeners in the Frontend Card to prevent memory bloat on dashboard navigation.
 
-## [0.4.0-rc3] (Mobile UX Polish)
-- **UX**: **Scrolling Fix**. Enabled scrolling on chart backgrounds, restricted `touch-action: none` only to handles.
-- **UX**: **Better Touch Targets**. Increased handle hit-area using pseudo-elements for easier grabbing on mobile.
+### Changed
+- **Config Handling**: Added robust type coercion (`float` -> `int`) for brightness/kelvin config values to prevent crashes.
+- **Algorithms**: Improved PCHIP midnight handling to prevent artifacts at day boundaries.
+- **Performance**: Implemented a bucketed result cache for Capability Detection to avoid redundant calculations.
+- **Code Quality**: Replaced magic numbers with named constants and improved internal documentation.
 
-## [0.4.0-rc2] (Dependency Hardening)
-- **Security**: **Local Chart.js**. Replaced external CDN dependency with local `chart.js` bundle to ensure offline functionality and stability.
-- **Perf**: **Drag Throttling**. Implemented `requestAnimationFrame` throttling for drag operations to reduce layout thrashing on lower-end devices.
-- **Fix**: **Chart Init Race**. Hardened `scaleReady` check in visual update loop to strictly wait for `xAxis.width > 0`.
+## [0.4.0-rc6] - 2026-01-31
+### Fixed
+- **IKEA Transition Glitch**: Removed `transition` parameter from all `color_temp` commands to prevent brightness "dips" on Zigbee consumer bulbs.
 
-## [0.4.0-rc1] (Stability Hardening)
-- **Fix**: **PCHIP Reliability**. Added zero-division guards to PCHIP implementation to prevent crashes with flat line segments.
-- **Fix**: **Frontend Race Condition**. Added robust checks to wait until Chart scales are fully initialized before positioning handles (prevents "0,0 stack" bug).
-- **Fix**: **Service Validation**. `update_curve` service now strictly validates entity domain (must contain `sensor` or `switch`) and platform.
-- **Fix**: **Migration Safety**. Added sanity checks to `migrate_legacy_config` to prevent invalid or compressed timelines (< 6h wake span).
-- **UI**: **Dropdown Contrast**. Improved CSS for preset dropdowns for better cross-browser readability.
+### Changed
+- **Optimization**: Filtered out redundant "Snap" commands in Smart Transition mode to reduce Zigbee traffic.
 
-## [0.4.0-beta20] (Visual Refinements)
-- **UI**: Removed chart points ("Pearl Chain") for a cleaner look.
+## [0.4.0-rc5] - 2026-01-30
+### Fixed
+- **Infinite Loop**: Added recursion guards and visibility checks to `_updateVisuals` to prevent background freeze.
+- **Memory Leak**: Chart instances are now properly destroyed when the card is removed.
+- **Sticky XY Mode**: Fixed an issue where out-of-range color commands permanently locked lights into XY mode.
+
+### Changed
+- **Rendering**: Migrated drag-handles to hardware-accelerated `translate` to eliminate layout thrashing.
+- **Validation**: Validation messages now float over the chart instead of shifting the layout.
+- **Logic**: Smart Active Phase validation now detects mismatches (e.g., "Bright enough but too cold").
+
+## [0.4.0-rc4]
+### Added
+- **Validation Engine**: Live checks for "Errors" (save blocked) and "Warnings" (advisory).
+- **Visual Feedback**: Warning zones (e.g., steep slopes, bright nights) are now visually highlighted in the chart.
+- **Plausibility Checks**: Warnings for Night Brightness (>10%), Night Color (>3000K), Daily Peak Duration (<4h), and Slopes.
+- **Sanitizer**: Auto-fix common data issues (duplicates, sorting) via new "Fix" button.
+
+## [0.4.0-rc3]
+### Changed
+- **Scrolling Fix**: Enabled scrolling on chart backgrounds, restricted `touch-action: none` only to handles.
+- **Touch Targets**: Increased handle hit-area using pseudo-elements for easier grabbing on mobile.
+
+## [0.4.0-rc2]
+### Security
+- **Local Chart.js**: Replaced external CDN dependency with local `chart.js` bundle to ensure offline functionality and stability.
+
+### Fixed
+- **Chart Init Race**: Hardened `scaleReady` check in visual update loop to strictly wait for `xAxis.width > 0`.
+
+### Changed
+- **Drag Throttling**: Implemented `requestAnimationFrame` throttling for drag operations to reduce layout thrashing.
+
+## [0.4.0-rc1]
+### Fixed
+- **PCHIP Reliability**: Added zero-division guards to PCHIP implementation to prevent crashes with flat line segments.
+- **Frontend Race Condition**: Added robust checks to wait until Chart scales are fully initialized before positioning handles.
+- **Service Validation**: `update_curve` service now strictly validates entity domain (must contain `sensor` or `switch`) and platform.
+- **Migration Safety**: Added sanity checks to `migrate_legacy_config` to prevent invalid or compressed timelines.
+
+### Changed
+- **Dropdown Contrast**: Improved CSS for preset dropdowns for better cross-browser readability.
+
+## [0.4.0-beta20]
+### Added
+- **Live Tooltips**: Added tooltips to drag handles showing Time & Value.
+
+### Changed
+- **Chart Cleanup**: Removed chart points ("Pearl Chain") for a cleaner look.
 - **UI**: Improved Dropdown readability with dark background.
-- **UX**: Added **Live Tooltips** to drag handles showing Time & Value.
 
-## [0.4.0-beta19] (Cache Buster)
-- **Fix**: Added version query parameter to frontend resource URL to force browser cache refresh.
+## [0.4.0-beta19]
+### Fixed
+- **Cache Buster**: Added version query parameter to frontend resource URL to force browser cache refresh.
 
-## [0.4.0-beta18] (Glass Precision UI)
-- **UI**: **Complete Redesign**. Implemented "Glass Precision" style with frosted glass backgrounds.
-- **UI**: **Responsive Layout**. Charts now sit side-by-side on desktop (Grid) and stack on mobile.
-- **UX**: **Pill Buttons**. Modern rounded buttons and inputs.
-- **UX**: **Overlay Labels**. "Brightness" and "Color Temp" labels directly in the chart area.
-- **UX**: **Axis Footer**. Added Timeline (00:00 - 24:00) below the color bar.
+## [0.4.0-beta18]
+### Added
+- **Axis Footer**: Added Timeline (00:00 - 24:00) below the color bar.
+- **Overlay Labels**: "Brightness" and "Color Temp" labels directly in the chart area.
+
+### Changed
+- **Complete Redesign**: Implemented "Glass Precision" style with frosted glass backgrounds.
+- **Responsive Layout**: Charts now sit side-by-side on desktop (Grid) and stack on mobile.
+- **Pill Buttons**: Modern rounded buttons and inputs.
 - **Visuals**: Enhanced handle glow effects for better visibility.
 
-## [0.4.0-beta17] (Biologically Accurate Presets)
-- **Feat**: Updated Presets to detailed **12-Point Biologically Accurate Model** (Default, Early Bird, Night Owl).
-- **Match**: Presets now match the backend default logic (Midday Dip, Morning Peak, etc.).
+## [0.4.0-beta17]
+### Added
+- **Biologically Accurate Presets**: Updated Presets to detailed 12-Point Model (Default, Early Bird, Night Owl).
 
-## [0.4.0-beta16] (Bug Fixes & Revert)
-- **Fix**: Resolved `ReferenceError` preventing Drag & Drop of points.
-- **Feat**: Added **REVERT** button to discard unsaved changes and reload from disk.
-- **Feat**: Added `mode: revert` to `update_curve` service.
+### Changed
+- **Logic**: Presets now match the backend default logic (Midday Dip, Morning Peak, etc.).
 
-## [0.4.0-beta15] (Feature Complete UI)
-- **Feat**: **Presets**! Added drop-down with "Night Owl", "Early Bird", "Cozy", and "Default" profiles.
-- **Feat**: **Visual Feedback**: Added Color Bar (Gradient) showing resulting Kelvin color below charts.
-- **Feat**: **Clamped Shading**: Areas outside configured Brightness Min/Max are now shaded grey.
-- **Feat**: **Test Button**: Added "TEST" button to apply curve to lights *without* saving to disk.
-- **UX**: **Drag Constraints**: Points can no longer cross each other (min 15 min distance enforced).
+## [0.4.0-beta16]
+### Added
+- **Revert Button**: Added `REVERT` button to discard unsaved changes and reload from disk.
+- **Service**: Added `mode: revert` to `update_curve` service.
 
-## [0.4.0-beta14] (Frontend Polish & Accessibility)
-- **Feat**: Added full Keyboard Navigation (Arrow Keys) for handles.
-- **Feat**: Added ARIA labels/attributes for screen readers (Accessibility).
-- **Fix**: Added `touch-action: none` to prevent page scrolling while dragging handles on mobile.
-- **Fix**: Wrapped external Chart.js import in try/catch for offline robustness.
-- **Perf**: Optimized `set hass` to avoid unnecessary JSON parsing.
+### Fixed
+- **Drag & Drop**: Resolved `ReferenceError` preventing Drag & Drop of points.
 
-## [0.4.0-beta13] (Final Layout Fix)
-- **Fix**: Forces Chart resize in observer and adds fallback timeout (300ms) to guarantee Chart initialization before positioning handles.
+## [0.4.0-beta15]
+### Added
+- **Presets**: Added drop-down with "Night Owl", "Early Bird", "Cozy", and "Default" profiles.
+- **Color Bar**: Added Gradient bar showing resulting Kelvin color below charts.
+- **Clamped Shading**: Areas outside configured Brightness Min/Max are now shaded grey.
+- **Test Button**: Added "TEST" button to apply curve to lights *without* saving to disk.
 
-## [0.4.0-beta12] (Robust Layout Fix)
-- **Fix**: Implemented `ResizeObserver` in Frontend Card. Handles now correctly reposition when the card resizes or loads in a dynamic dashboard (fixing the "0,0" bug robustly).
+### Changed
+- **Drag Constraints**: Points can no longer cross each other (min 15 min distance enforced).
 
-## [0.4.0-beta11] (Save & Render Fixes)
-- **Fix**: Removed invalid `await` from `async_update_entry` which caused "bool object not awaitable" errors during Save.
-- **Fix**: Frontend now waits for layout (requestAnimationFrame) before calculating initial handle positions, fixing handles appearing at (0,0).
+## [0.4.0-beta14]
+### Added
+- **Keyboard Navigation**: Added full Arrow Key support for handles.
+- **Accessibility**: Added ARIA labels/attributes for screen readers.
 
-## [0.4.0-beta10] (Stability Hardening)
-- **Fix**: Prevents "ZeroDivisionError" crash in PCHIP if fewer than 2 control points exist.
-- **Fix**: Resolves critical "Dispatcher Leak" causing multiple redundant update cycles per save.
-- **Fix**: Ensures "Update Curve" service raises visible errors in UI if Entity/Config is invalid.
-- **Improved**: Hardened `light_controller` against invalid `supported_color_modes` (NoneType).
+### Fixed
+- **Scrolling**: Added `touch-action: none` to prevent page scrolling while dragging handles on mobile.
+- **Reliability**: Wrapped external Chart.js import in try/catch for offline robustness.
 
-## [0.4.0-beta9] (Release Candidate Fixes)
-- **Fix**: Backend now stores Control Points as Dicts (not Tuples), fixing "Points at 0,0" bug in Frontend.
-- **Fix**: Corrected API call `hass.helpers.entity_registry.async_get` -> `er.async_get` in Service.
+### Changed
+- **Performance**: Optimized `set hass` to avoid unnecessary JSON parsing.
 
-## [0.4.0-beta8] (Hotfix: Service Resolution)
-- **Fix**: Card now sends `entity_id` to `update_curve` service.
-- **Fix**: Service `update_curve` is now a Global Service (accepting Switch or Sensor entity) to resolve the correct config entry.
-- **Improved**: Switch properly subscribes to "Apply" signals from the Card.
+## [0.4.0-beta13]
+### Fixed
+- **Layout**: Forces Chart resize in observer and adds fallback timeout (300ms) to guarantee initialization.
 
-## [0.4.0-beta7] (Hotfix: Lovelace Deprecation)
-- **Fix**: Use `lovelace_data.resources` (attribute) instead of `.get("resources")` to avoid future breaking change warning.
+## [0.4.0-beta12]
+### Fixed
+- **Layout**: Implemented `ResizeObserver` to robustly fix the "0,0" handle bug on resize.
 
-## [0.4.0-beta6] (Hotfix: Services)
-- **Fix**: Added missing `services.yaml` definition for `update_curve`. Fixing `Failed to load services.yaml` error.
+## [0.4.0-beta11]
+### Fixed
+- **Save Error**: Removed invalid `await` from `async_update_entry` which caused errors during Save.
+- **Render Race**: Frontend now waits for layout before calculating initial handle positions.
 
-## [0.4.0-beta5] (Hotfix: Static Path)
-- **Fix**: Use `async_register_static_paths` instead of deprecated default method. Fixes setup error.
+## [0.4.0-beta10]
+### Fixed
+- **Math**: Prevents "ZeroDivisionError" crash in PCHIP if fewer than 2 control points exist.
+- **Leak**: Resolves critical "Dispatcher Leak" causing multiple redundant update cycles per save.
+- **Validation**: Ensures "Update Curve" service raises visible errors in UI if Entity/Config is invalid.
 
-## [0.4.0-beta4] (Self-Contained)
-- **Refactor**: Frontend assets now served internally via `/hcl_lighting_static/`.
-- **UX**: No longer requires manual file copying to `www/`. Fully self-contained integration.
+### Changed
+- **Robustness**: Hardened `light_controller` against invalid `supported_color_modes` (NoneType).
 
-## [0.4.0-beta3] (Auto-Registration)
-- **Feature**: Auto-register `hcl-curve-card.js` as Lovelace Resource on startup.
+## [0.4.0-beta9]
+### Fixed
+- **Data Structure**: Backend now stores Control Points as Dicts (not Tuples), fixing "Points at 0,0" bug.
+- **API**: Corrected API call `hass.helpers.entity_registry.async_get` -> `er.async_get`.
+
+## [0.4.0-beta8]
+### Fixed
+- **Service**: Card now sends `entity_id` to `update_curve` service.
+- **Service Scope**: `update_curve` is now a Global Service to resolve the correct config entry.
+
+### Changed
+- **Logic**: Switch properly subscribes to "Apply" signals from the Card.
+
+## [0.4.0-beta7]
+### Fixed
+- **Deprecation**: Use `lovelace_data.resources` instead of dict access to avoid warnings.
+
+## [0.4.0-beta6]
+### Fixed
+- **Configuration**: Added missing `services.yaml` definition for `update_curve`.
+
+## [0.4.0-beta5]
+### Fixed
+- **Setup**: Use `async_register_static_paths` instead of deprecated default method.
+
+## [0.4.0-beta4]
+### Changed
+- **Assets**: Frontend assets now served internally via `/hcl_lighting_static/`.
+- **Packaging**: No longer requires manual file copying to `www/`. Fully self-contained.
+
+## [0.4.0-beta3]
+### Added
+- **Auto-Registration**: Auto-register `hcl-curve-card.js` as Lovelace Resource on startup.
+
+### Changed
 - **UX**: Eliminates manual installation step for Dashboard Card.
 
-## [0.4.0-beta2] (Frontend Alpha)
-- **Feature**: `custom:hcl-curve-card` Lovelace Card.
+## [0.4.0-beta2]
+### Added
+- **Frontend**: `custom:hcl-curve-card` Lovelace Card.
 - **Frontend**: Full PCHIP Interpolation logic in JS.
 - **Frontend**: Interactive Drag & Drop UI (Glassmorphism).
 - **Frontend**: Integrated `preview` (live update) and `save` actions.
 
-## [0.4.0-beta1] (Interactive Backend)
-- **Feature**: "Free-hand" Curve Logic (Arbitrary Control Points).
-- **Feature**: `CurveConfig` data structure for explicit point storage.
-- **Feature**: `hcl_lighting.update_curve` service for Preview/Apply/Save.
-- **Feature**: `sensor.hcl_lighting_curve` (Source of Truth) for frontend synchronization.
-- **Logic**: Migrated Interpolation to **PCHIP (Monotone Cubic Spline)**. Matches Professional Design Tools & Dashboard (WYSIWYG).
+## [0.4.0-beta1]
+### Added
+- **Features**: "Free-hand" Curve Logic (Arbitrary Control Points).
+- **Features**: `CurveConfig` data structure for explicit point storage.
+- **Services**: `hcl_lighting.update_curve` service for Preview/Apply/Save.
+- **Entities**: `sensor.hcl_lighting_curve` (Source of Truth) for frontend synchronization.
+
+### Changed
 - **Migration**: Automatic migration of v0.3.0 settings to v0.2.1-replica point list.
+- **Interpolation**: Migrated to **PCHIP (Monotone Cubic Spline)** to match professional tools.
 
 ## [0.3.0] - 2026-01-30
-### "Dynamic & Customizable" Release
-
-This major release empowers users to tailor the HCL curve to their specific daily schedule while improving stability and supporting multiple independent instances.
-
-### 🌟 Major Features
+### Added
 - **User-Customizable Schedule**:
-    - **Dynamic Anchors**: Define your own `Wake Time`, `Midday (Dip)`, and `Sleep Time`. The curve automatically stretches and adapts to your rhythm.
-    - **Shift Work Support**: Handles schedules that wrap around midnight (e.g., Sleep at 01:00 AM) seamlessly.
-    - **Elastic Intervals**: Intelligent math prevents "impossible" curves if times are set too close together.
-- **Custom Instance Naming**:
-    - Assign unique names (e.g., "HCL Living Room", "HCL Kids") during setup for easier identification in the Device Registry.
-- **Refined Default Curve**:
-    - Tuned the default generation logic to match the popular, natural profile of **v0.2.1**:
-        - **Centered Midday Dip**: The configured "Midday" time is now the lowest point of the dip (4000K).
-        - **Simpler Phases**: Removed complex "Social Evening" offsets in favor of a smooth, linear wind-down.
-
-### 🛠️ Improvements & Fixes
-- **Stability**:
-    - **Brightness Ping-Pong**: Fixed a rounding issue where brightness would oscillate by ±1%.
-    - **Shared State Isolation**: Critical fix ensuring multiple HCL instances do not leak curve data to each other.
-    - **Null Safety**: Hardened `OverrideManager` against startup race conditions.
+    - **Dynamic Anchors**: Define your own `Wake Time`, `Midday (Dip)`, and `Sleep Time`.
+    - **Shift Work Support**: Handles schedules that wrap around midnight seamlessly.
+    - **Elastic Intervals**: Intelligent math prevents "impossible" curves.
+- **Custom Instance Naming**: Assign unique names during setup.
 - **Translations**: Added full English and German translations for all new configuration options.
+
+### Changed
+- **Refined Default Curve**: Tuned default generation to match the natural profile of v0.2.1 (Centered Midday Dip, Simpler Phases).
 - **Math**: Improved Midnight wrapping logic to effectively handle day crossings.
 
+### Fixed
+- **Stability**: Fixed "Brightness Ping-Pong" where brightness would oscillate by ±1%.
+- **Isolation**: Critical fix ensuring multiple HCL instances do not leak curve data to each other.
+- **Null Safety**: Hardened `OverrideManager` against startup race conditions.
+
+
 ## [0.2.1] - 2026-01-28
-### "Architecture & Intelligence" Release
-
-This major release marks the transition from MVP to a production-grade HCL system. It introduces a modular architecture, an intelligent "Manual Override" detection system, and "Instant-On" low-latency performance.
-
-### 🌟 Major Features
-- **Smart Override 2.0**: The system detects when you manually adjust lights and automatically releases control.
-    - **Divergence Detection**: Distinguishes between natural HCL transitions and manual interventions (trajectory analysis).
-    - **Color Support**: Now detects manual color changes (e.g., Blue, Red) via XY/RGB divergence check.
+### Added
+- **Smart Override 2.0**:
+    - **Divergence Detection**: Distinguishes between natural HCL transitions and manual interventions.
+    - **Color Support**: Detects manual color changes via XY/RGB divergence check.
     - **Steep Slope Tolerance**: Intelligent logic prevents false positives during the aggressive 12:15 PM HCL dip.
-- **"Instant-On" Performance**:
-    - **Fast-Path HCL**: Lights receive their correct HCL settings *immediately* upon turning on, bypassing the "Color Flash" artifact.
+- **Instant-On Performance**:
+    - **Fast-Path HCL**: Lights receive settings *immediately* upon turning on, bypassing "Color Flash".
     - **Zero Latency**: Optimization of task scheduling ensures commands hit the network instantly.
 - **Smart Traffic Control**:
-    - **Dynamic Thresholds**: Updates are only sent if values change significantly (>100K or >2%), reducing Zigbee/WiFi traffic by ~90%.
-    - **Timezone Awareness**: All calculations now strictly follow Local Time to prevent circadian drift.
+    - **Dynamic Thresholds**: Updates are only sent if values change significantly (>100K or >2%).
+    - **Timezone Awareness**: Calculations now strictly follow Local Time.
 
-### 🏗️ Architecture & Internal
-- **Modular Codebase**: Split monolithic code into specialized logic modules (`hcl_math`, `light_controller`, `override_manager`).
+### Changed
+- **Architecture**: Split monolithic code into modules (`hcl_math`, `light_controller`, `override_manager`).
 - **Resilient Update Loop**: Parallel execution (asyncio) ensures one failing light doesn't block others.
-- **Memory Safety**: Automated cache pruning prevents long-term memory leaks.
-- **Concurrency**: Guarded update loops prevent race conditions during rapid state changes.
+- **Capabilities**: Enhanced auto-detection of light capabilities (XY vs CT) with safe caching.
 
-### 🐛 Bug Fixes & Polish
+### Fixed
 - **Group Safety**: Automatic filtering of Zigbee/Hue groups to prevent "Double Control" conflicts.
 - **Zombie Cleanup**: Strict timer management prevents ghost updates after reloads.
-- **Capability 2.0**: Enhanced auto-detection of light capabilities (XY vs CT) with safe caching.
+- **Memory Safety**: Automated cache pruning prevents long-term memory leaks.
+
 
 ## [0.1.0] - 2026-01-24
-
 ### Added
-- Initial release of HCL Lighting integration
-- Automatic brightness and color temperature adjustment based on time of day
-- Cubic Hermite spline interpolation for smooth, natural transitions
-- Support for DIN SPEC 67600 inspired HCL curve with key phases:
-  - Morning activation (warm-up to 6500K)
-  - Midday regeneration dip (12:30 PM)
-  - Afternoon re-activation
-  - Evening wind-down
-- Flexible targeting system:
-  - Individual entities
-  - Devices
-  - Areas
-  - Groups (with automatic expansion)
-- Smart compatibility features:
-  - Automatic light capability detection
-  - Extended warm white simulation using XY color for low Kelvin values
-  - Optional "Smart Transition" mode for incompatible lights
-- Configurable brightness limits (min/max)
-- Instant HCL application when lights turn on (prevents color flash)
-- Periodic updates every 5 minutes with smart delta detection
-- State restoration after Home Assistant restart
-- Full UI configuration (no YAML required)
-- German and English translations
+- Initial release of HCL Lighting integration.
+- Automatic brightness and color temperature adjustment based on time of day.
+- Cubic Hermite spline interpolation for smooth, natural transitions.
+- Support for DIN SPEC 67600 inspired HCL curve (Morning, Midday, Evening).
+- Flexible targeting system (Entities, Devices, Areas, Groups).
+- Automatic light capability detection and Extended Warm White simulation (XY).
+- Optional "Smart Transition" mode.
+- Configurable brightness limits (min/max).
+- Instant HCL application when lights turn on.
+- State restoration after Home Assistant restart.
+- Full UI configuration (no YAML required).
+- German and English translations.
 
-### Technical Details
-- Update interval: 5 minutes
-- Default transition duration: 60 seconds
-- Delta thresholds: 2% brightness, 50K color temperature
-- Interpolation: Cubic Hermite splines with periodic boundary conditions
-
+[0.4.0-rc7]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc7
+[0.4.0-rc6]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc6
+[0.4.0-rc5]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc5
+[0.4.0-rc4]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc4
+[0.4.0-rc3]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc3
+[0.4.0-rc2]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc2
+[0.4.0-rc1]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc1
+[0.4.0-beta20]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta20
+[0.4.0-beta19]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta19
+[0.4.0-beta18]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta18
+[0.4.0-beta17]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta17
+[0.4.0-beta16]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta16
+[0.4.0-beta15]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta15
+[0.4.0-beta14]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta14
+[0.4.0-beta13]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta13
+[0.4.0-beta12]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta12
+[0.4.0-beta11]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta11
+[0.4.0-beta10]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta10
+[0.4.0-beta9]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta9
+[0.4.0-beta8]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta8
+[0.4.0-beta7]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta7
+[0.4.0-beta6]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta6
+[0.4.0-beta5]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta5
+[0.4.0-beta4]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta4
+[0.4.0-beta3]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta3
+[0.4.0-beta2]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta2
+[0.4.0-beta1]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-beta1
+[0.3.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.3.0
+[0.2.1]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.2.1
 [0.2.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.1.0
