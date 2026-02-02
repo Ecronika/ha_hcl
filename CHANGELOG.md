@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc13] - 2026-02-02
+### Fixed
+- **Validation UI**: Fixed missing validation highlighting on the Color Temperature (Kelvin) chart. The background plugin was previously only registered for the Brightness chart. All warnings (like "Temp too low") now correctly display an orange overlay on the affected graph area.
+
 ## [0.4.0-rc12] - 2026-02-02
 ### Fixed
 - **Accessibility**: Fixed focus loss during keyboard navigation (Arrow Keys). The card now restores focus to the active handle after re-rendering.
@@ -294,6 +298,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc13]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc13
 [0.4.0-rc12]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc12
 [0.4.0-rc11]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc11
 [0.4.0-rc10]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc10

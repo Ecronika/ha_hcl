@@ -553,7 +553,8 @@ class HCLCurveCard extends HTMLElement {
                 ...commonOpts,
                 elements: { point: { radius: 0, hoverRadius: 0 }, line: { borderWidth: 2, tension: 0.4 } },
                 scales: { ...commonOpts.scales, y: { min: 2000, max: 7000, ...commonOpts.scales.y } }
-            }
+            },
+            plugins: [customBackgroundPlugin]
         });
     }
 
