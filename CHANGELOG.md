@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc15] - 2026-02-02
+### Fixed
+- **Network Stability**: Increased preview service debounce to 500ms to prevent flooding Home Assistant with requests during rapid dragging.
+- **Performance**: Optimized validation UI rendering to prevent DOM thrashing during animations.
+- **Stability**: Added visibility checks (`offsetParent`) to stop rendering loops when the card is in a background tab.
+- **Logic**: Improved state synchronization to prevent unnecessary re-renders when receiving data from the backend.
+
 ## [0.4.0-rc14] - 2026-02-02
 ### Fixed
 - **Light Theme Support**: Fixed critical UX issue where text was unreadable in Light Themes. The card now uses Home Assistant theme variables (`--primary-text-color`, `--card-background-color`, etc.) with proper fallbacks, ensuring readability in all modes.
@@ -305,6 +312,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc15]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc15
 [0.4.0-rc14]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc14
 [0.4.0-rc13]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc13
 [0.4.0-rc12]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc12

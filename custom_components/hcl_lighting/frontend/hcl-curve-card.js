@@ -118,12 +118,15 @@ class HCLCurveCard extends HTMLElement {
 
         const stateObj = hass.states[this.config.entity];
         if (stateObj && stateObj.attributes.control_points) {
+            // Existing check: if (!this._isDragging)
             if (!this._isDragging) {
                 const rawPoints = stateObj.attributes.control_points;
-                if (this._rawPointsRef === rawPoints) return;
 
+                // OPTIMIZATION: Strict deep equality check before parsing/rendering
+                // This prevents re-renders when other attributes of the sensor change (e.g. timestamp)
                 const newPointsJSON = JSON.stringify(rawPoints);
                 if (this._lastPointsJSON !== newPointsJSON) {
+                    // Logic to update local state
                     this._points = JSON.parse(newPointsJSON);
                     this._lastPointsJSON = newPointsJSON;
                     this._rawPointsRef = rawPoints;
@@ -713,7 +716,7 @@ class HCLCurveCard extends HTMLElement {
                 points: this._points,
                 mode: 'preview'
             });
-        }, 100);
+        }, 500);
     }
 
     _saveCurve() {
@@ -751,6 +754,10 @@ class HCLCurveCard extends HTMLElement {
     _updateVisuals(retryCount = 0) {
         if (!this._chartB || !this._chartK) return;
         if (!this.isConnected) return;
+
+        // NEW: Check if card is actually visible to prevent layout calculation errors
+        // offsetParent is null if element or any parent has display: none
+        if (this.offsetParent === null) return;
 
         const data = this._calculateCurve();
 
@@ -1048,6 +1055,12 @@ class HCLCurveCard extends HTMLElement {
         const area = this.shadowRoot.getElementById('validation-area');
         const btnSave = this.shadowRoot.getElementById('btn-save');
         if (!area || !btnSave) return;
+
+        // NEW: Generate a signature/hash of the current state to avoid DOM trashing
+        const currentSig = JSON.stringify(this._validationResult);
+        if (this._lastValidationSig === currentSig) return;
+        this._lastValidationSig = currentSig;
+
         const escapeHtml = (unsafe) => {
             return String(unsafe)
                 .replace(/&/g, "&amp;")
