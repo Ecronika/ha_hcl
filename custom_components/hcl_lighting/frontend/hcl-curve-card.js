@@ -110,6 +110,16 @@ class HCLCurveCard extends HTMLElement {
                 { t: 1440, b: 5, k: 2200 }  // 00:00 Sleep
             ]
         };
+
+        // Bound Event Handlers (defined in constructor to persist across reconnects)
+        this._boundSanitize = () => this._sanitizeCurve();
+        this._boundSave = () => this._saveCurve();
+        this._boundTest = () => this._testCurve();
+        this._boundRevert = () => this._revertCurve();
+        this._boundPreset = (e) => {
+            this._applyPreset(e.target.value);
+            e.target.value = "";
+        };
     }
 
     set hass(hass) {
@@ -189,6 +199,9 @@ class HCLCurveCard extends HTMLElement {
         if (container && container.clientWidth > 0) {
             this._refreshCharts();
         }
+
+        // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
+        this._bindEvents();
     }
 
 
@@ -202,11 +215,12 @@ class HCLCurveCard extends HTMLElement {
             this._dragCleanup();
         }
 
-        this.shadowRoot.getElementById('btn-sanitize')?.removeEventListener('click', this._boundSanitize);
-        this.shadowRoot.getElementById('btn-save')?.removeEventListener('click', this._boundSave);
-        this.shadowRoot.getElementById('btn-test')?.removeEventListener('click', this._boundTest);
-        this.shadowRoot.getElementById('btn-revert')?.removeEventListener('click', this._boundRevert);
-        this.shadowRoot.getElementById('preset-select')?.removeEventListener('change', this._boundPreset);
+        if (this._dragCleanup) {
+            this._dragCleanup();
+        }
+
+        // Use helper to unbind
+        this._unbindEvents();
 
         if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
         if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
@@ -455,24 +469,41 @@ class HCLCurveCard extends HTMLElement {
               </div>
           </div>
       </ha-card>
+      </ha-card>
     `;
 
-        this._boundSanitize = () => this._sanitizeCurve();
-        this._boundSave = () => this._saveCurve();
-        this._boundTest = () => this._testCurve();
-        this._boundRevert = () => this._revertCurve();
-        this._boundPreset = (e) => {
-            this._applyPreset(e.target.value);
-            e.target.value = "";
-        };
-
-        this.shadowRoot.getElementById('btn-sanitize').addEventListener('click', this._boundSanitize);
-        this.shadowRoot.getElementById('btn-save').addEventListener('click', this._boundSave);
-        this.shadowRoot.getElementById('btn-test').addEventListener('click', this._boundTest);
-        this.shadowRoot.getElementById('btn-revert').addEventListener('click', this._boundRevert);
-        this.shadowRoot.getElementById('preset-select').addEventListener('change', this._boundPreset);
-
         this._initCharts();
+    }
+
+    _bindEvents() {
+        const btnSanitize = this.shadowRoot.getElementById('btn-sanitize');
+        const btnSave = this.shadowRoot.getElementById('btn-save');
+        const btnTest = this.shadowRoot.getElementById('btn-test');
+        const btnRevert = this.shadowRoot.getElementById('btn-revert');
+        const presetSelect = this.shadowRoot.getElementById('preset-select');
+
+        // Remove first to be safe (idempotent)
+        this._unbindEvents();
+
+        if (btnSanitize) btnSanitize.addEventListener('click', this._boundSanitize);
+        if (btnSave) btnSave.addEventListener('click', this._boundSave);
+        if (btnTest) btnTest.addEventListener('click', this._boundTest);
+        if (btnRevert) btnRevert.addEventListener('click', this._boundRevert);
+        if (presetSelect) presetSelect.addEventListener('change', this._boundPreset);
+    }
+
+    _unbindEvents() {
+        const btnSanitize = this.shadowRoot.getElementById('btn-sanitize');
+        const btnSave = this.shadowRoot.getElementById('btn-save');
+        const btnTest = this.shadowRoot.getElementById('btn-test');
+        const btnRevert = this.shadowRoot.getElementById('btn-revert');
+        const presetSelect = this.shadowRoot.getElementById('preset-select');
+
+        if (btnSanitize) btnSanitize.removeEventListener('click', this._boundSanitize);
+        if (btnSave) btnSave.removeEventListener('click', this._boundSave);
+        if (btnTest) btnTest.removeEventListener('click', this._boundTest);
+        if (btnRevert) btnRevert.removeEventListener('click', this._boundRevert);
+        if (presetSelect) presetSelect.removeEventListener('change', this._boundPreset);
     }
 
     _initCharts() {
@@ -757,7 +788,8 @@ class HCLCurveCard extends HTMLElement {
 
         // NEW: Check if card is actually visible to prevent layout calculation errors
         // offsetParent is null if element or any parent has display: none
-        if (this.offsetParent === null) return;
+        // RELAXED CHECK: If width > 0, we are fine. offsetParent can be flaky in some custom cards.
+        if (this.offsetParent === null && (!this._chartB.canvas || this._chartB.canvas.clientWidth === 0)) return;
 
         const data = this._calculateCurve();
 

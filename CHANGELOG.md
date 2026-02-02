@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc16] - 2026-02-02
+### Fixed
+- **UI Responsiveness (Critical)**: Fixed "dead" buttons and preset selector after navigating between tabs. Logic for binding event listeners has been separated from the HTML rendering to ensure they are correctly re-attached even if the DOM persists.
+- **Initial Rendering**: Relaxed visibility checks to ensure the chart and handles render correctly on the first load, even if `offsetParent` reports null but dimensions are valid.
+
 ## [0.4.0-rc15] - 2026-02-02
 ### Fixed
 - **Network Stability**: Increased preview service debounce to 500ms to prevent flooding Home Assistant with requests during rapid dragging.
@@ -312,6 +317,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc16]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc16
 [0.4.0-rc15]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc15
 [0.4.0-rc14]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc14
 [0.4.0-rc13]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc13
