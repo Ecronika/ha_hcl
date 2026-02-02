@@ -211,6 +211,9 @@ class HCLCurveCard extends HTMLElement {
         if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
         if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
         this._initialized = false;
+
+        // FIX: Clear DOM to ensure render() re-runs and re-binds events on reconnect
+        this.shadowRoot.innerHTML = '';
     }
 
     render() {

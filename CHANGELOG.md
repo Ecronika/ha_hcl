@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc11] - 2026-02-02
+### Fixed
+- **UI Responsiveness**: Fixed an issue where buttons and dropdowns became unresponsive after navigating between dashboard tabs. The card now fully resets its HTML on disconnect to ensure event listeners are correctly re-bound upon reconnection.
+
 ## [0.4.0-rc10] - 2026-02-02
 ### Fixed
 - **Critical JavaScript Fix**: Restored missing `class HCLCurveCard extends HTMLElement` wrapper that was accidentally removed in rc9, causing a `SyntaxError: Unexpected strict mode reserved word`. The card now correctly registers as a Custom Element.
@@ -285,6 +289,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc11]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc11
 [0.4.0-rc10]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc10
 [0.4.0-rc9]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc9
 [0.4.0-rc8]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc8
