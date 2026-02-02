@@ -160,7 +160,10 @@ class HCLCurveCard extends HTMLElement {
         this.render();
         this._initialized = true;
 
-        this._resizeObserver = new ResizeObserver(() => {
+        this._resizeObserver = new ResizeObserver((entries) => {
+            // Check visibility explicitly
+            if (!entries.length || entries[0].contentRect.width === 0) return;
+
             // Perf: rAF um Resize-Loop Errors zu vermeiden
             requestAnimationFrame(() => {
                 if (this._initialized && !this._isDragging) {
@@ -179,23 +182,13 @@ class HCLCurveCard extends HTMLElement {
         // Initialize Charts Forcefully
         this._initCharts();
 
-        // Active Polling for Layout (Fixes Navigation Blanking)
-        this._scheduleLayoutCheck();
+        // Trigger initial visual update only if dimensions allow
+        if (container && container.clientWidth > 0) {
+            this._refreshCharts();
+        }
     }
 
-    _scheduleLayoutCheck(attempts = 0) {
-        if (!this.isConnected || attempts > 20) return; // Stop after ~1s
 
-        requestAnimationFrame(() => {
-            const container = this.shadowRoot.querySelector('.charts-container');
-            // Check if we have dimensions (layout pass done)
-            if (container && container.clientWidth > 0) {
-                this._refreshCharts();
-            } else {
-                this._scheduleLayoutCheck(attempts + 1);
-            }
-        });
-    }
 
     disconnectedCallback() {
         if (this._resizeObserver) {
@@ -217,7 +210,8 @@ class HCLCurveCard extends HTMLElement {
         this._initialized = false;
 
         // FIX: Clear DOM to ensure render() re-runs and re-binds events on reconnect
-        this.shadowRoot.innerHTML = '';
+        // CRITICAL FIX: Do NOT clear innerHTML. Let the DOM nodes stay for performance.
+        // this.shadowRoot.innerHTML = ''; 
     }
 
     render() {
@@ -225,15 +219,17 @@ class HCLCurveCard extends HTMLElement {
 
         this.shadowRoot.innerHTML = `
       <style>
-          :host {
               display: block;
-              --glass-bg: rgba(20, 20, 25, 0.6); 
-              --glass-border: rgba(255, 255, 255, 0.1);
-              --chart-bg: rgba(0, 0, 0, 0.3);
+              /* Use HA defaults with fallbacks */
+              --ha-card-background: var(--card-background-color, rgba(20, 20, 25, 0.6));
+              --primary-text-color: var(--primary-text-color, #ffffff);
+              --secondary-text-color: var(--secondary-text-color, rgba(255, 255, 255, 0.4));
+              
+              --glass-border: var(--divider-color, rgba(255, 255, 255, 0.1));
+              --chart-bg: rgba(0, 0, 0, 0.2);
+              
               --accent-gold: #FFD700;
               --accent-blue: #00E5FF;
-              --text-main: #ffffff;
-              --text-muted: rgba(255, 255, 255, 0.4);
           }
           ha-card {
               background: var(--ha-card-background, var(--glass-bg));
@@ -242,7 +238,7 @@ class HCLCurveCard extends HTMLElement {
               border: 1px solid var(--glass-border);
               border-radius: 24px; 
               overflow: hidden;
-              color: var(--text-main);
+              color: var(--primary-text-color);
               padding-bottom: 16px;
               position: relative; 
           }
@@ -268,7 +264,9 @@ class HCLCurveCard extends HTMLElement {
               display: flex;
               justify-content: space-between;
               align-items: center;
-              border-bottom: 1px solid rgba(255,255,255,0.05);
+              align-items: center;
+              border-bottom: 1px solid var(--glass-border);
+              margin-bottom: 16px;
               margin-bottom: 16px;
           }
           .controls-row {
@@ -278,9 +276,9 @@ class HCLCurveCard extends HTMLElement {
               flex-wrap: wrap;
           }
           button, select {
-              background: rgba(255, 255, 255, 0.05);
-              border: 1px solid rgba(255, 255, 255, 0.1);
-              color: rgba(255, 255, 255, 0.8);
+              background: var(--card-background-color, rgba(255, 255, 255, 0.05));
+              border: 1px solid var(--glass-border);
+              color: var(--primary-text-color);
               padding: 6px 16px;
               border-radius: 20px;
               font-size: 12px;
@@ -296,13 +294,13 @@ class HCLCurveCard extends HTMLElement {
               color: #fff;
           }
           select {
-             background: rgba(20, 20, 25, 0.95);
-             border: 1px solid rgba(255, 255, 255, 0.1);
-             color: var(--text-main); 
+             background: var(--card-background-color, rgba(20, 20, 25, 0.95));
+             border: 1px solid var(--glass-border);
+             color: var(--primary-text-color); 
           }
           option {
-             background-color: #1a1a1a;
-             color: white;
+             background-color: var(--card-background-color, #1a1a1a);
+             color: var(--primary-text-color);
           }
           .handle-info {
              position: absolute;
@@ -614,8 +612,11 @@ class HCLCurveCard extends HTMLElement {
 
         // A11y Fix: Restore focus
         if (focusedType !== null && focusedIdx !== -1) {
-            const el = this.shadowRoot.querySelector(`#handles-${focusedType} .handle[data-idx="${focusedIdx}"]`);
-            if (el) el.focus();
+            // Wait for DOM update
+            requestAnimationFrame(() => {
+                const el = this.shadowRoot.querySelector(`#handles-${focusedType} .handle[data-idx="${focusedIdx}"]`);
+                if (el) el.focus();
+            });
         }
     }
 

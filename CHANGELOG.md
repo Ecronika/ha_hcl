@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc14] - 2026-02-02
+### Fixed
+- **Light Theme Support**: Fixed critical UX issue where text was unreadable in Light Themes. The card now uses Home Assistant theme variables (`--primary-text-color`, `--card-background-color`, etc.) with proper fallbacks, ensuring readability in all modes.
+- **Performance**: Removed inefficient layout polling (busy wait) in favor of a native `ResizeObserver` approach.
+- **Stability**: Removed aggressive DOM cleanup on disconnect to prevent flickering when switching tabs.
+- **Accessibility**: Improved keyboard focus restoration logic using `requestAnimationFrame` for robust interactions.
+
 ## [0.4.0-rc13] - 2026-02-02
 ### Fixed
 - **Validation UI**: Fixed missing validation highlighting on the Color Temperature (Kelvin) chart. The background plugin was previously only registered for the Brightness chart. All warnings (like "Temp too low") now correctly display an orange overlay on the affected graph area.
@@ -298,6 +305,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc14]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc14
 [0.4.0-rc13]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc13
 [0.4.0-rc12]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc12
 [0.4.0-rc11]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc11
