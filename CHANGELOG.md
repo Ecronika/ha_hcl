@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc18] - 2026-02-02
+### Fixed
+- **Startup Rendering**: Removed the layout dimension check in `connectedCallback`. Handles are now created unconditionally on startup, ensuring they are present even if the card initializes while hidden or 0-width (e.g. mobile loading). Visual positioning will still update automatically when the layout settles.
+
 ## [0.4.0-rc17] - 2026-02-02
 ### Fixed
 - **Startup Rendering**: Fixed an issue where handles were missing on the first load because the rendering logic waited for layout dimensions too strictly. Handles are now created immediately, and positioning is updated as soon as the card becomes visible.
@@ -322,6 +326,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc18]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc18
 [0.4.0-rc17]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc17
 [0.4.0-rc16]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc16
 [0.4.0-rc15]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc15

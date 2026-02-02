@@ -195,10 +195,9 @@ class HCLCurveCard extends HTMLElement {
         // Initialize Charts Forcefully
         this._initCharts();
 
-        // Trigger initial visual update only if dimensions allow
-        if (container && container.clientWidth > 0) {
-            this._refreshCharts();
-        }
+        // FIX: Always build handles immediately, even if layout is pending.
+        // ResizeObserver will handle the positioning (updateVisuals) once dimensions are ready.
+        this._refreshCharts();
 
         // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
         this._bindEvents();
