@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc19] - 2026-02-02
+### Fixed
+- **Performance**: Added reference equality check in `set hass` to prevent expensive JSON serialization on every single state update in Home Assistant.
+- **Visuals (Light Theme)**: Fixed text contrast issues in Light Themes by forcing specific colors for the dark chart areas and adjusting CSS variable usage.
+- **Accessibility**: Improved contrast of chart grid lines and axis ticks for better readability.
+- **Stability**: Added a check in `connectedCallback` to ensure charts are refreshed immediately if data arrived while `Chart.js` was loading asynchronously.
+
 ## [0.4.0-rc18] - 2026-02-02
 ### Fixed
 - **Startup Rendering**: Removed the layout dimension check in `connectedCallback`. Handles are now created unconditionally on startup, ensuring they are present even if the card initializes while hidden or 0-width (e.g. mobile loading). Visual positioning will still update automatically when the layout settles.
@@ -326,6 +333,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc19]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc19
 [0.4.0-rc18]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc18
 [0.4.0-rc17]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc17
 [0.4.0-rc16]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc16

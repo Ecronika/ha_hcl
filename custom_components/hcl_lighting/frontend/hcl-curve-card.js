@@ -132,6 +132,9 @@ class HCLCurveCard extends HTMLElement {
             if (!this._isDragging) {
                 const rawPoints = stateObj.attributes.control_points;
 
+                // PERF-FIX: Reference check first to avoid expensive JSON.stringify
+                if (this._rawPointsRef === rawPoints) return;
+
                 // OPTIMIZATION: Strict deep equality check before parsing/rendering
                 // This prevents re-renders when other attributes of the sensor change (e.g. timestamp)
                 const newPointsJSON = JSON.stringify(rawPoints);
@@ -199,6 +202,11 @@ class HCLCurveCard extends HTMLElement {
         // ResizeObserver will handle the positioning (updateVisuals) once dimensions are ready.
         this._refreshCharts();
 
+        // STABILITY-FIX: If hass data arrived while we were importing Chart.js
+        if (this._points.length > 0) {
+            this._refreshCharts();
+        }
+
         // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
         this._bindEvents();
     }
@@ -237,9 +245,9 @@ class HCLCurveCard extends HTMLElement {
       <style>
               display: block;
               /* Use HA defaults with fallbacks */
-              --ha-card-background: var(--card-background-color, rgba(20, 20, 25, 0.6));
-              --primary-text-color: var(--primary-text-color, #ffffff);
-              --secondary-text-color: var(--secondary-text-color, rgba(255, 255, 255, 0.4));
+              /* UX-FIX: Force dark text color context if we force dark background, OR use system background */
+              --ha-card-background: var(--card-background-color, #1c1c1c); 
+              --chart-text-color: #e0e0e0; /* Fixed color for inside dark charts */
               
               --glass-border: var(--divider-color, rgba(255, 255, 255, 0.1));
               --chart-bg: rgba(0, 0, 0, 0.2);
@@ -360,7 +368,7 @@ class HCLCurveCard extends HTMLElement {
               position: absolute;
               top: 16px; left: 24px;
               font-size: 11px;
-              color: var(--text-muted);
+              color: var(--chart-text-color); /* UX-FIX: Readable on dark bg */
               text-transform: uppercase;
               letter-spacing: 1px;
               font-weight: 600;
@@ -514,7 +522,12 @@ class HCLCurveCard extends HTMLElement {
             layout: { padding: 0 },
             scales: {
                 x: { type: 'linear', min: 0, max: 1440, display: false },
-                y: { display: true, position: 'right', grid: { color: 'rgba(255,255,255,0.05)' } }
+                y: {
+                    display: true,
+                    position: 'right',
+                    grid: { color: 'rgba(255,255,255,0.1)' }, /* A11Y-FIX: Better contrast */
+                    ticks: { color: 'rgba(255,255,255,0.7)' }  /* A11Y-FIX: Readable ticks */
+                }
             },
             plugins: {
                 legend: false, tooltip: false,
