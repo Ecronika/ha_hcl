@@ -36,7 +36,7 @@ class HCLCurveCard extends HTMLElement {
         this._presets = {
             // 1. DEFAULT: The "True" DIN-inspired Curve (v0.2.1 Replica)
             "default": [
-                { t: 420, b: 30, k: 2700 }, // 07:00 Wake
+                { t: 435, b: 14, k: 2700 }, // 07:15 Wake
                 { t: 540, b: 50, k: 4500 }, // 09:00 Rise
                 { t: 570, b: 75, k: 5500 }, // 09:30
                 { t: 600, b: 100, k: 6500 }, // 10:00 Peak Focus
@@ -47,11 +47,11 @@ class HCLCurveCard extends HTMLElement {
                 { t: 840, b: 75, k: 6000 }, // 14:00
                 { t: 960, b: 50, k: 4000 }, // 16:00
                 { t: 1080, b: 30, k: 2700 }, // 18:00 Wind Down
-                { t: 1320, b: 10, k: 2200 }  // 22:00 Bedtime
+                { t: 1380, b: 5, k: 2200 }  // 23:00 Bedtime
             ],
             // 2. FOCUS (Work from Home): High Performance
             "focus": [
-                { t: 420, b: 30, k: 3500 }, // 07:00 Wake
+                { t: 420, b: 15, k: 3500 }, // 07:00 Wake
                 { t: 480, b: 80, k: 5500 }, // 08:00
                 { t: 540, b: 100, k: 6500 }, // 09:00 Deep Work
                 { t: 720, b: 100, k: 6500 }, // 12:00
@@ -81,7 +81,7 @@ class HCLCurveCard extends HTMLElement {
             ],
             // 4. EARLY BIRD
             "early_bird": [
-                { t: 330, b: 30, k: 2700 }, // 05:30
+                { t: 360, b: 11, k: 2700 }, // 06:00
                 { t: 450, b: 50, k: 4500 },
                 { t: 480, b: 75, k: 5500 },
                 { t: 510, b: 100, k: 6500 },
@@ -92,11 +92,11 @@ class HCLCurveCard extends HTMLElement {
                 { t: 750, b: 75, k: 6000 },
                 { t: 870, b: 50, k: 4000 },
                 { t: 990, b: 30, k: 2700 }, // 16:30 Wind Down
-                { t: 1230, b: 10, k: 2200 }  // 20:30 Sleep
+                { t: 1290, b: 5, k: 2200 }  // 21:30 Sleep
             ],
             // 5. NIGHT OWL
             "night_owl": [
-                { t: 540, b: 30, k: 2700 }, // 09:00
+                { t: 540, b: 20, k: 2700 }, // 09:00
                 { t: 660, b: 50, k: 4500 },
                 { t: 690, b: 75, k: 5500 },
                 { t: 720, b: 100, k: 6500 },
@@ -106,8 +106,8 @@ class HCLCurveCard extends HTMLElement {
                 { t: 930, b: 75, k: 6000 },
                 { t: 960, b: 75, k: 6000 },
                 { t: 1080, b: 50, k: 4000 },
-                { t: 1200, b: 30, k: 2700 }, // 20:00 Wind Down
-                { t: 1440, b: 10, k: 2200 }  // 00:00 Sleep
+                { t: 1200, b: 21, k: 2700 }, // 20:00 Wind Down
+                { t: 1440, b: 5, k: 2200 }  // 00:00 Sleep
             ]
         };
     }
