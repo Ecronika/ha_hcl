@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc12] - 2026-02-02
+### Fixed
+- **Accessibility**: Fixed focus loss during keyboard navigation (Arrow Keys). The card now restores focus to the active handle after re-rendering.
+- **Stability**: Added proper cleanup for global drag event listeners (`pointermove`, `pointerup`) to prevent memory leaks or "ghost drags" if the card is disconnected during an interaction.
+
 ## [0.4.0-rc11] - 2026-02-02
 ### Fixed
 - **UI Responsiveness**: Fixed an issue where buttons and dropdowns became unresponsive after navigating between dashboard tabs. The card now fully resets its HTML on disconnect to ensure event listeners are correctly re-bound upon reconnection.
@@ -289,6 +294,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc12]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc12
 [0.4.0-rc11]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc11
 [0.4.0-rc10]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc10
 [0.4.0-rc9]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc9

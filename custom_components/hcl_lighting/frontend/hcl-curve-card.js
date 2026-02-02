@@ -202,6 +202,10 @@ class HCLCurveCard extends HTMLElement {
             this._resizeObserver.disconnect();
         }
 
+        if (this._dragCleanup) {
+            this._dragCleanup();
+        }
+
         this.shadowRoot.getElementById('btn-sanitize')?.removeEventListener('click', this._boundSanitize);
         this.shadowRoot.getElementById('btn-save')?.removeEventListener('click', this._boundSave);
         this.shadowRoot.getElementById('btn-test')?.removeEventListener('click', this._boundTest);
@@ -568,6 +572,15 @@ class HCLCurveCard extends HTMLElement {
     }
 
     _rebuildHandles() {
+        // A11y Fix: Store focus to restore it after rebuilding DOM
+        let focusedType = null;
+        let focusedIdx = -1;
+        const activeEl = this.shadowRoot.activeElement;
+        if (activeEl && activeEl.classList.contains('handle')) {
+            focusedType = activeEl.classList.contains('type-b') ? 'b' : 'k';
+            focusedIdx = parseInt(activeEl.dataset.idx, 10);
+        }
+
         ['b', 'k'].forEach(type => {
             const container = this.shadowRoot.getElementById(`handles-${type}`);
             container.innerHTML = '';
@@ -597,6 +610,12 @@ class HCLCurveCard extends HTMLElement {
                 container.appendChild(el);
             });
         });
+
+        // A11y Fix: Restore focus
+        if (focusedType !== null && focusedIdx !== -1) {
+            const el = this.shadowRoot.querySelector(`#handles-${focusedType} .handle[data-idx="${focusedIdx}"]`);
+            if (el) el.focus();
+        }
     }
 
     _onKeyDown(e, idx, type) {
@@ -668,10 +687,16 @@ class HCLCurveCard extends HTMLElement {
             this._schedulePreview();
         };
 
-        const onUp = () => {
+        // Stability Fix: Store cleanup function reference
+        this._dragCleanup = () => {
             this._isDragging = false;
             window.removeEventListener('pointermove', onMove);
             window.removeEventListener('pointerup', onUp);
+            this._dragCleanup = null;
+        };
+
+        const onUp = () => {
+            if (this._dragCleanup) this._dragCleanup();
         };
 
         window.addEventListener('pointermove', onMove);
