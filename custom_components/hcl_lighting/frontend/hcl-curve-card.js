@@ -246,17 +246,26 @@ render() {
               position: absolute;
               top: 76px; /* Below header */
               left: 24px; right: 24px;
-              z-index: 20;
+              z-index: 5; /* Lower Z-Index to stay below Handle Tooltips but above chart bg */
               pointer-events: none; /* Let clicks pass through to charts */
               display: flex;
               flex-direction: column;
               gap: 4px;
           }
+          /* FIX: Ensure buttons are clickable by raising their Z-Index */
+          .card-header {
+              position: relative;
+              z-index: 15;
+              padding: 20px 24px;
           #validation-area > div {
               pointer-events: auto; /* Re-enable clicks on messages */
               box-shadow: 0 4px 12px rgba(0,0,0,0.5);
               backdrop-filter: blur(4px);
           }
+          .card-header {
+              /* Ensure Header is above Validation Overlay */
+              position: relative;
+              z-index: 25; 
               padding: 20px 24px;
               display: flex;
               justify-content: space-between;
@@ -482,11 +491,18 @@ render() {
     this.shadowRoot.getElementById('btn-revert').addEventListener('click', this._boundRevert);
     this.shadowRoot.getElementById('preset-select').addEventListener('change', this._boundPreset);
 
-    // Initialize Charts
+    // Initialize Charts (Force re-init to handle navigation/canvas loss)
     this._initCharts();
 }
 
+// Lifecycle: Fix Re-Rendering Bugs
+// When navigating away and back, disconnectedCallback destroys charts.
+// We must ensure they are fully rebuilt.
 _initCharts() {
+    // Safety Check: If charts exist but canvas is gone (detached), destroy them.
+    if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
+    if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
+
     const commonOpts = {
         responsive: true, maintainAspectRatio: false, animation: false,
         layout: { padding: 0 },

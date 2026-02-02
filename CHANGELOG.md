@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc8] - 2026-02-02
+### Fixed
+- **Dashboard Navigation Support**: Fixed a bug where charts would disappear (blank canvas) when switching between dashboard views by forcing chart re-initialization.
+- **UI Layout**: Fixed Validation Warnings overlaying the "Save/Revert" buttons, making them unclickable. Adjusted Z-Index stacking.
+
 ## [0.4.0-rc7] - 2026-02-02
 ### Security
 - **XSS Prevention**: Fixed a vulnerability in the Validation UI by escaping HTML in error messages.
@@ -271,6 +276,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc8]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc8
 [0.4.0-rc7]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc7
 [0.4.0-rc6]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc6
 [0.4.0-rc5]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc5
