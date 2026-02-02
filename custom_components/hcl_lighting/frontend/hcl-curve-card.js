@@ -394,11 +394,11 @@ class HCLCurveCard extends HTMLElement {
           .handle:hover { transform: translate(-50%, -50%) scale(1.3); }
           .handle:active { cursor: grabbing; }
           .handle.type-b { 
-              background: var(--accent-gold); 
+              background: var(--accent-gold, #FFD700); 
               box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 10px rgba(255, 215, 0, 0.6); 
           }
           .handle.type-k { 
-              background: var(--accent-blue); 
+              background: var(--accent-blue, #00E5FF); 
               box-shadow: 0 0 0 2px rgba(0,0,0,0.5), 0 0 10px rgba(0, 229, 255, 0.6); 
           }
           .footer-section {

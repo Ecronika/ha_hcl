@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc17] - 2026-02-02
+### Fixed
+- **Startup Rendering**: Fixed an issue where handles were missing on the first load because the rendering logic waited for layout dimensions too strictly. Handles are now created immediately, and positioning is updated as soon as the card becomes visible.
+- **Visuals**: Added CSS variable fallbacks for handle colors to prevent "hollow" or transparent handles if themes interfere with variable definitions.
+
 ## [0.4.0-rc16] - 2026-02-02
 ### Fixed
 - **UI Responsiveness (Critical)**: Fixed "dead" buttons and preset selector after navigating between tabs. Logic for binding event listeners has been separated from the HTML rendering to ensure they are correctly re-attached even if the DOM persists.
@@ -317,6 +322,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc17]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc17
 [0.4.0-rc16]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc16
 [0.4.0-rc15]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc15
 [0.4.0-rc14]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc14
