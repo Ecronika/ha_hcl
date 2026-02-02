@@ -160,7 +160,6 @@ getCardSize() {
 
     async connectedCallback() {
     // Robustness: Try/Catch for CDN load failure
-    // Robustness: Try/Catch for CDN load failure
     if (!window.Chart) {
         try {
             // Local Import (Robustness)
@@ -178,6 +177,7 @@ getCardSize() {
         // Perf: rAF um Resize-Loop Errors zu vermeiden
         requestAnimationFrame(() => {
             if (this._initialized && !this._isDragging) {
+                // FIX: Explizites Resize beim Observer-Trigger
                 if (this._chartB) this._chartB.resize();
                 if (this._chartK) this._chartK.resize();
                 this._updateVisuals();
@@ -190,8 +190,25 @@ getCardSize() {
         this._resizeObserver.observe(container);
     }
 
-    // Fallback Initialisierung
-    setTimeout(() => this._refreshCharts(), 300);
+    // FIX: Sofortige Initialisierung + Polling für Layout-Bereitschaft
+    this._initCharts();
+
+    // Versuche das Rendering, sobald der Browser bereit ist (löst das Tab-Wechsel Problem)
+    this._scheduleLayoutCheck();
+}
+
+// NEU: Wartet aktiv darauf, dass die Karte sichtbar ist und eine Größe hat
+_scheduleLayoutCheck(attempts = 0) {
+    if (!this.isConnected || attempts > 20) return; // Abbruch nach ~1 Sekunde
+
+    requestAnimationFrame(() => {
+        const container = this.shadowRoot.querySelector('.charts-container');
+        if (container && container.clientWidth > 0) {
+            this._refreshCharts();
+        } else {
+            this._scheduleLayoutCheck(attempts + 1);
+        }
+    });
 }
 
 // Neu: Cleanup beim Entfernen der Karte
@@ -499,7 +516,6 @@ render() {
 // When navigating away and back, disconnectedCallback destroys charts.
 // We must ensure they are fully rebuilt.
 _initCharts() {
-    // Safety Check: If charts exist but canvas is gone (detached), destroy them.
     if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
     if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
 
@@ -513,15 +529,12 @@ _initCharts() {
         plugins: {
             legend: false, tooltip: false,
             annotation: {
-                annotations: {}, // Will be populated dynamically
-                common: {
-                    drawTime: 'beforeDatasetsDraw',
-                }
+                annotations: {},
+                common: { drawTime: 'beforeDatasetsDraw' }
             }
         }
     };
 
-    // Register inline plugin for Shading + Validation Backgrounds
     const customBackgroundPlugin = {
         id: 'customBackground',
         beforeDraw: (chart) => {
@@ -529,12 +542,12 @@ _initCharts() {
             const yAxis = chart.scales.y;
             const xAxis = chart.scales.x;
 
-            // 1. Min/Max Shading (Legacy Logic)
+            if (!xAxis || !yAxis) return; // Safety check
+
             if (chart.canvas.id === 'chartB') {
-                // Get Limits
                 let minB = 0; let maxB = 100;
                 if (this._hass && this.config && this.config.entity) {
-                    const attr = this._hass.states[this.config.entity].attributes;
+                    const attr = this._hass.states[this.config.entity]?.attributes || {};
                     if (attr.min_brightness !== undefined) minB = attr.min_brightness;
                     if (attr.max_brightness !== undefined) maxB = attr.max_brightness;
                 }
@@ -565,9 +578,20 @@ _initCharts() {
         }
     };
 
-    // Register inline plugin
+    const canvasB = this.shadowRoot.getElementById('chartB');
+    const canvasK = this.shadowRoot.getElementById('chartK');
 
-    const ctxB = this.shadowRoot.getElementById('chartB').getContext('2d');
+    // FIX: Ensure canvas is clean before reuse (essential for tab switching)
+    if (canvasB) {
+        const ctx = canvasB.getContext('2d');
+        ctx.clearRect(0, 0, canvasB.width, canvasB.height);
+    }
+    if (canvasK) {
+        const ctx = canvasK.getContext('2d');
+        ctx.clearRect(0, 0, canvasK.width, canvasK.height);
+    }
+
+    const ctxB = canvasB.getContext('2d');
     this._chartB = new Chart(ctxB, {
         type: 'line',
         data: { datasets: [{ data: [], borderColor: '#FFD700', fill: true, backgroundColor: 'rgba(255,215,0,0.1)', tension: 0.4 }] },
@@ -579,7 +603,7 @@ _initCharts() {
         plugins: [customBackgroundPlugin]
     });
 
-    const ctxK = this.shadowRoot.getElementById('chartK').getContext('2d');
+    const ctxK = canvasK.getContext('2d');
     this._chartK = new Chart(ctxK, {
         type: 'line',
         data: { datasets: [{ data: [], borderColor: '#00E5FF', fill: true, backgroundColor: 'rgba(0,229,255,0.1)', tension: 0.4 }] },
@@ -593,6 +617,14 @@ _initCharts() {
 
 _refreshCharts() {
     if (!this._chartB || !this._points.length) return;
+
+    // FIX: Ensure resizing logic runs at least once per visibility cycle
+    if (this._chartB.canvas.clientWidth > 0 && this._chartB.width !== this._chartB.canvas.clientWidth) {
+        this._chartB.resize();
+    }
+    if (this._chartK.canvas.clientWidth > 0 && this._chartK.width !== this._chartK.canvas.clientWidth) {
+        this._chartK.resize();
+    }
 
     this._rebuildHandles(); // Only if points changed
     this._updateVisuals();

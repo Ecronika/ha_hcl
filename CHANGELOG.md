@@ -5,6 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0-rc9] - 2026-02-02
+### Fixed
+- **Dashboard Navigation Support (Robust)**: Implemented active layout polling (`_scheduleLayoutCheck`) and explicit resizing loop in the frontend card. This robustly fixes blank charts when switching dashboard tabs/views by ensuring the canvas only renders when it has valid dimensions.
+
 ## [0.4.0-rc8] - 2026-02-02
 ### Fixed
 - **Dashboard Navigation Support**: Fixed a bug where charts would disappear (blank canvas) when switching between dashboard views by forcing chart re-initialization.
@@ -276,6 +280,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.4.0-rc9]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc9
 [0.4.0-rc8]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc8
 [0.4.0-rc7]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc7
 [0.4.0-rc6]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0-rc6
