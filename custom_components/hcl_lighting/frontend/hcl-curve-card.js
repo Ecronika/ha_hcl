@@ -20,6 +20,7 @@ class HCLCurveCard extends HTMLElement {
 
         // Validator State
         this._validationResult = { errors: [], warnings: [] };
+        this._isDirty = false;
 
         // Settings for Validation
         this._valSettings = {
@@ -444,7 +445,7 @@ class HCLCurveCard extends HTMLElement {
              <div class="controls-row">
                 <button id="btn-sanitize" title="Fix sorting/duplicates" style="display:none;">FIX</button>
                  <button id="btn-revert" title="Discard unsaved changes">REVERT</button>
-                <button id="btn-test" title="Apply without saving">TEST</button>
+                <button id="btn-test" title="Apply unsaved changes to lights temporarily">PREVIEW</button>
                 <button id="btn-save" title="Save to disk" style="border-color:var(--accent-blue); color:var(--accent-blue);">SAVE</button>
              </div>
           </div>
@@ -689,7 +690,9 @@ class HCLCurveCard extends HTMLElement {
         if (changed) {
             e.preventDefault();
             this._updateVisuals();
-            this._schedulePreview();
+            this._updateVisuals();
+            this._isDirty = true;
+            this._updateUIState();
             e.target.focus();
         }
     }
@@ -732,7 +735,8 @@ class HCLCurveCard extends HTMLElement {
                     this._rafInFlight = false;
                 });
             }
-            this._schedulePreview();
+            this._isDirty = true;
+            this._updateUIState();
         };
 
         // Stability Fix: Store cleanup function reference
@@ -768,21 +772,41 @@ class HCLCurveCard extends HTMLElement {
             points: this._points,
             mode: 'save'
         });
+        this._isDirty = false;
+        this._updateUIState();
     }
 
     _revertCurve() {
         if (!confirm('Discard all unsaved changes and reload from disk?')) return;
+
+        // 1. Send Revert Command to Backend
         this._hass.callService('hcl_lighting', 'update_curve', {
             entity_id: this.config.entity,
             mode: 'revert'
         });
+
+        // 2. Restore local state explicitly from last known stable state
+        // This ensures the chart snaps back immediately even if the backend signal is slow
+        // or if the backend state didn't actually change (e.g. was already 'dirty' only in frontend)
+        if (this._hass && this.config.entity) {
+            const stateObj = this._hass.states[this.config.entity];
+            if (stateObj && stateObj.attributes.control_points) {
+                this._points = JSON.parse(JSON.stringify(stateObj.attributes.control_points));
+                // Clear last JSON cache to ensure next update is processed if it differs
+                this._lastPointsJSON = "";
+                this._refreshCharts();
+            }
+        }
+
+        this._isDirty = false;
+        this._updateUIState();
     }
 
     _testCurve() {
         this._hass.callService('hcl_lighting', 'update_curve', {
             entity_id: this.config.entity,
             points: this._points,
-            mode: 'apply'
+            mode: 'preview'
         });
     }
 
@@ -790,7 +814,8 @@ class HCLCurveCard extends HTMLElement {
         if (this._presets[name]) {
             this._points = JSON.parse(JSON.stringify(this._presets[name]));
             this._refreshCharts();
-            this._schedulePreview();
+            this._isDirty = true;
+            this._updateUIState();
         }
     }
 
@@ -1146,7 +1171,26 @@ class HCLCurveCard extends HTMLElement {
         }
         this._points = unique;
         this._refreshCharts();
-        this._schedulePreview();
+        this._isDirty = true;
+        this._updateUIState();
+    }
+
+    _updateUIState() {
+        const btnSave = this.shadowRoot.getElementById('btn-save');
+        const btnTest = this.shadowRoot.getElementById('btn-test');
+
+        if (btnTest) {
+            btnTest.style.backgroundColor = this._isDirty ? 'rgba(255, 215, 0, 0.2)' : '';
+            btnTest.style.borderColor = this._isDirty ? 'var(--accent-gold)' : '';
+            btnTest.innerText = this._isDirty ? 'PREVIEW *' : 'PREVIEW';
+        }
+
+        // Just ensure SAVE isn't hidden by logic elsewhere, validation UI handles disable
+        if (btnSave && this._isDirty) {
+            btnSave.style.boxShadow = '0 0 10px rgba(0, 229, 255, 0.3)';
+        } else if (btnSave) {
+            btnSave.style.boxShadow = 'none';
+        }
     }
 }
 

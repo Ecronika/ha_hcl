@@ -81,7 +81,7 @@ The integration creates a **Switch** entity (e.g., `switch.hcl_living_room`).
 
 *   **ON**: HCL is active. Lights follow the curve.
 *   **OFF**: HCL is paused. Lights behave like normal smart lights.
-*   **Manual Override**: If you manually change a light (e.g., via Wall Switch or App), the HCL Switch turns **OFF** automatically. Turn it back **ON** to resume circadian control.
+*   **Manual Override**: If you manually change a light (e.g., via Wall Switch or App), HCL control is **paused for that specific light**. The Main Switch remains **ON**. Turn the light **OFF and ON** again to resume circadian control.
 
 ---
 
