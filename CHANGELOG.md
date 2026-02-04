@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-02-04
+### Changed
+- **Manual Preview Mode**: Dragging points in the graph no longer sends immediate updates to lights. This prevents "Time Paradox" flickering and reduces network traffic.
+- **Visual Feedback**: The "PREVIEW" button now highlights (Yellow/Asterisk) to indicate unsaved changes.
+- **Documentation**: Corrected the description of "Manual Override" behavior in README (it is per-light, not global).
+
+### Fixed
+- **Revert Logic**: The "REVERT" button now correctly and immediately resets the curve in the UI to the last saved state.
+- **UI Consistency**: Renamed "VORSCHAU" button to "PREVIEW" to match the rest of the interface.
+
 ## [0.4.0] - 2026-02-02
 ### Added
 - **Interactive Dashboard Card**: A fully interactive, touch-friendly Lovelace card (`custom:hcl-curve-card`) allowing drag-and-drop adjustment of Brightness and Color Temperature curves.
