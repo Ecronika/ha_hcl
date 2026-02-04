@@ -247,6 +247,8 @@ class HCLCurveCard extends HTMLElement {
             });
             // Optimistic Update
             this._updateModeVisuals(mode);
+        } else {
+            console.warn("HCL Curve Card: 'mode_entity_id' not found in attributes of " + this.config.entity + ". Cannot switch mode. Ensure 'select' entity is initialized.");
         }
     }
 

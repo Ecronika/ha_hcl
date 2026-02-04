@@ -83,10 +83,20 @@ class HCLLightingCurveSensor(SensorEntity):
     @callback
     def _handle_update(self):
         """Handle signal from switch/service."""
+        # Retry finding Mode Entity if logic failed during startup (Race Condition)
+        if not self._mode_entity_id:
+             ent_reg = er.async_get(self.hass)
+             entries = er.async_entries_for_config_entry(ent_reg, self._entry.entry_id)
+             for e in entries:
+                if e.domain == "select":
+                    self._mode_entity_id = e.entity_id
+                    break
+        
         self._update_attributes()
         # Update state to trigger push
         self._attr_native_value = dt_util.now().isoformat()
         self.async_write_ha_state()
+
 
     def _update_attributes(self):
         """Regenerate attributes from hcl_calc."""
