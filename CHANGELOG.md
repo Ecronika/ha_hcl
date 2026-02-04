@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0-beta1] - 2026-02-04
+### Added
+- **Scenario Engine**: New `select.hcl_mode` entity allows robust switching between modes.
+- **Fixed Scenarios**:
+    - **Pro Modes**: Focus (5500K/100%), Relax (2700K/40%), Cleaning (4000K/100%).
+    - **Guest Mode**: Pauses HCL updates completely, allowing manual control without fighting back.
+    - **Sleep Mode**: Turns lights off, but allows manual override.
+- **Frontend Upgrade**: `hcl-curve-card` now features "Chip" selectors for modes and visualizes the active scenario with a horizontal line in the chart.
+- **Persistence**: Active mode is saved and restored after Home Assistant restarts.
+
 ## [0.4.1] - 2026-02-04
 ### Changed
 - **Manual Preview Mode**: Dragging points in the graph no longer sends immediate updates to lights. This prevents "Time Paradox" flickering and reduces network traffic.

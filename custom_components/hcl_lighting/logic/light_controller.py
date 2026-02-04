@@ -23,8 +23,18 @@ from ..const import (
     KELVIN_THRESHOLD,
     XY_COLOR_SENSITIVITY,
     KELVIN_RANGE,
-    CAPABILITY_CACHE_VERSION
+    CAPABILITY_CACHE_VERSION,
+    MODE_AUTO,
+    MODE_GUEST,
+    MODE_SLEEP,
+    SCENARIO_DEFAULTS,
+    CONF_MIN_BRIGHTNESS,
+    CONF_MAX_BRIGHTNESS,
+    DEFAULT_MIN_BRIGHTNESS,
+    DEFAULT_MAX_BRIGHTNESS
 )
+
+from ..logic.hcl_math import HCLCalculator
 
 from .override_manager import OverrideManager
 
@@ -41,13 +51,60 @@ _LOGGER = logging.getLogger(__name__)
 class HCLLightController:
     """Controller for applying HCL settings to lights."""
 
-    def __init__(self, hass: HomeAssistant, override_manager: OverrideManager, config_entry):
+    def __init__(self, hass: HomeAssistant, override_manager: OverrideManager, hcl_calc: HCLCalculator, config_entry):
         self.hass = hass
         self.override_manager = override_manager
+        self.hcl_calc = hcl_calc
         self.config_entry = config_entry
         self._capability_cache = {}
         self._result_cache = {} # (entity_id, k_bucket) -> result
         self._cache_version = CAPABILITY_CACHE_VERSION
+        
+        # State Machine
+        self.active_mode = MODE_AUTO
+        
+    def set_active_mode(self, mode: str) -> None:
+        """Set the active scenario mode."""
+        if self.active_mode == mode:
+            return
+            
+        self.active_mode = mode
+        _LOGGER.debug("HCL Mode changed to: %s", mode)
+        
+        # Trigger immediate update logic is handled by the caller (select entity) calling switch.update_ha_state() 
+        # or sending a signal. But actually, we should probably expose a signal or callback.
+        # For now, select entity calls generic update.
+
+    def calculate_target_values(self, now) -> tuple[int | None, int | None]:
+        """
+        Calculate target (Brightness, Kelvin) based on Priority Stack.
+        User Intent > Curve.
+        """
+        
+        # 1. GUEST MODE (Freeze)
+        if self.active_mode == MODE_GUEST:
+            return None, None
+
+        # 2. FIXED SCENARIOS
+        if self.active_mode in SCENARIO_DEFAULTS:
+            settings = SCENARIO_DEFAULTS[self.active_mode]
+            
+            # Special Handling: Sleep (Off)
+            if self.active_mode == MODE_SLEEP:
+                return 0, 2000 # Off, but pre-heat to 2000K
+                
+            return settings["brightness"], settings["kelvin"]
+
+        # 3. AUTO MODE (Curve)
+        if self.active_mode == MODE_AUTO:
+            # Dynamic Config resolution moved here to keep Switch dumb
+            min_b = self.config_entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
+            max_b = self.config_entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+            
+            return self.hcl_calc.get_hcl_values(now, min_b, max_b)
+            
+        # Fallback
+        return None, None
 
     def prune_cache(self, valid_entity_ids: set[str]) -> None:
         """Prune capability cache of invalid/removed entities."""

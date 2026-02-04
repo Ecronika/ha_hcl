@@ -32,6 +32,16 @@ class HCLCurveCard extends HTMLElement {
             windDownDuration: 180 // 3 hours
         };
 
+        // v0.5.0 Scenario Definitions (Mirroring Backend)
+        // Needed for visualization of horizontal lines
+        this._scenarios = {
+            "focus": { b: 100, k: 5500 },
+            "relax": { b: 40, k: 2700 }, // Conervative: 2700K
+            "cleaning": { b: 100, k: 4000 },
+            "sleep": { b: 0, k: 2000 },
+            "guest": { b: null, k: null }
+        };
+
         // Presets: Scientifically inspired 12-point profiles
         // T: Minutes, B: Brightness (%), K: Kelvin
         this._presets = {
@@ -209,7 +219,57 @@ class HCLCurveCard extends HTMLElement {
         }
 
         // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
+        // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
         this._bindEvents();
+        this._bindChipEvents();
+    }
+
+    _bindChipEvents() {
+        const chips = this.shadowRoot.querySelectorAll('.chip');
+        chips.forEach(chip => {
+            chip.onclick = () => {
+                const mode = chip.dataset.mode;
+                this._setMode(mode);
+            };
+        });
+    }
+
+    _setMode(mode) {
+        if (!this.config.entity) return;
+        // We need the select entity ID.
+        // Option 1: Store it in a variable when reading hass
+        // Option 2: Look it up again from sensor attributes
+        const stateObj = this._hass.states[this.config.entity];
+        if (stateObj && stateObj.attributes.mode_entity_id) {
+            this._hass.callService("select", "select_option", {
+                entity_id: stateObj.attributes.mode_entity_id,
+                option: mode
+            });
+            // Optimistic Update
+            this._updateModeVisuals(mode);
+        }
+    }
+
+    _updateModeVisuals(mode) {
+        const chips = this.shadowRoot.querySelectorAll('.chip');
+        if (!chips.length) return;
+
+        chips.forEach(chip => {
+            if (chip.dataset.mode === mode) {
+                chip.classList.add('active');
+            } else {
+                chip.classList.remove('active');
+            }
+        });
+
+        const container = this.shadowRoot.querySelector('.charts-container');
+        if (container) {
+            if (mode === 'auto') {
+                container.classList.remove('disabled');
+            } else {
+                container.classList.add('disabled');
+            }
+        }
     }
 
 
@@ -428,6 +488,65 @@ class HCLCurveCard extends HTMLElement {
               color: var(--text-muted);
               font-family: monospace;
           }
+          /* v0.5.0 Scenario Chips */
+          .mode-selector {
+              padding: 0 24px 16px 24px;
+              display: flex;
+              gap: 8px;
+              flex-wrap: wrap;
+          }
+          .chip {
+              background: rgba(255, 255, 255, 0.05);
+              border: 1px solid var(--glass-border);
+              border-radius: 16px;
+              padding: 6px 12px;
+              font-size: 11px;
+              font-weight: 500;
+              cursor: pointer;
+              display: flex;
+              align-items: center;
+              gap: 6px;
+              transition: all 0.2s ease;
+              color: var(--primary-text-color);
+              opacity: 0.7;
+          }
+          .chip:hover {
+              background: rgba(255, 255, 255, 0.1);
+              opacity: 1;
+          }
+          .chip.active {
+              background: var(--primary-color, #03a9f4);
+              color: white; 
+              border-color: transparent;
+              opacity: 1;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          }
+          .chip ha-icon { --mdc-icon-size: 14px; }
+          
+          /* Visual Feedback when Override active */
+          .charts-container.disabled {
+              opacity: 0.5;
+              filter: grayscale(0.8);
+              pointer-events: none;
+              transition: all 0.3s;
+          }
+          .overlay-message {
+              position: absolute;
+              top: 50%; left: 50%;
+              transform: translate(-50%, -50%);
+              background: rgba(0,0,0,0.8);
+              padding: 12px 24px;
+              border-radius: 8px;
+              color: white;
+              font-weight: bold;
+              z-index: 50;
+              pointer-events: none;
+              border: 1px solid rgba(255,255,255,0.2);
+              display: none;
+          }
+          .charts-container.disabled + .overlay-message {
+              display: block;
+          }
       </style>
       <ha-card>
           <div class="card-header">
@@ -452,17 +571,32 @@ class HCLCurveCard extends HTMLElement {
 
            <div id="validation-area" style="display: none;"></div>
 
+          <!-- v0.5.0 Mode Selector -->
+          <div class="mode-selector" id="mode-chips">
+              <div class="chip active" data-mode="auto"><ha-icon icon="mdi:chart-bell-curve"></ha-icon>Auto</div>
+              <div class="chip" data-mode="focus"><ha-icon icon="mdi:brain"></ha-icon>Focus</div>
+              <div class="chip" data-mode="relax"><ha-icon icon="mdi:coffee"></ha-icon>Relax</div>
+              <div class="chip" data-mode="cleaning"><ha-icon icon="mdi:broom"></ha-icon>Cleaning</div>
+              <div class="chip" data-mode="guest"><ha-icon icon="mdi:account-group"></ha-icon>Guest</div>
+              <div class="chip" data-mode="sleep"><ha-icon icon="mdi:bed"></ha-icon>Sleep</div>
+          </div>
+
            <div class="charts-container">
              <div class="chart-wrapper">
                  <span class="chart-label">Brightness</span>
                  <canvas id="chartB"></canvas>
                  <div class="handle-layer" id="handles-b"></div>
              </div>
-             
-             <div class="chart-wrapper">
-                 <span class="chart-label">Color Temp</span>
-                 <canvas id="chartK"></canvas>
-                 <div class="handle-layer" id="handles-k"></div>
+          </div>
+          
+
+          <div style="position:relative;">
+             <div class="charts-container">
+                 <div class="chart-wrapper">
+                     <span class="chart-label">Color Temp</span>
+                     <canvas id="chartK"></canvas>
+                     <div class="handle-layer" id="handles-k"></div>
+                 </div>
              </div>
           </div>
 
@@ -477,10 +611,34 @@ class HCLCurveCard extends HTMLElement {
               </div>
           </div>
       </ha-card>
-      </ha-card>
     `;
 
         this._initCharts();
+    }
+
+    _drawOverrideLine(chart, value, color) {
+        if (!chart) return;
+        const ctx = chart.ctx;
+        const yAxis = chart.scales.y;
+        const xAxis = chart.scales.x;
+
+        // Map value to Y-pixel
+        let yPixel = yAxis.getPixelForValue(value);
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.moveTo(xAxis.left, yPixel);
+        ctx.lineTo(xAxis.right, yPixel);
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = color;
+        ctx.font = 'bold 10px sans-serif';
+        ctx.fillText(this._currentMode.toUpperCase(), xAxis.left + 5, yPixel - 5);
+        ctx.restore();
     }
 
     _bindEvents() {

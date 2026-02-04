@@ -51,13 +51,11 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Switch from a config entry."""
     
-    # Retrieve Shared Calculator
-    hcl_calc: HCLCalculator = hass.data[DOMAIN][entry.entry_id]
-
-    # Initialize Logic Components
-    override_manager = OverrideManager()
-    
-    controller = HCLLightController(hass, override_manager, entry)
+    # Retrieve Shared Logic Core
+    logic_core = hass.data[DOMAIN][entry.entry_id]
+    hcl_calc = logic_core["calculator"]
+    controller = logic_core["controller"]
+    override_manager = logic_core["override_manager"]
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
     
@@ -225,12 +223,23 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
         async with self._update_lock:
             try:
-                # 1. Calculate Target Values
-                # Dynamic Config
-                min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-                max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+                # 1. Calculate Target Values (Delegate to Controller Priority Stack)
+                brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
                 
-                brightness, kelvin = self.hcl_calc.get_hcl_values(dt_util.now(), min_b, max_b)
+                # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
+                if brightness is None and kelvin is None:
+                    # GUEST MODE: Freeze/No-Op
+                    # We still define brightness/kelvin as None for the state attributes below?
+                    # Or just return?
+                    # If we return, we don't prune cache or re-engage.
+                    # Pruning is safe. Re-engage... maybe we shouldn't re-engage in Guest mode.
+                    # Let's update state to reflect "Guest" or "Hold"?
+                    self.async_write_ha_state() 
+                    return
+
+                # Special Case: Sleep Mode handling (If brightness is 0)
+                # calculate_target_values returns 0, 2000 for sleep
+                is_sleep = (brightness == 0)
                 
                 # Update State for UI/Debugging
                 self._calculated_brightness = brightness
@@ -292,13 +301,15 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             if old_state and old_state.state != STATE_ON and new_state.state == STATE_ON:
                  # Just turned on.
                  if not self.override_manager.is_overridden(entity_id):
-                     # RECALCULATE FRESH VALUES IMMEDIATELY
-                     min_b = self._entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-                     max_b = self._entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
+                     # RECALCULATE FRESH VALUES IMMEDIATELY via Controller
+                     fresh_b, fresh_k = self.controller.calculate_target_values(dt_util.now())
                      
-                     # Use local time for calculation
-                     now = dt_util.now()
-                     fresh_b, fresh_k = self.hcl_calc.get_hcl_values(now, min_b, max_b)
+                     if fresh_b is None: # Guest mode active
+                         return 
+                         
+                     if fresh_b == 0: # Sleep mode
+                         # Don't turn on if sleep mode
+                         return
                      
                      # Update cache while we are at it
                      self._calculated_brightness = fresh_b

@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.util import dt as dt_util
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
@@ -29,7 +30,8 @@ _LOGGER = logging.getLogger(__name__)
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Sensor."""
     
-    hcl_calc: HCLCalculator = hass.data[DOMAIN][entry.entry_id]
+    logic_core = hass.data[DOMAIN][entry.entry_id]
+    hcl_calc: HCLCalculator = logic_core["calculator"]
     
     sensor = HCLLightingCurveSensor(hass, entry, hcl_calc)
     
@@ -56,6 +58,15 @@ class HCLLightingCurveSensor(SensorEntity):
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
         await super().async_added_to_hass()
+        
+        # Resolve Select Entity ID for Frontend
+        ent_reg = er.async_get(self.hass)
+        entries = er.async_entries_for_config_entry(ent_reg, self._entry.entry_id)
+        self._mode_entity_id = None
+        for e in entries:
+            if e.domain == "select":
+                self._mode_entity_id = e.entity_id
+                break
         
         # Subscribe to updates from Switch/Service
         self.async_on_remove(
@@ -109,7 +120,8 @@ class HCLLightingCurveSensor(SensorEntity):
             ATTR_SAMPLE_COUNT: len(samples),
             "control_points": points, # The explicit list
             ATTR_SAMPLES: samples,    # The interpolated curve
-            ATTR_CURVE_VERSION: 2
+            ATTR_CURVE_VERSION: 2,
+            "mode_entity_id": getattr(self, "_mode_entity_id", None)
         }
 
     @property

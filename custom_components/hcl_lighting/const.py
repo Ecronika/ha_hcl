@@ -50,3 +50,34 @@ ATTR_SAMPLES = "samples"
 # Release Hardening Constants
 XY_COLOR_DISTANCE_THRESHOLD = 0.05 # Euclidean distance in CIE 1931 space
 IGNORE_WINDOW_SECONDS = 2.0        # Seconds to ignore events after setting a value
+ 
+# v0.5.0 Scenario Engine
+CONF_SCENARIOS = "scenarios"
+ 
+MODE_AUTO = "auto"
+MODE_SLEEP = "sleep"
+MODE_FOCUS = "focus"
+MODE_RELAX = "relax"
+MODE_CLEANING = "cleaning"
+MODE_GUEST = "guest"
+ 
+HCL_MODES = [
+    MODE_AUTO,
+    MODE_SLEEP,
+    MODE_FOCUS,
+    MODE_RELAX,
+    MODE_CLEANING,
+    MODE_GUEST,
+]
+ 
+SCENARIO_DEFAULTS = {
+    # 5500K is "Focus" enough without being harsh blue (6500K+)
+    MODE_FOCUS: {"brightness": 100, "kelvin": 5500},
+    # 2700K is standard warm white, 40% is good for reading
+    MODE_RELAX: {"brightness": 40, "kelvin": 2700},
+    # 4000K is neutral white, good for cleaning visibility
+    MODE_CLEANING: {"brightness": 100, "kelvin": 4000},
+    # Sleep logic handles the "0", but we define it data-model wise
+    MODE_SLEEP: {"brightness": 0, "kelvin": 2000}, 
+    MODE_GUEST: {"brightness": None, "kelvin": None}, 
+}

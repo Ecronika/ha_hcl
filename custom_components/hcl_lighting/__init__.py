@@ -18,11 +18,14 @@ from .const import (
     CONF_CURVE_CONFIG
 )
 from .logic.hcl_math import HCLCalculator
+from .logic.override_manager import OverrideManager
+from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
 
 # List of platforms to support.
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR]
+# List of platforms to support.
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.SELECT]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HCL Lighting from a config entry."""
@@ -54,7 +57,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Initialized with Legacy Config")
 
     # Store shared instance
-    hass.data[DOMAIN][entry.entry_id] = hcl_calc
+    # Initialize Logic Core
+    override_manager = OverrideManager()
+    controller = HCLLightController(hass, override_manager, hcl_calc, entry)
+
+    # Store shared logic core
+    hass.data[DOMAIN][entry.entry_id] = {
+        "calculator": hcl_calc,
+        "controller": controller,
+        "override_manager": override_manager
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
@@ -95,7 +107,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if entry_id not in hass.data[DOMAIN]:
              raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
         
-        hcl_calc: HCLCalculator = hass.data[DOMAIN][entry_id]
+        if entry_id not in hass.data[DOMAIN]:
+             raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
+        
+        logic_core = hass.data[DOMAIN][entry_id]
+        hcl_calc: HCLCalculator = logic_core["calculator"]
         
         # 1. Update In-Memory Calculator
         if points:
@@ -189,7 +205,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.4.1"
+    FULL_URL = f"{BASE_URL}?v=0.5.0-beta1"
     
     if "lovelace" not in hass.data:
         return
