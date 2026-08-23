@@ -11,7 +11,7 @@ from homeassistant.components.light import (
     ATTR_COLOR_TEMP_KELVIN,
     ColorMode
 )
-from homeassistant.helpers import entity_registry as er, device_registry as dr
+from homeassistant.helpers import entity_registry as er, device_registry as dr, area_registry as ar
 from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
 from homeassistant.const import ATTR_ENTITY_ID
 
@@ -530,6 +530,7 @@ class HCLLightController:
         entity_ids = set()
         er_registry = er.async_get(self.hass)
         dr_registry = dr.async_get(self.hass)
+        ar_registry = ar.async_get(self.hass)
         
         # 1. Direct Entities
         if "entity_id" in target_config:
@@ -556,6 +557,23 @@ class HCLLightController:
                         entity_ids.add(entry.entity_id)
                 for device in dr.async_entries_for_area(dr_registry, area_id):
                     for entry in er.async_entries_for_device(er_registry, device.id):
+                        if entry.domain == "light":
+                            entity_ids.add(entry.entity_id)
+
+        # 4. Labels
+        if "label_id" in target_config:
+            labels = target_config["label_id"]
+            if isinstance(labels, str): labels = [labels]
+            for label_id in labels:
+                for entry in er.async_entries_for_label(er_registry, label_id):
+                    if entry.domain == "light":
+                        entity_ids.add(entry.entity_id)
+                for device in dr.async_entries_for_label(dr_registry, label_id):
+                    for entry in er.async_entries_for_device(er_registry, device.id):
+                        if entry.domain == "light":
+                            entity_ids.add(entry.entity_id)
+                for area in ar.async_entries_for_label(ar_registry, label_id):
+                    for entry in er.async_entries_for_area(er_registry, area.id):
                         if entry.domain == "light":
                             entity_ids.add(entry.entity_id)
         
