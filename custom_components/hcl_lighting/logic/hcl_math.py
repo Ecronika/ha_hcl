@@ -135,28 +135,57 @@ class HCLCalculator:
                 total_span
             )
             w_min, m_min, s_min = 420, 750, 1320 # Fallback 07:00, 12:30, 22:00
+            total_span = (s_min - w_min) % 1440
 
         # v0.2.1 Replica Logic (Offsets)
         # Structure: time, kelvin, brightness
-        raw_points = [
-            # Wake Sector
-            (w_min, 2700, 30),
-            (w_min + 120, 4500, 50),
-            (w_min + 150, 5500, 75),
-            (w_min + 180, 6500, 100),
-            
-            # Midday Sector
-            (m_min - 30, 6500, 100),
-            (m_min, 4000, 50), # Dip
-            (m_min + 30, 4000, 50),
-            (m_min + 60, 6000, 75),
-            (m_min + 90, 6000, 75),
-            (m_min + 210, 4000, 50),
-            
-            # Sleep Sector
-            (s_min - 240, 2700, 30),
-            (s_min, 2200, 10),
-        ]
+        def build(w, m, s):
+            return [
+                # Wake Sector
+                (w, 2700, 30),
+                (w + 120, 4500, 50),
+                (w + 150, 5500, 75),
+                (w + 180, 6500, 100),
+
+                # Midday Sector
+                (m - 30, 6500, 100),
+                (m, 4000, 50), # Dip
+                (m + 30, 4000, 50),
+                (m + 60, 6000, 75),
+                (m + 90, 6000, 75),
+                (m + 210, 4000, 50),
+
+                # Sleep Sector
+                (s - 240, 2700, 30),
+                (s, 2200, 10),
+            ]
+
+        # Elastic Intervals: the three sectors must stay in chronological order
+        # (times relative to wake, unwrapped): w+180 < m-30 and m+210 < s-240.
+        # Midday is moved into its feasible window; if the active day is too short
+        # for all sectors, the default template (07:00/12:30/22:00, 900 min) is
+        # scaled to the wake..sleep span instead.
+        rel_m = (m_min - w_min) % 1440
+        min_rel_m = 180 + 30 + 1
+        max_rel_m = total_span - 240 - 210 - 1
+        if min_rel_m <= max_rel_m:
+            if not min_rel_m <= rel_m <= max_rel_m:
+                clamped = max(min_rel_m, min(max_rel_m, rel_m))
+                _LOGGER.warning(
+                    "Midday time does not fit between wake and sleep time; using %02d:%02d instead",
+                    ((w_min + clamped) % 1440) // 60, ((w_min + clamped) % 1440) % 60,
+                )
+                rel_m = clamped
+            raw_points = build(w_min, w_min + rel_m, w_min + total_span)
+        else:
+            _LOGGER.warning(
+                "Wake-sleep span (%d min) too short for the midday sector; scaling the default profile",
+                total_span,
+            )
+            scale = total_span / 900
+            raw_points = [
+                (w_min + round(t * scale), k, b) for t, k, b in build(0, 330, 900)
+            ]
 
         # Convert to HCLPoint list
         points: List[HCLPoint] = []
@@ -337,18 +366,14 @@ class HCLCalculator:
             float: Slope (dy/dt) at t_curr, zero if local extremum detected
             
         Edge Cases:
-            - Midnight wrap: 1430 -> 10 normalized to 1430 -> 1450
+            - Midnight wrap: 1430 -> 10 is a forward distance of 20 min
+            - Gaps longer than 12 h stay positive (the curve is cyclic, the
+              neighbours are always the previous/next point in time)
             - Flat segments: Returns 0 if |slope| < 1e-9
         """
-        # Normalize time differences (handle midnight wrap)
-        def normalize_diff(t_to, t_from):
-            diff = t_to - t_from
-            if diff <= -720: diff += 1440 # Wrapped forward (e.g. 1430 -> 10)
-            elif diff > 720: diff -= 1440 # Wrapped backward
-            return diff
-
-        dt_left = normalize_diff(t_curr, t_prev)
-        dt_right = normalize_diff(t_next, t_curr)
+        # Forward distances on the 24 h circle (prev -> curr -> next)
+        dt_left = (t_curr - t_prev) % 1440
+        dt_right = (t_next - t_curr) % 1440
         
         # Secants
         if dt_left == 0 or dt_right == 0: return 0

@@ -13,6 +13,12 @@ build/
 .coverage
 htmlcov/
 .tox/
+.venv*/
+venv/
+.mypy_cache/
+.ruff_cache/
+test-results/
+playwright-report/
 
 # IDE
 .vscode/
@@ -21,6 +27,8 @@ htmlcov/
 *.swo
 *~
 .DS_Store
+Thumbs.db
+desktop.ini
 
 # Development artifacts
 *.zip
@@ -29,6 +37,8 @@ forum_post.md
 REPOSITORY_STRUCTURE.md
 hcl_kurven_interpolation_analyse.md
 Hcl Kurven Interpolation Analyse.pdf
+docs/REVIEW_*.md
+Claude outputs/
 
 # Home Assistant
 *.log

@@ -138,6 +138,7 @@ class HCLCurveCard extends HTMLElement {
         if (!this.config || !this.config.entity) return;
 
         const stateObj = hass.states[this.config.entity];
+        if (stateObj) this._syncMode(hass, stateObj);
         if (stateObj && stateObj.attributes.control_points) {
             // Existing check: if (!this._isDragging)
             if (!this._isDragging) {
@@ -158,6 +159,18 @@ class HCLCurveCard extends HTMLElement {
                 }
             }
         }
+    }
+
+    // Mirrors the state of the mode select entity into the chips and the
+    // scenario line (the mode can also change via automations or restarts).
+    _syncMode(hass, stateObj) {
+        const modeId = stateObj.attributes.mode_entity_id;
+        const modeState = modeId ? hass.states[modeId] : null;
+        if (!modeState || modeState.state === this._currentMode) return;
+        this._currentMode = modeState.state;
+        this._updateModeVisuals(this._currentMode);
+        if (this._chartB) this._chartB.update('none');
+        if (this._chartK) this._chartK.update('none');
     }
 
     setConfig(config) {
@@ -222,6 +235,7 @@ class HCLCurveCard extends HTMLElement {
         // FIX: Ensure events are bound even if render() skipped due to existing innerHTML
         this._bindEvents();
         this._bindChipEvents();
+        if (this._currentMode) this._updateModeVisuals(this._currentMode);
     }
 
     _bindChipEvents() {
@@ -306,6 +320,7 @@ class HCLCurveCard extends HTMLElement {
 
         this.shadowRoot.innerHTML = `
       <style>
+          :host {
               display: block;
               /* Use HA defaults with fallbacks */
               /* UX-FIX: Force dark text color context if we force dark background, OR use system background */
@@ -698,6 +713,15 @@ class HCLCurveCard extends HTMLElement {
 
         const customBackgroundPlugin = {
             id: 'customBackground',
+            // Horizontal line for the fixed value of the active scenario
+            afterDatasetsDraw: (chart) => {
+                const scenario = this._scenarios[this._currentMode];
+                if (!scenario) return;
+                const isB = chart.canvas.id === 'chartB';
+                const value = isB ? scenario.b : scenario.k;
+                if (value === null || value === undefined) return;
+                this._drawOverrideLine(chart, value, isB ? '#FFD700' : '#00E5FF');
+            },
             beforeDraw: (chart) => {
                 const ctx = chart.ctx;
                 const yAxis = chart.scales.y;

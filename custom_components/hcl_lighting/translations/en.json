@@ -5,6 +5,7 @@
                 "title": "Set up HCL Lighting",
                 "description": "Configure the Human Centric Lighting integration.",
                 "data": {
+                    "name": "Name",
                     "target": "Lights to control"
                 }
             }
@@ -37,6 +38,12 @@
             "hcl_switch": {
                 "name": "HCL Mode"
             }
+        }
+    },
+    "issues": {
+        "setup_curve_card": {
+            "title": "Configure HCL Curve",
+            "description": "To customize your lighting curve, please add the **HCL Curve Card** to your dashboard.\n\n1. Go to your Dashboard\n2. Edit Dashboard -> Add Card\n3. Select 'Manual' and enter:\n\n```yaml\ntype: custom:hcl-curve-card\nentity: {entity_id}\n```"
         }
     }
 }

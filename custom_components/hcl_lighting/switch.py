@@ -19,6 +19,7 @@ from homeassistant.helpers.event import async_track_state_change_event, async_tr
 from homeassistant.const import STATE_ON
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.service import async_call_from_config
+from homeassistant.helpers.start import async_at_started
 
 from .const import (
     DOMAIN,
@@ -106,6 +107,11 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 self._is_on = True
                 await self.async_turn_on()
 
+        # Target groups (and other light platforms) may still be loading during
+        # HA startup; resolve the targets again once startup has finished.
+        if not self.hass.is_running:
+            self.async_on_remove(async_at_started(self.hass, self._async_hass_started))
+
         # Subscribe to global updates (from service)
         from homeassistant.helpers.dispatcher import async_dispatcher_connect
         self.async_on_remove(
@@ -126,6 +132,13 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         if self._state_listener_remove_callback:
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
+
+    async def _async_hass_started(self, _hass: HomeAssistant) -> None:
+        """Re-resolve targets after HA startup (groups are expanded only when loaded)."""
+        if not self._is_on:
+            return
+        await self._re_evaluate_targets_and_listeners()
+        await self._update_hcl()
 
     # async_options_updated is handled by reload in __init__.py
 
@@ -260,7 +273,10 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 # 3. Check for Re-engagements (Expired Overrides)
                 expired_overrides = self.override_manager.get_pending_reengagements()
                 for eid in expired_overrides:
-                    if eid in all_lights:
+                    # Only lights that are still on are brought back to HCL;
+                    # re-engaging must never switch a light on.
+                    eid_state = self.hass.states.get(eid)
+                    if eid in all_lights and eid_state and eid_state.state == STATE_ON:
                         await self.controller.reengage_light(
                             eid, self._calculated_brightness, self._calculated_kelvin
                         )
@@ -308,7 +324,10 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                          return 
                          
                      if fresh_b == 0: # Sleep mode
-                         # Don't turn on if sleep mode
+                         # A light switched on during sleep mode counts as a manual
+                         # override: it stays on until it is turned off again
+                         # (or the override timeout expires).
+                         self.override_manager.set_override(entity_id)
                          return
                      
                      # Update cache while we are at it
@@ -316,7 +335,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      self._calculated_kelvin = fresh_k
 
                      # Synchronous Update to Override Manager (Fix Race Condition)
-                     self.override_manager.set_last_set_values(entity_id, fresh_b, fresh_k)
+                     self.override_manager.set_last_set_values(
+                         entity_id, fresh_b, self.controller.reachable_kelvin(entity_id, fresh_k, new_state)
+                     )
                      
                      # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
                      self.override_manager.set_ignore_window(entity_id, IGNORE_WINDOW_SECONDS)

@@ -5,6 +5,7 @@
                 "title": "Set up HCL Lighting",
                 "description": "Configure the Human Centric Lighting integration.",
                 "data": {
+                    "name": "Name",
                     "target": "Lights to control"
                 }
             }

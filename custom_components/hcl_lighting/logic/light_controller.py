@@ -11,8 +11,16 @@ from homeassistant.components.light import (
     ATTR_COLOR_TEMP_KELVIN,
     ColorMode
 )
-from homeassistant.helpers import entity_registry as er, device_registry as dr
-from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
+from homeassistant.helpers import (
+    area_registry as ar,
+    device_registry as dr,
+    entity_registry as er,
+)
+from homeassistant.util.color import (
+    color_temperature_to_rgb,
+    color_RGB_to_xy,
+    color_xy_to_temperature,
+)
 from homeassistant.const import ATTR_ENTITY_ID
 
 from ..const import (
@@ -31,7 +39,8 @@ from ..const import (
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS,
-    DEFAULT_MAX_BRIGHTNESS
+    DEFAULT_MAX_BRIGHTNESS,
+    XY_COLOR_DISTANCE_THRESHOLD
 )
 
 from ..logic.hcl_math import HCLCalculator
@@ -159,7 +168,9 @@ class HCLLightController:
             cap_type = self._get_capability(entity_id, kelvin)
             if cap_type == "ct":
                 lights_ct.append(entity_id)
-                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
+                self.override_manager.set_last_set_values(
+                    entity_id, brightness, self.reachable_kelvin(entity_id, kelvin)
+                )
                 self.override_manager.set_ignore_window(entity_id, transition_val)
             elif cap_type == "xy_sim":
                 lights_xy_sim.append(entity_id)
@@ -512,10 +523,23 @@ class HCLLightController:
         # Check Kelvin (if supported)
         delta_k = 0
         if curr_k is not None:
-             delta_k = abs(curr_k - target_k)
+             # Compare with what the light can reach: a CT light clamps the
+             # target to its own range and reports the clamped value.
+             delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
         elif self._get_capability(entity_id, target_k) in ("ct", "xy_sim"):
-             # Color supported but current is None (e.g. RGB mode?), force update
-             return True
+             # Light is in a colour mode (e.g. XY simulation): no colour_temp is
+             # reported, so compare the XY colour with the XY value HCL sends.
+             curr_xy = state.attributes.get("xy_color")
+             if not curr_xy:
+                 return True
+             target_x, target_y = color_RGB_to_xy(*color_temperature_to_rgb(target_k))
+             dist_xy = ((curr_xy[0] - target_x) ** 2 + (curr_xy[1] - target_y) ** 2) ** 0.5
+             if dist_xy > XY_COLOR_DISTANCE_THRESHOLD:
+                 return True
+             delta_k = abs(
+                 color_xy_to_temperature(curr_xy[0], curr_xy[1])
+                 - color_xy_to_temperature(target_x, target_y)
+             )
         
         if delta_b <= BRIGHTNESS_THRESHOLD and (delta_k <= KELVIN_THRESHOLD if target_k else True):
              # Logs demoted to TRACE (level 5) to avoid spam
@@ -523,6 +547,23 @@ class HCLLightController:
              return False
         
         return True
+
+    def reachable_kelvin(self, entity_id: str, kelvin: int, state_obj=None) -> int:
+        """Return the colour temperature a CT light actually shows for a target.
+
+        Lights controlled via native colour temperature clamp the target to
+        their min/max range. Lights simulated via XY get the target unchanged.
+        """
+        state = state_obj or self.hass.states.get(entity_id)
+        if state is None or self._get_capability(entity_id, kelvin) != "ct":
+            return kelvin
+        min_k = state.attributes.get("min_color_temp_kelvin")
+        max_k = state.attributes.get("max_color_temp_kelvin")
+        if min_k is not None and kelvin < min_k:
+            return min_k
+        if max_k is not None and kelvin > max_k:
+            return max_k
+        return kelvin
 
     def resolve_targets(self, target_config: dict[str, Any]) -> set[str]:
         """Resolve target config to a set of entity IDs."""
@@ -546,10 +587,32 @@ class HCLLightController:
                      if entry.domain == "light":
                         entity_ids.add(entry.entity_id)
 
-        # 3. Areas
-        if "area_id" in target_config:
-            areas = target_config["area_id"]
-            if isinstance(areas, str): areas = [areas]
+        # 3. Floors and labels (offered by the target selector) expand to
+        #    areas, devices and entities
+        areas = target_config.get("area_id") or []
+        if isinstance(areas, str): areas = [areas]
+        areas = list(areas)
+        ar_registry = ar.async_get(self.hass)
+
+        floors = target_config.get("floor_id") or []
+        if isinstance(floors, str): floors = [floors]
+        for floor_id in floors:
+            areas.extend(a.id for a in ar.async_entries_for_floor(ar_registry, floor_id))
+
+        labels = target_config.get("label_id") or []
+        if isinstance(labels, str): labels = [labels]
+        for label_id in labels:
+            for entry in er.async_entries_for_label(er_registry, label_id):
+                if entry.domain == "light":
+                    entity_ids.add(entry.entity_id)
+            for device in dr.async_entries_for_label(dr_registry, label_id):
+                for entry in er.async_entries_for_device(er_registry, device.id):
+                    if entry.domain == "light":
+                        entity_ids.add(entry.entity_id)
+            areas.extend(a.id for a in ar.async_entries_for_label(ar_registry, label_id))
+
+        # 4. Areas
+        if areas:
             for area_id in areas:
                 for entry in er.async_entries_for_area(er_registry, area_id):
                     if entry.domain == "light":

@@ -80,6 +80,7 @@ class OverrideManager:
         recorded_last_set = light_data.get("last_set")
         reference_values = recorded_last_set or last_set_values
         last_b = reference_values[0] if reference_values else None
+        last_k = reference_values[1] if reference_values and len(reference_values) > 1 else None
 
         # 1. Check Ignore Window with Divergence Detection
         ignore_until = light_data.get("ignore_events_until")
@@ -105,6 +106,33 @@ class OverrideManager:
                             dist_old, dist_new
                         )
                         divergence_detected = True
+
+                    # Same trajectory check for colour: an HCL transition only moves
+                    # towards the target, a user change moves away from it.
+                    curr_k = state.attributes.get("color_temp_kelvin")
+                    old_k = old_state.attributes.get("color_temp_kelvin")
+                    if last_k and curr_k and old_k:
+                        dist_new_k = abs(curr_k - last_k)
+                        dist_old_k = abs(old_k - last_k)
+                        if dist_new_k > dist_old_k + OVERRIDE_KELVIN_DELTA:
+                            _LOGGER.debug(
+                                "Override detected inside Ignore Window! Kelvin divergence: OldDist=%sK, NewDist=%sK",
+                                dist_old_k, dist_new_k
+                            )
+                            divergence_detected = True
+
+                    curr_xy = state.attributes.get("xy_color")
+                    old_xy = old_state.attributes.get("xy_color")
+                    if last_k and curr_xy and old_xy:
+                        exp_x, exp_y = color_RGB_to_xy(*color_temperature_to_rgb(last_k))
+                        dist_new_xy = ((curr_xy[0] - exp_x) ** 2 + (curr_xy[1] - exp_y) ** 2) ** 0.5
+                        dist_old_xy = ((old_xy[0] - exp_x) ** 2 + (old_xy[1] - exp_y) ** 2) ** 0.5
+                        if dist_new_xy > dist_old_xy + XY_COLOR_DISTANCE_THRESHOLD:
+                            _LOGGER.debug(
+                                "Override detected inside Ignore Window! XY divergence: OldDist=%.3f, NewDist=%.3f",
+                                dist_old_xy, dist_new_xy
+                            )
+                            divergence_detected = True
                 except Exception:
                     pass # Fallback to standard ignore
             
@@ -207,6 +235,16 @@ class OverrideManager:
                     ready.append(eid)
         
         return ready
+
+    def set_override(self, entity_id: str) -> None:
+        """Mark a light as manually controlled.
+
+        HCL leaves the light alone until it is turned off or the override
+        timeout expires.
+        """
+        if entity_id not in self._override_state:
+            self._override_state[entity_id] = {}
+        self._override_state[entity_id]["manual_override_time"] = dt_util.now()
 
     def reset_override(self, entity_id: str):
         """Manually reset override state."""

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import logging
+import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -22,6 +24,36 @@ from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
+
+DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
+
+_POINT_SCHEMA = vol.Schema(
+    {
+        vol.Required("t"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+        vol.Required("b"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Required("k"): vol.All(vol.Coerce(int), vol.Range(min=2000, max=7000)),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+
+def _validate_update_curve(data: dict) -> dict:
+    """Points are required (at least two) for every mode except 'revert'."""
+    if data["mode"] != "revert" and len(data.get("points") or []) < 2:
+        raise vol.Invalid("points (at least 2) are required for mode " + data["mode"])
+    return data
+
+
+UPDATE_CURVE_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Optional("mode", default="preview"): vol.In(["preview", "apply", "save", "revert"]),
+            vol.Optional("points"): [_POINT_SCHEMA],
+        }
+    ),
+    _validate_update_curve,
+)
 
 # List of platforms to support.
 # List of platforms to support.
@@ -58,7 +90,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Store shared instance
     # Initialize Logic Core
-    override_manager = OverrideManager()
+    # The override state is kept per entry across reloads (saving the curve or
+    # the options reloads the entry) so manually controlled lights stay paused.
+    override_manager = hass.data.setdefault(DATA_OVERRIDE_MANAGERS, {}).setdefault(
+        entry.entry_id, OverrideManager()
+    )
     controller = HCLLightController(hass, override_manager, hcl_calc, entry)
 
     # Store shared logic core
@@ -155,7 +191,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pass # Currently implemented in switch.py as dispatcher listener? No.
             # Ideally the switch should subscribe to this update too.
 
-    hass.services.async_register(DOMAIN, "update_curve", async_update_curve_service)
+    hass.services.async_register(
+        DOMAIN, "update_curve", async_update_curve_service, schema=UPDATE_CURVE_SCHEMA
+    )
 
     # 4. Create Setup Issue (Onboarding)
     # This guides the user to add the dashboard card
@@ -205,7 +243,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.5.0-beta2"
+    FULL_URL = f"{BASE_URL}?v=0.5.1"
     
     if "lovelace" not in hass.data:
         return
@@ -221,6 +259,17 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
 
     if not resources:
         return
+
+    # YAML-mode resources are read-only (no create/delete); the user manages
+    # them in configuration.yaml.
+    if not isinstance(resources, ResourceStorageCollection):
+        _LOGGER.info("Lovelace resources are in YAML mode; add %s manually", FULL_URL)
+        return
+
+    # Storage-mode resources are loaded lazily. Load them before reading or
+    # writing, otherwise existing entries are missed and a write replaces the
+    # stored resource list.
+    await resources.async_get_info()
 
     # Check for existing and cleanup old versions
     found = False
@@ -255,6 +304,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data.pop(DOMAIN)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clean up state that outlives reloads when an entry is deleted."""
+    hass.data.get(DATA_OVERRIDE_MANAGERS, {}).pop(entry.entry_id, None)
+    from homeassistant.helpers import issue_registry as ir
+    ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
 
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
