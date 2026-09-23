@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Overrides lost on save**: Saving the curve or the options reloads the entry; manual overrides are now kept across the reload (still cleared by a Home Assistant restart).
 - **Anchor times**: Wake/Midday/Sleep combinations that did not leave room for all sectors produced duplicate or out-of-order curve points (e.g. 07:00/14:00/21:00). Midday is now moved into its feasible range, and days shorter than ~11 h scale the default profile.
 - **Curves with gaps longer than 12 h**: Interpolation crashed with a division by zero (e.g. two-point curves) or overshot and differed from the dashboard card. Slopes now use forward distances on the 24 h cycle.
-- **Floor and label targets**: Floors and labels selected in the target selector were ignored.
+- **Floor and label targets**: Floors and labels selected in the target selector were ignored. Label support was also proposed by @joneshf in #1 – thank you!
 - **Startup race**: Light groups that finish loading after HCL were not expanded to their members until the switch was toggled. Targets are resolved again when Home Assistant has started.
 - **Card mode chips**: The chips now show the actual mode of the select entity (also after restarts or changes by automations).
 - **Card brightness limits**: The curve sensor now exposes `min_brightness`/`max_brightness`, so the card shades the clipped ranges again.
