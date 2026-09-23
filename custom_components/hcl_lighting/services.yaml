@@ -11,13 +11,13 @@ update_curve:
           integration: hcl_lighting
     points:
       name: Control Points
-      description: List of control points [{t, b, k}].
-      required: true
+      description: "List of control points [{t, b, k}] (t 0-1440 min, b 0-100 %, k 2000-7000 K, at least 2). Not used for revert."
+      required: false
       selector:
         object:
     mode:
       name: Mode
-      description: Action mode (preview, apply, save).
+      description: "Action mode: preview/apply (use points until reload), save (persist points), revert (reload the saved curve)."
       required: true
       selector:
         select:
@@ -25,3 +25,4 @@ update_curve:
             - preview
             - apply
             - save
+            - revert

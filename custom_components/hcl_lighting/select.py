@@ -38,6 +38,17 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
         self._attr_options = HCL_MODES
         self._attr_current_option = controller.active_mode
 
+    @property
+    def device_info(self):
+        """Return device info (same HCL device as the switch and the sensor)."""
+        from homeassistant.helpers.entity import DeviceInfo
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.title,
+            manufacturer="HCL Integration",
+            model="HCL Controller",
+        )
+
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
         await super().async_added_to_hass()

@@ -5,6 +5,7 @@
                 "title": "HCL Lighting einrichten",
                 "description": "Konfiguriere die Human Centric Lighting Integration.",
                 "data": {
+                    "name": "Name",
                     "target": "Zu steuernde Lichter"
                 }
             }

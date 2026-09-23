@@ -10,13 +10,15 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN, CONF_TARGET, CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS,
     CONF_WAKE_TIME, CONF_MIDDAY_TIME, CONF_SLEEP_TIME,
-    DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME
+    DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME,
+    CONF_CURVE_CONFIG
 )
 
 from homeassistant.const import CONF_NAME
@@ -69,6 +71,29 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Initialize options flow."""
         self.config_entry_proxy = config_entry
 
+    def _merged_options(self, user_input: dict[str, Any]) -> dict[str, Any]:
+        """Merge the form into the existing options.
+
+        Options not shown in this form (e.g. the curve saved by the dashboard
+        card) are kept. A saved curve is only discarded when an anchor time
+        (wake/midday/sleep) is changed, so the curve is regenerated from the
+        new anchors.
+        """
+        entry = self.config_entry_proxy
+        defaults = {
+            CONF_WAKE_TIME: DEFAULT_WAKE_TIME,
+            CONF_MIDDAY_TIME: DEFAULT_MIDDAY_TIME,
+            CONF_SLEEP_TIME: DEFAULT_SLEEP_TIME,
+        }
+        new_options = {**entry.options, **user_input}
+        for key, default in defaults.items():
+            old = entry.options.get(key) or entry.data.get(key) or default
+            new = user_input.get(key) or default
+            if dt_util.parse_time(str(old)) != dt_util.parse_time(str(new)):
+                new_options.pop(CONF_CURVE_CONFIG, None)
+                break
+        return new_options
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -81,7 +106,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if min_b >= max_b:
                 errors["base"] = "min_greater_max"
             else:
-                return self.async_create_entry(title="", data=user_input)
+                return self.async_create_entry(title="", data=self._merged_options(user_input))
 
         # Compatibility wrapper for older HA versions
         # Use current options/data as defaults if user_input is None

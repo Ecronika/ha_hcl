@@ -68,6 +68,14 @@ class HCLLightingCurveSensor(SensorEntity):
                 self._mode_entity_id = e.entity_id
                 break
         
+        # The mode select can be registered after this sensor (new entry) or be
+        # renamed later; keep mode_entity_id (used by the card) in sync.
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED, self._handle_registry_update
+            )
+        )
+
         # Subscribe to updates from Switch/Service
         self.async_on_remove(
             async_dispatcher_connect(
@@ -79,6 +87,19 @@ class HCLLightingCurveSensor(SensorEntity):
         
         # Initial Update
         self._update_attributes()
+
+    @callback
+    def _handle_registry_update(self, event) -> None:
+        """Re-resolve the mode select when a select entity is added, renamed or removed."""
+        if not str(event.data.get("entity_id", "")).startswith("select."):
+            return
+        mode_entity_id = er.async_get(self.hass).async_get_entity_id(
+            "select", DOMAIN, f"{self._entry.entry_id}_mode"
+        )
+        if mode_entity_id != self._mode_entity_id:
+            self._mode_entity_id = mode_entity_id
+            self._update_attributes()
+            self.async_write_ha_state()
 
     @callback
     def _handle_update(self):
@@ -131,7 +152,10 @@ class HCLLightingCurveSensor(SensorEntity):
             "control_points": points, # The explicit list
             ATTR_SAMPLES: samples,    # The interpolated curve
             ATTR_CURVE_VERSION: 2,
-            "mode_entity_id": getattr(self, "_mode_entity_id", None)
+            "mode_entity_id": getattr(self, "_mode_entity_id", None),
+            # Brightness limits, shaded in the dashboard card
+            "min_brightness": min_b,
+            "max_brightness": max_b,
         }
 
     @property
