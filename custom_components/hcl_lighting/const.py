@@ -81,3 +81,31 @@ SCENARIO_DEFAULTS = {
     MODE_SLEEP: {"brightness": 0, "kelvin": 2000}, 
     MODE_GUEST: {"brightness": None, "kelvin": None}, 
 }
+
+# v0.6.0 Options (behaviour)
+CONF_UPDATE_INTERVAL = "update_interval"            # seconds between update cycles
+CONF_TRANSITION = "transition"                      # seconds, transition of cycle updates
+CONF_TURN_ON_TRANSITION = "turn_on_transition"      # seconds, transition when a light is switched on
+CONF_OVERRIDE_TIMEOUT = "override_timeout"          # minutes until HCL takes a paused light back, 0 = never
+CONF_OVERRIDE_RESET_ON_OFF = "override_reset_on_off"  # switching a light off ends its manual control
+CONF_PERSIST_OVERRIDES = "persist_overrides"        # keep manual control across HA restarts
+CONF_RESPECT_TURN_ON_VALUES = "respect_turn_on_values"  # turn-on commands with own values are not overwritten
+
+DEFAULT_UPDATE_INTERVAL = UPDATE_INTERVAL_SECONDS
+DEFAULT_TRANSITION = HCL_TRANSITION_SECONDS
+DEFAULT_TURN_ON_TRANSITION = 0
+DEFAULT_OVERRIDE_TIMEOUT = OVERRIDE_TIMEOUT_HOURS * 60
+DEFAULT_OVERRIDE_RESET_ON_OFF = True
+DEFAULT_PERSIST_OVERRIDES = False
+DEFAULT_RESPECT_TURN_ON_VALUES = False
+
+# v0.6.0 Options (scenarios)
+CONF_SCENARIO_DURATION = "scenario_duration"        # minutes until Focus/Relax/Cleaning return to Auto, 0 = never
+DEFAULT_SCENARIO_DURATION = 0
+TIMED_MODES = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
+CONFIGURABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
+
+
+def scenario_option_keys(mode: str) -> tuple[str, str]:
+    """Option keys (brightness, kelvin) of a configurable scenario."""
+    return f"{mode}_brightness", f"{mode}_kelvin"

@@ -10,6 +10,13 @@ permissions:
   contents: read
 
 jobs:
+  hassfest:
+    name: hassfest (manifest, translations, services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
   homeassistant:
     name: Home Assistant ${{ matrix.ha }}
     runs-on: ubuntu-latest
@@ -46,7 +53,7 @@ jobs:
           python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
 
       - name: Run tests
-        run: pytest tests --ignore=tests/test_hcl_math_v4.py -p no:cacheprovider
+        run: pytest tests -p no:cacheprovider
 
   frontend:
     name: Dashboard card (Chromium)

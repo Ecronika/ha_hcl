@@ -1,44 +1,5 @@
-import sys
-from datetime import datetime, time, timedelta
-import logging
-import types
-
-# Mock Home Assistant imports
-mock_ha = types.ModuleType("homeassistant")
-mock_ha.util = types.ModuleType("homeassistant.util")
-mock_ha.util.dt = type('MockDtUtil', (), {
-    'parse_time': lambda self, t_str: time(int(t_str.split(':')[0]), int(t_str.split(':')[1])) if isinstance(t_str, str) and ':' in t_str else None,
-    'now': lambda self: datetime.now()
-})()
-
-mock_ha.config_entries = types.ModuleType("homeassistant.config_entries")
-mock_ha.config_entries.ConfigEntry = type('ConfigEntry', (), {})
-
-mock_ha.core = types.ModuleType("homeassistant.core")
-mock_ha.core.HomeAssistant = type('HomeAssistant', (), {})
-
-mock_ha.const = types.ModuleType("homeassistant.const")
-mock_ha.const.Platform = type('Platform', (), {'SWITCH': 'switch', 'SENSOR': 'sensor'})
-
-mock_ha.helpers = types.ModuleType("homeassistant.helpers")
-mock_ha.helpers.entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
-mock_ha.helpers.issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
-
-sys.modules['homeassistant'] = mock_ha
-sys.modules['homeassistant.util'] = mock_ha.util
-sys.modules['homeassistant.util.dt'] = mock_ha.util.dt
-sys.modules['homeassistant.config_entries'] = mock_ha.config_entries
-sys.modules['homeassistant.core'] = mock_ha.core
-sys.modules['homeassistant.const'] = mock_ha.const
-sys.modules['homeassistant.helpers'] = mock_ha.helpers
-sys.modules['homeassistant.helpers.entity_platform'] = mock_ha.helpers.entity_platform
-
-logging.basicConfig(level=logging.DEBUG)
-
-# Import the module under test
-# We need to add the path to sys.path first
-import os
-sys.path.append(os.path.abspath("c:/Users/tpaul/.gemini/antigravity/scratch/ha_hcl"))
+"""Curve math tests (migration of the anchor profile, PCHIP monotonicity)."""
+from datetime import datetime
 
 from custom_components.hcl_lighting.logic.hcl_math import HCLCalculator
 

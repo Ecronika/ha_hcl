@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
+
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import STATE_OFF, Platform
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.restore_state import async_get as async_get_restore_state
+from homeassistant.helpers.storage import Store
 
 from .const import (
     DOMAIN,
@@ -17,7 +22,13 @@ from .const import (
     DEFAULT_WAKE_TIME,
     DEFAULT_MIDDAY_TIME,
     DEFAULT_SLEEP_TIME,
-    CONF_CURVE_CONFIG
+    CONF_CURVE_CONFIG,
+    CONF_OVERRIDE_TIMEOUT,
+    CONF_OVERRIDE_RESET_ON_OFF,
+    CONF_PERSIST_OVERRIDES,
+    DEFAULT_OVERRIDE_TIMEOUT,
+    DEFAULT_OVERRIDE_RESET_ON_OFF,
+    DEFAULT_PERSIST_OVERRIDES,
 )
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
@@ -26,6 +37,50 @@ from .logic.light_controller import HCLLightController
 _LOGGER = logging.getLogger(__name__)
 
 DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
+DATA_FRONTEND_REGISTERED = f"{DOMAIN}_frontend_registered"
+OVERRIDE_STORE_VERSION = 1
+
+
+def _override_store(hass: HomeAssistant, entry_id: str) -> Store:
+    return Store(hass, OVERRIDE_STORE_VERSION, f"{DOMAIN}.overrides.{entry_id}")
+
+
+async def _async_setup_override_manager(
+    hass: HomeAssistant, entry: ConfigEntry, manager: OverrideManager, first_setup: bool
+) -> None:
+    """Apply the manual-control options and (optionally) persist the state."""
+    options = entry.options
+    timeout_min = int(options.get(CONF_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_TIMEOUT))
+    manager.timeout = timedelta(minutes=timeout_min) if timeout_min > 0 else None
+    manager.reset_on_off = bool(options.get(CONF_OVERRIDE_RESET_ON_OFF, DEFAULT_OVERRIDE_RESET_ON_OFF))
+
+    store = _override_store(hass, entry.entry_id)
+    persist = bool(options.get(CONF_PERSIST_OVERRIDES, DEFAULT_PERSIST_OVERRIDES))
+    if persist and first_setup:
+        manager.import_overrides(await store.async_load() or {})
+    elif not persist:
+        await store.async_remove()
+
+    signal = f"{DOMAIN}_{entry.entry_id}_overrides"
+
+    @callback
+    def _on_change() -> None:
+        if persist:
+            store.async_delay_save(manager.export_overrides, 2)
+        async_dispatcher_send(hass, signal)
+
+    manager.on_change = _on_change
+
+
+def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) -> bool:
+    """Last state of an adaptation switch (default on)."""
+    entity_id = er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_{key}")
+    if entity_id is None:
+        return True
+    stored = async_get_restore_state(hass).last_states.get(entity_id)
+    if stored is None:
+        return True
+    return stored.state.state != STATE_OFF
 
 _POINT_SCHEMA = vol.Schema(
     {
@@ -55,9 +110,89 @@ UPDATE_CURVE_SCHEMA = vol.All(
     _validate_update_curve,
 )
 
-# List of platforms to support.
-# List of platforms to support.
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.SELECT]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Register the integration-wide service (independent of loaded entries)."""
+
+    async def _handle(call: ServiceCall) -> None:
+        await _async_update_curve_service(hass, call)
+
+    hass.services.async_register(DOMAIN, "update_curve", _handle, schema=UPDATE_CURVE_SCHEMA)
+    return True
+
+
+async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Handle global update_curve service."""
+    _LOGGER.debug(f"Service update_curve called (data={call.data})")
+    points = call.data.get("points")
+    mode = call.data.get("mode", "preview")
+    entity_id = call.data.get("entity_id")
+    
+    if not entity_id:
+        raise HomeAssistantError("update_curve called without entity_id")
+        
+    # Resolve Entry ID from Entity ID
+    ent_reg = er.async_get(hass)
+    entity_entry = ent_reg.async_get(entity_id)
+    
+    if not entity_entry:
+         raise HomeAssistantError(f"Entity not found: {entity_id}")
+    
+    # Hardening: Validate Entity Type
+    if entity_entry.domain not in ["sensor", "switch"]:
+         raise HomeAssistantError(f"Invalid entity '{entity_id}'. Must be an HCL sensor or switch.")
+         
+    if entity_entry.platform != DOMAIN:
+         raise HomeAssistantError(f"Entity '{entity_id}' is not an HCL Lighting entity.")
+          
+    entry_id = entity_entry.config_entry_id
+    if not entry_id:
+         raise HomeAssistantError(f"Entity {entity_id} is not linked to a Config Entry.")
+
+    if entry_id not in hass.data.get(DOMAIN, {}):
+         raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
+    
+    logic_core = hass.data[DOMAIN][entry_id]
+    hcl_calc: HCLCalculator = logic_core["calculator"]
+    
+    # 1. Update In-Memory Calculator
+    if points:
+        hcl_calc.calculate_curve_from_points(points)
+        
+    # 2. Handle Save
+    if mode == "save":
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        new_options = {**config_entry.options}
+        new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+        hass.config_entries.async_update_entry(config_entry, options=new_options)
+        return
+    # 2b. Handle Revert
+    if mode == "revert":
+        config_entry = hass.config_entries.async_get_entry(entry_id)
+        curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
+        if curve_config:
+             hcl_calc.generate_curve_from_config(curve_config)
+        else:
+             # No saved curve: default curve from the anchor times
+             wake = config_entry.options.get(CONF_WAKE_TIME) or config_entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
+             midday = config_entry.options.get(CONF_MIDDAY_TIME) or config_entry.data.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
+             sleep = config_entry.options.get(CONF_SLEEP_TIME) or config_entry.data.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
+             hcl_calc.generate_curve(wake, midday, sleep)
+        _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
+        # Notify frontend to refresh
+        from homeassistant.helpers.dispatcher import async_dispatcher_send
+        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+        return
+
+    # 3. Preview/Apply: lights follow the points until the next reload
+    from homeassistant.helpers.dispatcher import async_dispatcher_send
+    async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HCL Lighting from a config entry."""
@@ -92,10 +227,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize Logic Core
     # The override state is kept per entry across reloads (saving the curve or
     # the options reloads the entry) so manually controlled lights stay paused.
-    override_manager = hass.data.setdefault(DATA_OVERRIDE_MANAGERS, {}).setdefault(
-        entry.entry_id, OverrideManager()
-    )
+    managers = hass.data.setdefault(DATA_OVERRIDE_MANAGERS, {})
+    first_setup = entry.entry_id not in managers
+    override_manager = managers.setdefault(entry.entry_id, OverrideManager())
+    await _async_setup_override_manager(hass, entry, override_manager, first_setup)
     controller = HCLLightController(hass, override_manager, hcl_calc, entry)
+    # Restore the adaptation switches before any light command is sent
+    controller.adapt_brightness = _restored_switch_state(hass, entry, "adapt_brightness")
+    controller.adapt_color = _restored_switch_state(hass, entry, "adapt_color")
 
     # Store shared logic core
     hass.data[DOMAIN][entry.entry_id] = {
@@ -106,95 +245,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
-    # Auto-register Lovelace Resource
-    await _async_register_lovelace_resource(hass)
+    # Static path and Lovelace resource: once per Home Assistant run
+    if not hass.data.get(DATA_FRONTEND_REGISTERED):
+        hass.data[DATA_FRONTEND_REGISTERED] = True
+        await _async_register_lovelace_resource(hass)
     
     entry.async_on_unload(entry.add_update_listener(update_listener))
     
-    # Register Global Service
-    async def async_update_curve_service(call):
-        """Handle global update_curve service."""
-        _LOGGER.debug(f"Service update_curve called (data={call.data})")
-        points = call.data.get("points")
-        mode = call.data.get("mode", "preview")
-        entity_id = call.data.get("entity_id")
-        
-        if not entity_id:
-            raise HomeAssistantError("update_curve called without entity_id")
-            
-        # Resolve Entry ID from Entity ID
-        ent_reg = er.async_get(hass)
-        entity_entry = ent_reg.async_get(entity_id)
-        
-        if not entity_entry:
-             raise HomeAssistantError(f"Entity not found: {entity_id}")
-        
-        # Hardening: Validate Entity Type
-        if entity_entry.domain not in ["sensor", "switch"]:
-             raise HomeAssistantError(f"Invalid entity '{entity_id}'. Must be an HCL sensor or switch.")
-             
-        if entity_entry.platform != DOMAIN:
-             raise HomeAssistantError(f"Entity '{entity_id}' is not an HCL Lighting entity.")
-              
-        entry_id = entity_entry.config_entry_id
-        if not entry_id:
-             raise HomeAssistantError(f"Entity {entity_id} is not linked to a Config Entry.")
-
-        if entry_id not in hass.data[DOMAIN]:
-             raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
-        
-        if entry_id not in hass.data[DOMAIN]:
-             raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
-        
-        logic_core = hass.data[DOMAIN][entry_id]
-        hcl_calc: HCLCalculator = logic_core["calculator"]
-        
-        # 1. Update In-Memory Calculator
-        if points:
-            hcl_calc.calculate_curve_from_points(points)
-            
-        # 2. Handle Save
-        if mode == "save":
-            config_entry = hass.config_entries.async_get_entry(entry_id)
-            new_options = {**config_entry.options}
-            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
-            hass.config_entries.async_update_entry(config_entry, options=new_options)
-            return
-        # 2b. Handle Revert
-        if mode == "revert":
-            config_entry = hass.config_entries.async_get_entry(entry_id)
-            curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
-            if curve_config:
-                 hcl_calc.generate_curve_from_config(curve_config)
-            else:
-                 # Revert to legacy logic if no curve config
-                 wake = config_entry.options.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
-                 midday = config_entry.options.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
-                 sleep = config_entry.options.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
-                 hcl_calc.generate_curve(wake, midday, sleep)
-            _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
-            # Notify frontend to refresh
-            from homeassistant.helpers.dispatcher import async_dispatcher_send
-            async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
-            return
-
-        # 3. Notify Updates (Preview/Apply)
-        from homeassistant.helpers.dispatcher import async_dispatcher_send
-        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
-        
-        # Trigger Switch Update if 'apply'
-        if mode == "apply":
-            # We need to find the switch entity for this entry to trigger logic
-            # Or just signal the switch to update?
-            # switch listens to the dispatcher? No, switch usually just runs loop or listens to state.
-            # But we can dispatch a "force_update" signal.
-            pass # Currently implemented in switch.py as dispatcher listener? No.
-            # Ideally the switch should subscribe to this update too.
-
-    hass.services.async_register(
-        DOMAIN, "update_curve", async_update_curve_service, schema=UPDATE_CURVE_SCHEMA
-    )
-
     # 4. Create Setup Issue (Onboarding)
     # This guides the user to add the dashboard card
     # Lookup the created sensor entity to be helpful
@@ -243,7 +300,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.5.1"
+    FULL_URL = f"{BASE_URL}?v=0.6.0"
     
     if "lovelace" not in hass.data:
         return
@@ -309,6 +366,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Clean up state that outlives reloads when an entry is deleted."""
     hass.data.get(DATA_OVERRIDE_MANAGERS, {}).pop(entry.entry_id, None)
+    await _override_store(hass, entry.entry_id).async_remove()
     from homeassistant.helpers import issue_registry as ir
     ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
 

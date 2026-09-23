@@ -29,8 +29,10 @@ POINTS = [
 ]
 
 
-def _hass(mode: str) -> dict:
+def _hass(mode: str, language: str = "en", dark: bool = False, extra: dict | None = None) -> dict:
     return {
+        "language": language,
+        "themes": {"darkMode": dark},
         "states": {
             "sensor.hcl_curve_data": {
                 "state": "x",
@@ -39,6 +41,7 @@ def _hass(mode: str) -> dict:
                     "mode_entity_id": "select.mode",
                     "min_brightness": 10,
                     "max_brightness": 100,
+                    **(extra or {}),
                 },
             },
             "select.mode": {"state": mode, "attributes": {}},
@@ -77,10 +80,10 @@ async def page():
         await browser.close()
 
 
-async def _set_hass(page, mode: str) -> None:
+async def _set_hass(page, mode: str, **kwargs) -> None:
     await page.evaluate(
         "(h) => { h.callService = (...a) => window.__calls.push(a); card.hass = h; }",
-        _hass(mode),
+        _hass(mode, **kwargs),
     )
     await page.wait_for_timeout(200)
 
@@ -106,10 +109,9 @@ async def test_b12_chip_click_still_calls_select_service(page):
 
 
 async def test_b18_card_styles_are_applied(page):
-    radius = await page.evaluate("() => getComputedStyle(card.shadowRoot.querySelector('ha-card')).borderTopLeftRadius")
-    assert radius == "24px"
-    accent = await page.evaluate("() => getComputedStyle(card).getPropertyValue('--accent-gold').trim()")
-    assert accent.upper() == "#FFD700"
+    """The :host rule is parsed (theme-based variables resolve on the card)."""
+    b_color = await page.evaluate("() => getComputedStyle(card).getPropertyValue('--hcl-b-color').trim()")
+    assert b_color.lower() == "#ffb300"  # fallback without HA theme
 
 
 async def test_b19_active_scenario_line_is_drawn(page):
@@ -140,3 +142,121 @@ async def test_editor_basics_unchanged(page):
     n = await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length")
     assert n == len(POINTS)
     assert page.errors == []
+
+
+async def _points(page):
+    return await page.evaluate("() => card._points.map(p => [p.t, p.b, p.k])")
+
+
+async def test_a09_german_texts(page):
+    await _set_hass(page, "sleep", language="de")
+    texts = await page.evaluate("""() => ({
+        title: card.shadowRoot.querySelector('.title').textContent,
+        chip: card.shadowRoot.querySelector('.chip[data-mode=sleep] span').textContent,
+        save: card.shadowRoot.getElementById('btn-save').textContent,
+        now: card.shadowRoot.getElementById('now-info').textContent,
+    })""")
+    assert texts["title"] == "HCL-Konfigurator"
+    assert texts["chip"] == "Schlafen"
+    assert texts["save"] == "Speichern"
+    assert texts["now"].startswith("Jetzt ")
+    await _set_hass(page, "sleep", language="en")
+    assert await page.evaluate("() => card.shadowRoot.querySelector('.title').textContent") == "HCL Configurator"
+    assert page.errors == []
+
+
+async def test_a09_chart_colours_follow_theme(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card.style.setProperty('--divider-color', 'rgb(1, 2, 3)'); card.style.setProperty('--secondary-text-color', 'rgb(4, 5, 6)'); }")
+    await _set_hass(page, "auto", dark=True)  # theme change
+    await page.wait_for_timeout(100)
+    grid, ticks = await page.evaluate("() => [card._chartB.options.scales.y.grid.color, card._chartK.options.scales.y.ticks.color]")
+    assert grid == "rgb(1, 2, 3)" and ticks == "rgb(4, 5, 6)"
+    assert page.errors == []
+
+
+async def test_a08_add_delete_undo(page):
+    await _set_hass(page, "auto")
+    before = await _points(page)
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-add').click()")
+    after_add = await _points(page)
+    assert len(after_add) == len(before) + 1
+    assert [p[0] for p in after_add] == sorted(p[0] for p in after_add)
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(after_add)
+    assert await page.evaluate("() => card._isDirty") is True
+    # delete the selected (new) point, then undo twice
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-delete').click()")
+    assert await _points(page) == before
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-undo').click()")
+    assert await _points(page) == after_add
+    await page.evaluate("() => card.dispatchEvent(new KeyboardEvent('keydown', {key: 'z', ctrlKey: true}))")
+    assert await _points(page) == before
+    assert await page.evaluate("() => card._isDirty") is False
+    assert page.errors == []
+
+
+async def test_a08_double_click_adds_point_at_time(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("""() => {
+        const c = card._chartB; const r = c.canvas.getBoundingClientRect();
+        const x = r.left + c.scales.x.getPixelForValue(1200);
+        c.canvas.dispatchEvent(new MouseEvent('dblclick', {clientX: x, clientY: r.top + 20, bubbles: true}));
+    }""")
+    assert 1200 in [p[0] for p in await _points(page)]
+    assert page.errors == []
+
+
+async def test_a08_keyboard_keeps_order_and_minimum_points(page):
+    await _set_hass(page, "auto")
+    # point 1 (09:00) cannot pass point 2 (09:30)
+    for _ in range(5):
+        await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle[data-idx="1"]')
+            .dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}))""")
+    pts = await _points(page)
+    assert pts[1][0] == 555 and pts[1][0] < pts[2][0]
+    # delete down to two points; the last two cannot be deleted
+    for _ in range(20):
+        await page.evaluate("""() => { const h = card.shadowRoot.querySelector('#handles-b .handle[data-idx="0"]');
+            h && h.dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true})); }""")
+    assert len(await _points(page)) == 2
+    assert page.errors == []
+
+
+async def test_a08_numeric_editor(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => card._select(4)")  # 12:00
+    await page.evaluate("""() => {
+        const $ = (id) => card.shadowRoot.getElementById(id);
+        $('in-t').value = '13:50'; $('in-b').value = '120'; $('in-k').value = '5000';
+        $('in-k').dispatchEvent(new Event('change'));
+    }""")
+    pt = (await _points(page))[4]
+    # time clamped to the next point (12:30) minus 15 min, brightness clamped to 100
+    assert pt == [735, 100, 5000]
+    assert page.errors == []
+
+
+async def test_a08_now_marker_and_limits(page):
+    await _set_hass(page, "auto", extra={"max_brightness": 60})
+    info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+    assert info.startswith("Now ") and "%" in info and "K" in info
+    dashed = await page.evaluate("() => card._chartB.data.datasets[1].data.length")
+    assert dashed == 97  # effective (limited) brightness drawn
+    assert await page.evaluate("() => Math.max(...card._chartB.data.datasets[1].data.map(p => p.y))") == 60
+    await _set_hass(page, "auto", extra={"max_brightness": 100})
+    await page.evaluate("() => card._updateVisuals()")
+    assert await page.evaluate("() => card._chartB.data.datasets[1].data.length") == 0
+
+
+async def test_a07_scenario_line_uses_configured_values(page):
+    await page.evaluate(
+        """() => {
+            window.__lines = [];
+            const orig = card._drawOverrideLine.bind(card);
+            card._drawOverrideLine = (chart, value, color) => { window.__lines.push([chart.canvas.id, value]); orig(chart, value, color); };
+        }"""
+    )
+    await _set_hass(page, "focus", extra={"scenarios": {"focus": {"b": 80, "k": 5000}}})
+    await page.evaluate("() => { card._chartB.update('none'); card._chartK.update('none'); }")
+    lines = await page.evaluate("() => window.__lines")
+    assert ["chartB", 80] in lines and ["chartK", 5000] in lines

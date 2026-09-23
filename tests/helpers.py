@@ -39,6 +39,8 @@ def core(hass: HomeAssistant, entry: MockConfigEntry) -> dict:
 
 
 def switch_entity(hass: HomeAssistant):
-    """Return the HCL switch entity object."""
+    """Return the main HCL switch entity object (not the adapt switches)."""
+    from custom_components.hcl_lighting.switch import HCLSwitch
+
     comp = hass.data["entity_components"]["switch"]
-    return next(iter(comp.entities))
+    return next(e for e in comp.entities if isinstance(e, HCLSwitch))

@@ -65,7 +65,7 @@ async def test_b01_sleep_mode_allows_manual_turn_on(hass, no_frontend_registrati
     sw = switch_entity(hass)
     await sw.async_turn_on()
     await hass.services.async_call(
-        "select", "select_option", {"entity_id": "select.hcl_mode", "option": "sleep"}, blocking=True
+        "select", "select_option", {"entity_id": "select.hcl_scenario", "option": "sleep"}, blocking=True
     )
     await hass.async_block_till_done()
     calls.clear()
@@ -88,7 +88,7 @@ async def test_b01_sleep_mode_still_turns_off_lights_on_activation(hass, no_fron
     await sw.async_turn_on()
     calls.clear()
     await hass.services.async_call(
-        "select", "select_option", {"entity_id": "select.hcl_mode", "option": "sleep"}, blocking=True
+        "select", "select_option", {"entity_id": "select.hcl_scenario", "option": "sleep"}, blocking=True
     )
     await hass.async_block_till_done()
     sent = _calls_for(calls, "light.a")
@@ -109,6 +109,9 @@ async def _run_options_flow(hass, entry, **changes):
     }
     current.update(changes)
     result = await hass.config_entries.options.async_configure(result["flow_id"], current)
+    # Steps "behavior" and "scenarios" with their defaults
+    while result["type"] == "form" and result["step_id"] in ("behavior", "scenarios"):
+        result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     await hass.async_block_till_done()
     return result
 
@@ -381,7 +384,7 @@ async def test_b11_group_loaded_after_startup_is_expanded(hass, no_frontend_regi
     async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=10, color_temp_kelvin=2700, **CT_ATTRS)
     set_light(hass, "light.b", "on", brightness=10, color_temp_kelvin=2700, **CT_ATTRS)
-    mock_restore_cache(hass, [State("switch.hcl_hcl_mode", "on")])
+    mock_restore_cache(hass, [State("switch.hcl_hcl_active", "on")])
     hass.set_state(CoreState.not_running)
     await setup_entry(hass, ["light.group"])  # group platform not loaded yet
     sw = switch_entity(hass)
@@ -404,7 +407,7 @@ async def test_b13_curve_sensor_exposes_brightness_limits(hass, no_frontend_regi
 
 
 # ---------------------------------------------------------------- B-14
-CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=0.5.1"
+CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=0.6.0"
 
 
 async def _register_with_storage(hass, hass_storage, items):
@@ -570,7 +573,7 @@ async def test_b26_mode_select_belongs_to_hcl_device(hass, no_frontend_registrat
     e1 = entities(entry1)
     assert e1["select"].device_id is not None
     assert e1["select"].device_id == e1["switch"].device_id == e1["sensor"].device_id
-    assert e1["select"].entity_id == "select.hcl_mode"
+    assert e1["select"].entity_id == "select.hcl_scenario"
 
     from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -579,10 +582,10 @@ async def test_b26_mode_select_belongs_to_hcl_device(hass, no_frontend_registrat
     assert await hass.config_entries.async_setup(entry2.entry_id)
     await hass.async_block_till_done()
     e2 = entities(entry2)
-    assert e2["select"].entity_id == "select.kitchen_mode"
+    assert e2["select"].entity_id == "select.kitchen_scenario"
     assert e2["select"].device_id == e2["switch"].device_id
     # The curve sensor still finds its own mode select (used by the card).
-    assert hass.states.get("sensor.kitchen_curve_data").attributes["mode_entity_id"] == "select.kitchen_mode"
+    assert hass.states.get("sensor.kitchen_curve_data").attributes["mode_entity_id"] == "select.kitchen_scenario"
 
 
 async def test_b26_existing_select_entity_id_is_kept(hass, no_frontend_registration):
@@ -605,12 +608,12 @@ async def test_b26_existing_select_entity_id_is_kept(hass, no_frontend_registrat
 async def test_b27_new_entry_exposes_mode_entity_id_immediately(hass, no_frontend_registration):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     await setup_entry(hass, ["light.a"])  # first setup: select not yet in the registry
-    assert hass.states.get("sensor.hcl_curve_data").attributes["mode_entity_id"] == "select.hcl_mode"
+    assert hass.states.get("sensor.hcl_curve_data").attributes["mode_entity_id"] == "select.hcl_scenario"
 
 
 async def test_b27_renamed_mode_select_is_followed(hass, no_frontend_registration):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     await setup_entry(hass, ["light.a"])
-    er.async_get(hass).async_update_entity("select.hcl_mode", new_entity_id="select.wohnzimmer_hcl")
+    er.async_get(hass).async_update_entity("select.hcl_scenario", new_entity_id="select.wohnzimmer_hcl")
     await hass.async_block_till_done()
     assert hass.states.get("sensor.hcl_curve_data").attributes["mode_entity_id"] == "select.wohnzimmer_hcl"

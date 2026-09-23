@@ -1,6 +1,8 @@
 # HCL Lighting for Home Assistant
 
-A **Human Centric Lighting (HCL)** custom integration for Home Assistant that automatically adjusts your lights' brightness and color temperature throughout the day to match natural circadian rhythms.
+A **Human Centric Lighting (HCL)** custom integration for Home Assistant that adjusts your lights' brightness and colour temperature throughout the day along a daily curve, inspired by the recommendations of DIN SPEC 67600 / DIN/TS 67600.
+
+🇩🇪 [Deutsche Kurzanleitung](README.de.md)
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub release](https://img.shields.io/github/release/Ecronika/ha_hcl.svg)](https://github.com/Ecronika/ha_hcl/releases)
@@ -8,24 +10,27 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 
 ## ✨ Features
 
-### 🎨 Interactive Dashboard (New in v0.4.0)
-- **Visual Editor**: Visualize and edit your lighting curve with an interactive, touch-friendly chart.
-- **Drag & Drop**: Simply drag control points to adjust Brightness and Color Temperature.
-- **Biologically Accurate Presets**: One-click profiles for **Early Bird**, **Night Owl**, or **Shift Work**.
-- **Live Validation**: Immediate feedback on "implausible" curves (e.g., bright blue light at midnight).
+### 🎨 Interactive Dashboard Card
+- **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
+- **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
+- **Now marker**: A line shows the current time; below the charts the current values are shown (including the brightness limits).
+- **Presets**: One-click profiles **Default**, **Focus**, **Relax**, **Early Bird** and **Night Owl**.
+- **Live Validation**: Immediate hints on implausible curves (e.g. bright, cold light at night).
+- **Language and theme**: German/English texts following the Home Assistant language; colours follow the active (light or dark) theme.
 
-### 🧬 Biologically Inspired Core
-- **PCHIP Interpolation**: Uses **Monotone Cubic Splines** for smooth, organic transitions without overshooting.
-- **HCL Phases**:
-    - **Morning**: Gradual warming up (Activating).
-    - **Midday Dip**: A natural "Regeneration" dip around 12:30 PM (4000K).
-    - **Focus**: High-Kelvin peaks for concentration.
-    - **Evening**: Smooth wind-down to warm, dim light.
+### 🧬 Curve
+- **PCHIP Interpolation**: Monotone cubic interpolation for smooth transitions without overshooting.
+- **Default profile**:
+    - **Morning**: gradual rise to cool, bright light.
+    - **Midday dip**: a dip around 12:30 (4000 K / 50 %). This is part of the default profile, not a normative requirement; edit or remove it in the card if you do not want it.
+    - **Afternoon**: bright, cool light.
+    - **Evening**: wind-down to warm, dim light.
 
-### 🧠 Intelligent Control
-- **Smart Override 2.0**: Automatically detects manual changes (brightness or color) and pauses HCL control.
-- **Traffic Control**: Updates are only sent if values change significantly (reducing Zigbee/WiFi traffic by ~90%).
-- **Instant-On**: Lights turn on *immediately* with the correct circadian settings (no "Color Flash").
+### 🧠 Control
+- **Manual control**: HCL pauses a light when you change it yourself and resumes later (see [Manual control](#manual-control)).
+- **Brightness and colour temperature separately**: Two switches per instance let HCL adapt only the colour temperature, only the brightness or both.
+- **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K).
+- **Instant-On**: Lights receive the HCL values right after they are switched on.
 - **Capabilities**: Auto-detects RGB/XY support and simulates colour temperatures outside a bulb's native CT range via XY on colour-capable bulbs (supported range of the curve: 2000–7000 K). CT-only bulbs are driven to the nearest temperature they can reach.
 
 ---
@@ -42,7 +47,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that au
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **"HCL Lighting"**.
-3. Follow the setup wizard to name your instance (e.g., "Living Room") and select lights. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members (also for groups that finish loading after Home Assistant has started).
+3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically.
 
 **Requirements**: Home Assistant **2024.7** or newer.
 
@@ -64,48 +69,74 @@ The sensor is named `sensor.<instance name>_curve_data` (e.g. `sensor.living_roo
 
 ## ⚙️ Configuration
 
-### Global Scheduling Options
-Go to **Configure** on the integration entry to set your "Dynamic Anchors". These options generate the **Default Curve**:
+Open **Configure** on the integration entry. The options have three pages.
 
+### 1. Curve and lights
+*   **Lights to control**
 *   **Wake Time**: Start of the active day (Default: 07:00).
-*   **Midday Time**: The lowest point of the "Regeneration Dip" (Default: 12:30).
-*   **Sleep Time**: End of the day (Default: 22:00).
-*   **Min/Max Brightness**: Global limits for the curve (e.g., 10% - 100%). Curve values outside the limits are clipped to them; the dashboard card shades the clipped ranges. Fixed scenarios (Focus, Relax, Cleaning) use their own values.
+*   **Midday Time**: The lowest point of the midday dip (Default: 12:30).
+*   **Sleep Time**: End of the day (Default: 22:00). Wake and sleep time must be more than 6 hours apart.
+*   **Min/Max Brightness**: Global limits for the curve (e.g., 10% - 100%). Curve values outside the limits are clipped to them; the dashboard card shades the clipped ranges and shows the effective brightness as a dashed line. Fixed scenarios (Focus, Relax, Cleaning) use their own values.
+*   **Smart Transition Mode**: Enable this if your lights flash or stutter during updates. It separates brightness and colour commands.
 
 The three anchors must leave room for the curve sectors (wake ramp 3 h, midday sector 30 min before to 3.5 h after midday, 4 h wind-down before sleep). If the midday time does not fit, it is moved to the nearest possible time; if the day is shorter than about 11 hours, the default profile is scaled to the wake–sleep span. A warning is logged in both cases.
 
-> **Note**: A curve saved in the Dashboard Card takes precedence over the anchor times. Saving the options (targets, brightness limits, smart transition) keeps it. **Changing Wake, Midday or Sleep Time discards the saved curve** and generates a new default curve from the new anchors. **REVERT** in the card only discards unsaved card edits and reloads the last saved curve.
+> **Note**: A curve saved in the Dashboard Card takes precedence over the anchor times. Saving the options keeps it. **Changing Wake, Midday or Sleep Time discards the saved curve** and generates a new default curve from the new anchors. **REVERT** in the card only discards unsaved card edits and reloads the last saved curve.
 
-### Smart Options
-*   **Smart Transition Mode**: Enable this if your lights flash or stutter during updates. It separates Brightness and Color commands.
+### 2. Updates and manual control
+| Option | Default | Meaning |
+|---|---|---|
+| Update interval | 27 s | Time between two update cycles (10–600 s) |
+| Transition of updates | 20 s | Must be shorter than the update interval; lights without transition support ignore it |
+| Transition when switched on | 0 s | Transition of the values sent right after a light is switched on |
+| Return to HCL after manual control | 240 min | 0 = HCL never takes a paused light back automatically |
+| Switching a light off ends manual control | on | Off: a paused light stays paused when it is switched off and on again |
+| Keep manual control across restarts | off | On: paused lights stay paused after a Home Assistant restart |
+| Keep values of turn-on commands | off | On: a light switched on through Home Assistant with its own brightness or colour (scene, automation, voice, app) keeps these values |
+
+### 3. Scenarios
+Brightness and colour temperature of **Focus** (100 % / 5500 K), **Relax** (40 % / 2700 K) and **Cleaning** (100 % / 4000 K), plus a **duration** in minutes after which these scenarios return to **Auto** (0 = until changed).
 
 ---
 
 ## 📖 Usage
 
-The integration creates a **Switch** entity (e.g., `switch.living_room_hcl_mode`; the name suffix follows the language Home Assistant used when the entity was created, e.g. `_hcl_modus` in German).
+Each instance is a device with these entities (IDs of new installations; existing installations keep their entity IDs, only the displayed names change):
 
-*   **ON**: HCL is active. Lights follow the curve.
-*   **OFF**: HCL is paused. Lights behave like normal smart lights.
-*   **Manual Override**: If you manually change a light (e.g., via Wall Switch or App), HCL control is **paused for that specific light**. The Main Switch remains **ON**. Turn the light **OFF and ON** again to resume circadian control. After **4 hours** HCL takes a paused light back automatically (smooth 3-minute transition) if it is still on; a light that is off is never switched on by HCL. Paused lights stay paused when the curve or the options are saved; a restart of Home Assistant clears all pauses.
+| Entity | Example ID | Purpose |
+|---|---|---|
+| HCL active | `switch.living_room_hcl_active` | HCL on/off. Attribute `manual_control` lists the paused lights. |
+| Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone |
+| Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
+| Scenario | `select.living_room_scenario` | Auto, Focus, Relax, Cleaning, Guest, Sleep (also the chips of the card). Attribute `until`: end of a timed scenario. |
+| Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change) |
 
-A **Mode** select entity (e.g. `select.living_room_mode`, part of the same HCL device; also used by the chips of the dashboard card) switches between scenarios:
+The name part of the IDs follows the language Home Assistant used when the entity was created (e.g. `_hcl_aktiv` in German).
 
+### Scenarios
 *   **Auto**: follow the curve.
-*   **Focus / Relax / Cleaning**: fixed values (5500 K/100 %, 2700 K/40 %, 4000 K/100 %).
+*   **Focus / Relax / Cleaning**: fixed values (configurable, optionally with a duration).
 *   **Guest**: HCL sends no updates.
-*   **Sleep**: lights that are on when Sleep is selected are faded off. A light switched on manually during Sleep counts as a manual override and stays on until it is switched off (or the 4-hour timeout expires).
+*   **Sleep**: lights that are on when Sleep is selected are faded off. A light switched on manually during Sleep counts as manual control and stays on until it is switched off (or the timeout expires).
+
+### Manual control
+HCL pauses a light (only this light; the HCL switch stays on) when
+*   Home Assistant changes its brightness or colour with a command that does not come from HCL (app, dashboard, scene, automation, voice assistant), or
+*   the light reports values that differ from HCL's values (e.g. changed with a wall switch or the manufacturer's app): brightness > 2 %, colour temperature > 100 K, XY colour > 0.05.
+
+Changes of an attribute that HCL does not adapt (see the two adapt switches) do not pause the light.
+
+A paused light returns to HCL when it is switched off and on again, or automatically after the configured time (default 4 hours, smooth 3-minute transition) if it is still on; HCL never switches a light on. Paused lights stay paused when the curve or the options are saved, and optionally across restarts.
+
+By default a light that is switched on receives the HCL values immediately, even if the turn-on command contained its own values. Enable **Keep values of turn-on commands** to keep them instead.
 
 ---
 
 ## 🔧 Technical Details
 
-*   **Update Loop**: Every **27 seconds** (periodic).
+*   **Update Loop**: every 27 seconds by default (configurable).
 *   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
-*   **Manual Detection Thresholds**:
-    *   Brightness: > 2% deviation
-    *   Color Temp: > 100K deviation
-    *   XY Color: > 0.05 Euclidean distance
+*   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State changes that are not caused by a Home Assistant command are compared with the thresholds above.
 *   **Traffic Optimization**:
     *   Brightness: Updates only if delta > 1%
     *   Kelvin: Updates only if delta > 50K (compared with the temperature the light can reach; lights in XY mode are compared by colour)
@@ -120,13 +151,11 @@ Tests use `pytest-homeassistant-custom-component` (Home Assistant tests) and Pla
 ```bash
 pip install pytest-homeassistant-custom-component playwright
 python -m playwright install chromium
-pytest tests --ignore=tests/test_hcl_math_v4.py   # Home Assistant / logic tests
-pytest tests_frontend                             # card tests (skipped without Playwright/Chromium)
+pytest tests            # Home Assistant / logic tests
+pytest tests_frontend   # card tests (skipped without Playwright/Chromium)
 ```
 
-GitHub Actions (`.github/workflows/tests.yml`) runs the Home Assistant tests against the minimum supported release (2024.7.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium. When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
-
-`tests/test_hcl_math_v4.py` is a legacy standalone script that replaces Home Assistant modules with mocks; it is excluded from the regular run.
+GitHub Actions (`.github/workflows/tests.yml`) runs hassfest, the Home Assistant tests against the minimum supported release (2024.7.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium. When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
 
 ---
 

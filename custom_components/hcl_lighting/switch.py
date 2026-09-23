@@ -16,10 +16,14 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.util.dt import utcnow
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
-from homeassistant.const import STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.service import async_call_from_config
 from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
+from homeassistant.const import EVENT_CALL_SERVICE, ENTITY_MATCH_ALL
 
 from .const import (
     DOMAIN,
@@ -29,8 +33,6 @@ from .const import (
     CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
-    UPDATE_INTERVAL_SECONDS,
-    HCL_TRANSITION_SECONDS,
     CONF_WAKE_TIME,
     CONF_MIDDAY_TIME,
     CONF_SLEEP_TIME,
@@ -38,9 +40,16 @@ from .const import (
     DEFAULT_MIDDAY_TIME,
     DEFAULT_SLEEP_TIME,
     SERVICE_UPDATE_CURVE,
-    SERVICE_UPDATE_CURVE,
     CONF_CURVE_CONFIG,
-    IGNORE_WINDOW_SECONDS
+    IGNORE_WINDOW_SECONDS,
+    CONF_UPDATE_INTERVAL,
+    CONF_TRANSITION,
+    CONF_TURN_ON_TRANSITION,
+    CONF_RESPECT_TURN_ON_VALUES,
+    DEFAULT_UPDATE_INTERVAL,
+    DEFAULT_TRANSITION,
+    DEFAULT_TURN_ON_TRANSITION,
+    DEFAULT_RESPECT_TURN_ON_VALUES,
 )
 
 from .logic.hcl_math import HCLCalculator
@@ -59,10 +68,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     override_manager = logic_core["override_manager"]
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
-    
-    async_add_entities([switch])
 
-    # Service is now registered globally in __init__.py
+    async_add_entities([
+        switch,
+        HCLAdaptSwitch(entry, controller, "adapt_brightness", "mdi:brightness-6"),
+        HCLAdaptSwitch(entry, controller, "adapt_color", "mdi:thermometer"),
+    ])
+
+
+# Light service attributes that change brightness or colour (used to recognise
+# manual control through Home Assistant: apps, scenes, automations, voice)
+_BRIGHTNESS_ATTRS = {"brightness", "brightness_pct", "brightness_step", "brightness_step_pct"}
+_COLOR_ATTRS = {
+    "color_temp", "color_temp_kelvin", "kelvin", "xy_color", "hs_color", "rgb_color",
+    "rgbw_color", "rgbww_color", "color_name", "white", "effect",
+}
+_TARGET_KEYS = ("entity_id", "device_id", "area_id", "floor_id", "label_id")
 
 class HCLSwitch(RestoreEntity, SwitchEntity):
     """Representation of a HCL Lighting Switch."""
@@ -97,6 +118,15 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         # Concurrency Guard
         self._update_lock = asyncio.Lock()
 
+        options = entry.options
+        self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
+        self._transition = float(options.get(CONF_TRANSITION, DEFAULT_TRANSITION))
+        self._turn_on_transition = float(options.get(CONF_TURN_ON_TRANSITION, DEFAULT_TURN_ON_TRANSITION))
+        self._respect_turn_on_values = bool(
+            options.get(CONF_RESPECT_TURN_ON_VALUES, DEFAULT_RESPECT_TURN_ON_VALUES)
+        )
+        self._cancel_reresolve = None
+
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
         await super().async_added_to_hass()
@@ -112,8 +142,28 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         if not self.hass.is_running:
             self.async_on_remove(async_at_started(self.hass, self._async_hass_started))
 
+        # Manual control through Home Assistant (apps, scenes, automations, voice)
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_CALL_SERVICE, self._handle_service_call)
+        )
+
+        # Keep the manual_control attribute current
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, f"{DOMAIN}_{self._entry.entry_id}_overrides", self._handle_overrides_changed
+            )
+        )
+
+        # Targets given as devices, areas, floors, labels or groups can change
+        for event_type in (
+            er.EVENT_ENTITY_REGISTRY_UPDATED,
+            dr.EVENT_DEVICE_REGISTRY_UPDATED,
+            ar.EVENT_AREA_REGISTRY_UPDATED,
+        ):
+            self.async_on_remove(self.hass.bus.async_listen(event_type, self._handle_registry_updated))
+        self.async_on_remove(self._cancel_pending_reresolve)
+
         # Subscribe to global updates (from service)
-        from homeassistant.helpers.dispatcher import async_dispatcher_connect
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, 
@@ -139,6 +189,84 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             return
         await self._re_evaluate_targets_and_listeners()
         await self._update_hcl()
+
+    @callback
+    def _handle_overrides_changed(self) -> None:
+        self.async_write_ha_state()
+
+    @callback
+    def _cancel_pending_reresolve(self) -> None:
+        if self._cancel_reresolve:
+            self._cancel_reresolve()
+            self._cancel_reresolve = None
+
+    @callback
+    def _handle_registry_updated(self, _event) -> None:
+        """Re-resolve the targets shortly after registry changes (debounced)."""
+        if not self._is_on:
+            return
+        self._cancel_pending_reresolve()
+
+        async def _reresolve(_now) -> None:
+            self._cancel_reresolve = None
+            if not self._is_on:
+                return
+            old_targets = set(self._resolved_targets)
+            await self._re_evaluate_targets_and_listeners()
+            if self._resolved_targets != old_targets:
+                await self._update_hcl()
+
+        self._cancel_reresolve = async_call_later(self.hass, 2, _reresolve)
+
+    @callback
+    def _handle_service_call(self, event) -> None:
+        """Mark lights as manually controlled when HA changes them with own values.
+
+        HCL's own commands carry an HCL context and are ignored. A command that
+        sets brightness or colour on a light that is on pauses HCL for that light
+        (only for the attributes HCL adapts). A turn-on command with own values
+        for a light that is off is respected only if configured.
+        """
+        if not self._is_on:
+            return
+        data = event.data
+        if data.get("domain") != "light" or data.get("service") not in ("turn_on", "toggle"):
+            return
+        if self.controller.is_own_context(event.context):
+            return
+
+        service_data = data.get("service_data") or {}
+        keys = set(service_data)
+        profile = "profile" in keys
+        touches_brightness = profile or bool(keys & _BRIGHTNESS_ATTRS)
+        touches_color = profile or bool(keys & _COLOR_ATTRS)
+        if not (
+            (touches_brightness and self.controller.adapt_brightness)
+            or (touches_color and self.controller.adapt_color)
+        ):
+            return
+
+        target = {}
+        for key in _TARGET_KEYS:
+            value = service_data.get(key)
+            if not value:
+                continue
+            if isinstance(value, str):
+                value = [v.strip() for v in value.split(",")]
+            target[key] = value
+        if ENTITY_MATCH_ALL in target.get("entity_id", []):
+            lights = set(self._resolved_targets)
+        else:
+            lights = self.controller.resolve_targets(target) & self._resolved_targets
+
+        for entity_id in lights:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.state == STATE_ON:
+                if data["service"] == "toggle":
+                    continue  # toggling a light that is on switches it off
+                self.override_manager.set_override(entity_id)
+            elif self._respect_turn_on_values:
+                self.override_manager.set_override(entity_id)
 
     # async_options_updated is handled by reload in __init__.py
 
@@ -171,6 +299,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             "calculated_brightness": self._calculated_brightness,
             "calculated_color_temp": self._calculated_kelvin,
             "target_entities": list(targets),
+            "manual_control": self.override_manager.overridden_entities(),
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -183,7 +312,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             self._timer_remove_callback = async_track_time_interval(
                 self.hass,
                 self._update_hcl, # Main Loop
-                timedelta(seconds=UPDATE_INTERVAL_SECONDS)
+                timedelta(seconds=self._update_interval)
             )
         
         await self._re_evaluate_targets_and_listeners()
@@ -241,13 +370,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 
                 # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
                 if brightness is None and kelvin is None:
-                    # GUEST MODE: Freeze/No-Op
-                    # We still define brightness/kelvin as None for the state attributes below?
-                    # Or just return?
-                    # If we return, we don't prune cache or re-engage.
-                    # Pruning is safe. Re-engage... maybe we shouldn't re-engage in Guest mode.
-                    # Let's update state to reflect "Guest" or "Hold"?
-                    self.async_write_ha_state() 
+                    # GUEST MODE: no updates, no re-engagement
+                    self.async_write_ha_state()
                     return
 
                 # Special Case: Sleep Mode handling (If brightness is 0)
@@ -270,6 +394,14 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 self.controller.prune_cache(all_lights)
                 self.override_manager.prune_stale_entities(all_lights)
                 
+                # Lights that are off are no longer under manual control
+                # (covers switch-offs HCL did not see, e.g. while it was off)
+                if self.override_manager.reset_on_off:
+                    for eid in self.override_manager.overridden_entities():
+                        eid_state = self.hass.states.get(eid)
+                        if eid_state is not None and eid_state.state == STATE_OFF:
+                            self.override_manager.reset_override(eid)
+
                 # 3. Check for Re-engagements (Expired Overrides)
                 expired_overrides = self.override_manager.get_pending_reengagements()
                 for eid in expired_overrides:
@@ -295,7 +427,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                         active_lights, 
                         self._calculated_brightness, 
                         self._calculated_kelvin,
-                        transition=HCL_TRANSITION_SECONDS 
+                        transition=self._transition
                     )
             except Exception:
                  _LOGGER.exception("Error in HCL update loop")
@@ -340,14 +472,17 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      )
                      
                      # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
-                     self.override_manager.set_ignore_window(entity_id, IGNORE_WINDOW_SECONDS)
+                     self.override_manager.set_ignore_window(
+                         entity_id, IGNORE_WINDOW_SECONDS + self._turn_on_transition
+                     )
 
                      # Await immediately to block handling of subsequent events until command is sent
                      await self.controller.apply_fast(
                          entity_id, 
                          fresh_b, 
                          fresh_k,
-                         state_obj=new_state
+                         state_obj=new_state,
+                         transition=self._turn_on_transition,
                      )
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return
@@ -364,3 +499,47 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 return
         except Exception:
             _LOGGER.exception("Error handling state change for %s", event.data.get("entity_id", "unknown"))
+
+
+class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
+    """Switch that enables adaptation of brightness or colour temperature."""
+
+    _attr_has_entity_name = True
+
+    def __init__(self, entry: ConfigEntry, controller: HCLLightController, key: str, icon: str) -> None:
+        """Initialize (key: adapt_brightness | adapt_color)."""
+        self._entry = entry
+        self._controller = controller
+        self._key = key
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_translation_key = key
+        self._attr_icon = icon
+
+    @property
+    def is_on(self) -> bool:
+        """Return true if HCL adapts this attribute."""
+        return getattr(self._controller, self._key)
+
+    @property
+    def device_info(self):
+        """Return device info (same HCL device as the main switch)."""
+        from homeassistant.helpers.entity import DeviceInfo
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name=self._entry.title,
+            manufacturer="HCL Integration",
+            model="HCL Controller",
+        )
+
+    async def _async_set(self, value: bool) -> None:
+        setattr(self._controller, self._key, value)
+        self.async_write_ha_state()
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Let HCL adapt this attribute."""
+        await self._async_set(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Stop adapting this attribute (it stays as it is)."""
+        await self._async_set(False)
