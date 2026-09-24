@@ -13,6 +13,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import async_get as async_get_restore_state
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -29,6 +30,8 @@ from .const import (
     DEFAULT_OVERRIDE_TIMEOUT,
     DEFAULT_OVERRIDE_RESET_ON_OFF,
     DEFAULT_PERSIST_OVERRIDES,
+    HCL_MODES,
+    MODE_AUTO,
 )
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
@@ -82,6 +85,27 @@ def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) ->
         return True
     return stored.state.state != STATE_OFF
 
+def _restored_mode(hass: HomeAssistant, entry: ConfigEntry) -> str:
+    """Last scenario of the mode select (Auto if unknown or a timed scenario has ended).
+
+    Mirrors HCLModeSelect's own restore so the controller already has the right
+    scenario when the HCL switch sends its first update (e.g. no light command
+    in Guest mode after a reload).
+    """
+    entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
+    if entity_id is None:
+        return MODE_AUTO
+    stored = async_get_restore_state(hass).last_states.get(entity_id)
+    if stored is None or stored.state.state not in HCL_MODES:
+        return MODE_AUTO
+    extra = stored.extra_data.as_dict() if stored.extra_data is not None else {}
+    until_iso = extra.get("until")
+    until = dt_util.parse_datetime(until_iso) if isinstance(until_iso, str) else None
+    if until is not None and until <= dt_util.utcnow():
+        return MODE_AUTO
+    return stored.state.state
+
+
 _POINT_SCHEMA = vol.Schema(
     {
         vol.Required("t"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
@@ -96,6 +120,13 @@ def _validate_update_curve(data: dict) -> dict:
     """Points are required (at least two) for every mode except 'revert'."""
     if data["mode"] != "revert" and len(data.get("points") or []) < 2:
         raise vol.Invalid("points (at least 2) are required for mode " + data["mode"])
+    times = [point["t"] for point in data.get("points") or []]
+    duplicates = sorted({t for t in times if times.count(t) > 1})
+    if duplicates:
+        raise vol.Invalid(
+            "points must have different times; duplicate t (minutes): "
+            + ", ".join(str(t) for t in duplicates)
+        )
     return data
 
 
@@ -162,6 +193,8 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
     # 1. Update In-Memory Calculator
     if points:
         hcl_calc.calculate_curve_from_points(points)
+    # Preview/apply: unsaved points; save/revert: the stored curve applies again
+    hcl_calc.preview_active = mode in ("preview", "apply")
         
     # 2. Handle Save
     if mode == "save":
@@ -235,6 +268,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Restore the adaptation switches before any light command is sent
     controller.adapt_brightness = _restored_switch_state(hass, entry, "adapt_brightness")
     controller.adapt_color = _restored_switch_state(hass, entry, "adapt_color")
+    # ... and the scenario (the HCL switch is set up before the mode select)
+    controller.set_active_mode(_restored_mode(hass, entry))
 
     # Store shared logic core
     hass.data[DOMAIN][entry.entry_id] = {
@@ -300,7 +335,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant):
     
     BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
     # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.6.0"
+    FULL_URL = f"{BASE_URL}?v=0.6.1"
     
     if "lovelace" not in hass.data:
         return

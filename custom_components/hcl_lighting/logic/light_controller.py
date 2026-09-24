@@ -61,6 +61,10 @@ from homeassistant.const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Colour modes HCL drives through the XY simulation (Home Assistant converts
+# xy_color to the light's own mode, including RGBW and RGBWW)
+_COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW)
+
 class HCLLightController:
     """Controller for applying HCL settings to lights."""
 
@@ -70,7 +74,6 @@ class HCLLightController:
         self.hcl_calc = hcl_calc
         self.config_entry = config_entry
         self._capability_cache = {}
-        self._result_cache = {} # (entity_id, k_bucket) -> result
         self._cache_version = CAPABILITY_CACHE_VERSION
         
         # State Machine
@@ -204,11 +207,7 @@ class HCLLightController:
         to_remove = [eid for eid in self._capability_cache if eid not in valid_entity_ids]
         for eid in to_remove:
             del self._capability_cache[eid]
-            
-        # Prune result cache (Keys are (entity_id, bucket))
-        to_remove_res = [k for k in self._result_cache if k[0] not in valid_entity_ids]
-        for k in to_remove_res:
-             del self._result_cache[k]
+
             
         if to_remove:
             _LOGGER.debug("Pruned %d stale entities from capability cache", len(to_remove))
@@ -221,9 +220,12 @@ class HCLLightController:
         transition: float | None = None,
         fast_mode: bool = False
     ):
-        """Apply settings to a batch of lights (Parallel Execution)."""
+        """Apply settings to a batch of lights (Parallel Execution).
+
+        Returns the lights that received a command.
+        """
         if not lights:
-            return
+            return []
 
         # 1. Update Tracking (Immediate to prevent Race Conditions)
         # Delegate to OverrideManager
@@ -315,6 +317,7 @@ class HCLLightController:
             ))
 
         # 4. EXECUTE ALL IN PARALLEL
+        updated = lights_ct + lights_xy_sim + lights_dim
         if tasks:
             if fast_mode:
                 # Fire-and-forget: schedule all tasks without waiting
@@ -331,6 +334,7 @@ class HCLLightController:
                             i + 1, len(results), res, 
                             exc_info=res
                         )
+        return updated
 
     async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None, transition: float = 0):
         """Ultra-fast HCL application for turn-on events."""
@@ -393,33 +397,24 @@ class HCLLightController:
         
         duration = REENGAGE_STEPS * REENGAGE_INTERVAL_SECONDS
         
-        await self.apply_batch(
+        updated = await self.apply_batch(
             [entity_id], 
             target_brightness, 
             target_kelvin, 
             transition=duration,
             fast_mode=True # Don't block main loop
         )
+        # Normal update cycles must not cut the smooth transition short
+        if entity_id in updated:
+            self.override_manager.set_reengaging(entity_id, duration)
 
     def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
-        """Determine capabilities of a light (Cached with Migration Safety)."""
-        
-        # 0. Optimization: Result Cache (Bucket: 500K)
-        # Avoids repeating logic checks every cycle for static states.
-        k_bucket = kelvin // 500
-        res_key = (entity_id, k_bucket)
-        
-        if res_key in self._result_cache and not state_obj:
-            # Only use cache if not forcing state_obj update
-            return self._result_cache[res_key]
+        """Determine how a light is driven for a target colour temperature.
 
-        result = self._get_capability_internal(entity_id, kelvin, state_obj)
-        
-        # Store result
-        if not state_obj:
-             self._result_cache[res_key] = result
-             
-        return result
+        The light's capabilities are cached; the range check (native CT or XY
+        simulation) is done for every target value.
+        """
+        return self._get_capability_internal(entity_id, kelvin, state_obj)
 
     def _get_capability_internal(self, entity_id: str, kelvin: int, state_obj=None) -> str:
         """Internal capability resolution logic."""
@@ -438,9 +433,6 @@ class HCLLightController:
                     self._cache_version
                 )
                 del self._capability_cache[entity_id]
-                # Also clear result cache for this entity as properties might change
-                keys_to_clear = [k for k in self._result_cache if k[0] == entity_id]
-                for k in keys_to_clear: del self._result_cache[k]
             else:
                 # Valid Cache
                 native_type = cached["type"]
@@ -503,7 +495,7 @@ class HCLLightController:
         max_kelvin = state.attributes.get("max_color_temp_kelvin")
         supports_color = any(
             mode in supported_modes 
-            for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB)
+            for mode in _COLOR_MODES
         )
 
         # Calculate Capability
@@ -562,7 +554,7 @@ class HCLLightController:
         
         supports_color = any(
             mode in supported_modes 
-            for mode in (ColorMode.XY, ColorMode.HS, ColorMode.RGB)
+            for mode in _COLOR_MODES
         )
 
         if ColorMode.COLOR_TEMP in supported_modes:

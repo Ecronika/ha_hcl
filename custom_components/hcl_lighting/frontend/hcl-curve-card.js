@@ -34,6 +34,10 @@ const HCL_STRINGS = {
         mode_guest: "Guest",
         mode_sleep: "Sleep",
         confirm_revert: "Discard all unsaved changes and reload the saved curve?",
+        preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
+        save_failed: "Saving failed: {msg}",
+        preview_failed: "Preview failed: {msg}",
+        revert_failed: "Revert failed: {msg}",
         point_b: "Brightness point {n}",
         point_k: "Colour temperature point {n}",
         val_min_points: "The curve needs at least 2 points.",
@@ -79,6 +83,10 @@ const HCL_STRINGS = {
         mode_guest: "Gast",
         mode_sleep: "Schlafen",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
+        preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
+        save_failed: "Speichern fehlgeschlagen: {msg}",
+        preview_failed: "Vorschau fehlgeschlagen: {msg}",
+        revert_failed: "Verwerfen fehlgeschlagen: {msg}",
         point_b: "Helligkeitspunkt {n}",
         point_k: "Farbtemperaturpunkt {n}",
         val_min_points: "Die Kurve braucht mindestens 2 Punkte.",
@@ -138,12 +146,20 @@ class HCLCurveCard extends HTMLElement {
 
         // Validator State
         this._validationResult = { errors: [], warnings: [] };
+        // Draft differs from the points the lights currently follow
         this._isDirty = false;
+        // The lights follow an unsaved preview (sensor attribute preview_active)
+        this._previewActive = false;
+        // Last error of a service call (shown until the next successful call)
+        this._serviceError = null;
+        // Home Assistant time zone (the backend controls the lights in this zone)
+        this._timeZone = null;
 
         // Settings for Validation
         this._valSettings = {
+            // Night = sleep time → wake time (sensor attributes, defaults 22:00–07:00)
             nightStart: 1320, // 22:00
-            nightEnd: 360,    // 06:00
+            nightEnd: 420,    // 07:00
             minDailyPeakDuration: 240, // 4 hours
             maxSlopeB: 2.0,   // % per min
             maxSlopeK: 100,   // K per min
@@ -155,9 +171,9 @@ class HCLCurveCard extends HTMLElement {
         // Presets: Scientifically inspired 12-point profiles
         // T: Minutes, B: Brightness (%), K: Kelvin
         this._presets = {
-            // 1. DEFAULT: The "True" DIN-inspired Curve (v0.2.1 Replica)
+            // 1. DEFAULT: identical to the backend default curve (anchors 07:00 / 12:30 / 22:00)
             "default": [
-                { t: 435, b: 14, k: 2700 }, // 07:15 Wake
+                { t: 420, b: 30, k: 2700 }, // 07:00 Wake
                 { t: 540, b: 50, k: 4500 }, // 09:00 Rise
                 { t: 570, b: 75, k: 5500 }, // 09:30
                 { t: 600, b: 100, k: 6500 }, // 10:00 Peak Focus
@@ -168,7 +184,7 @@ class HCLCurveCard extends HTMLElement {
                 { t: 840, b: 75, k: 6000 }, // 14:00
                 { t: 960, b: 50, k: 4000 }, // 16:00
                 { t: 1080, b: 30, k: 2700 }, // 18:00 Wind Down
-                { t: 1380, b: 5, k: 2200 }  // 23:00 Bedtime
+                { t: 1320, b: 10, k: 2200 }  // 22:00 Sleep
             ],
             // 2. FOCUS (Work from Home): High Performance
             "focus": [
@@ -295,8 +311,19 @@ class HCLCurveCard extends HTMLElement {
         }
         if (!this.config || !this.config.entity) return;
 
+        const timeZone = (hass.config && hass.config.time_zone) || null;
+        if (timeZone !== this._timeZone) {
+            this._timeZone = timeZone;
+            if (this._chartB) this._updateVisuals();
+        }
         const stateObj = hass.states[this.config.entity];
         if (stateObj) {
+            this._syncAnchors(stateObj.attributes);
+            const previewActive = stateObj.attributes.preview_active === true;
+            if (previewActive !== this._previewActive) {
+                this._previewActive = previewActive;
+                this._updateUIState();
+            }
             if (stateObj.attributes.scenarios) {
                 this._scenarios = { ...HCL_SCENARIO_DEFAULTS, ...stateObj.attributes.scenarios };
             }
@@ -588,6 +615,8 @@ class HCLCurveCard extends HTMLElement {
               font-family: monospace;
           }
           #now-info { margin-top: 6px; font-size: 12px; color: var(--hcl-text-2); }
+          #status { margin: 6px 0; font-size: 12px; color: var(--hcl-warning); }
+          #status.error { color: var(--hcl-error, var(--error-color, #db4437)); }
       </style>
       <ha-card>
           <div class="card-header">
@@ -610,6 +639,7 @@ class HCLCurveCard extends HTMLElement {
              </div>
           </div>
 
+          <div id="status" role="status" style="display: none;"></div>
           <div id="validation-area" style="display: none;"></div>
 
           <div class="mode-selector" id="mode-chips">${chips}</div>
@@ -687,9 +717,38 @@ class HCLCurveCard extends HTMLElement {
         ctx.restore();
     }
 
-    _nowMinutes() {
-        const now = new Date();
-        return now.getHours() * 60 + now.getMinutes();
+    // Current time of day in the Home Assistant time zone (the backend steers the
+    // lights in this zone); falls back to the browser time zone
+    _nowMinutes(date = new Date()) {
+        if (this._timeZone) {
+            try {
+                const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: this._timeZone, hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+                }).formatToParts(date);
+                const get = (type) => Number(parts.find(p => p.type === type).value);
+                return (get('hour') % 24) * 60 + get('minute');
+            } catch (err) {
+                // unknown time zone: use the browser time
+            }
+        }
+        return date.getHours() * 60 + date.getMinutes();
+    }
+
+    // Night window of the validation from the anchor times (sleep → wake)
+    _syncAnchors(attrs) {
+        const toMin = (v) => {
+            const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ''));
+            return m ? (Number(m[1]) % 24) * 60 + Number(m[2]) : null;
+        };
+        const start = toMin(attrs.sleep_time);
+        const end = toMin(attrs.wake_time);
+        if (start === null || end === null || start === end) return;
+        if (start !== this._valSettings.nightStart || end !== this._valSettings.nightEnd) {
+            this._valSettings.nightStart = start;
+            this._valSettings.nightEnd = end;
+            this._lastValidationSig = null;
+            if (this._chartB) this._updateVisuals();
+        }
     }
 
     _bindEvents() {
@@ -1130,23 +1189,36 @@ class HCLCurveCard extends HTMLElement {
         window.addEventListener('pointerup', onUp);
     }
 
-    _saveCurve() {
-        this._hass.callService('hcl_lighting', 'update_curve', {
-            entity_id: this.config.entity,
-            points: this._points,
-            mode: 'save'
-        });
-        this._isDirty = false;
-        this._updateUIState();
+    // Runs a service call; errors are shown in the card instead of being lost
+    async _callCurveService(data, errorKey) {
+        try {
+            await this._hass.callService('hcl_lighting', 'update_curve', {
+                entity_id: this.config.entity, ...data
+            });
+            this._serviceError = null;
+            return true;
+        } catch (err) {
+            const msg = (err && (err.message || err.code)) || String(err);
+            this._serviceError = this._t(errorKey, { msg });
+            return false;
+        } finally {
+            this._updateUIState();
+        }
+    }
+
+    async _saveCurve() {
+        const points = JSON.parse(JSON.stringify(this._points));
+        // The draft stays marked as unsaved until Home Assistant confirms the call
+        if (await this._callCurveService({ points, mode: 'save' }, 'save_failed')) {
+            if (JSON.stringify(this._points) === JSON.stringify(points)) this._isDirty = false;
+            this._updateUIState();
+        }
     }
 
     _revertCurve() {
         if (!confirm(this._t('confirm_revert'))) return;
 
-        this._hass.callService('hcl_lighting', 'update_curve', {
-            entity_id: this.config.entity,
-            mode: 'revert'
-        });
+        this._callCurveService({ mode: 'revert' }, 'revert_failed');
 
         // Show the last known state immediately; the backend update follows
         if (this._hass && this.config.entity) {
@@ -1165,11 +1237,9 @@ class HCLCurveCard extends HTMLElement {
     }
 
     _testCurve() {
-        this._hass.callService('hcl_lighting', 'update_curve', {
-            entity_id: this.config.entity,
-            points: this._points,
-            mode: 'preview'
-        });
+        return this._callCurveService(
+            { points: JSON.parse(JSON.stringify(this._points)), mode: 'preview' }, 'preview_failed'
+        );
     }
 
     _applyPreset(name) {
@@ -1415,7 +1485,11 @@ class HCLCurveCard extends HTMLElement {
             }
         }
 
-        const isNight = (t) => t >= this._valSettings.nightStart || t < this._valSettings.nightEnd;
+        const { nightStart, nightEnd } = this._valSettings;
+        const isNight = (t) => {
+            const m = ((t % 1440) + 1440) % 1440;
+            return nightStart < nightEnd ? (m >= nightStart && m < nightEnd) : (m >= nightStart || m < nightEnd);
+        };
         const nightViolationsB = [];
         const nightViolationsK = [];
         data.t.forEach((t, i) => {
@@ -1512,9 +1586,17 @@ class HCLCurveCard extends HTMLElement {
             btnTest.classList.toggle('dirty', this._isDirty);
             btnTest.textContent = this._t('preview') + (this._isDirty ? ' *' : '');
         }
-        if (btnSave) btnSave.classList.toggle('dirty', this._isDirty);
+        // Save stays highlighted while the lights follow an unsaved preview
+        if (btnSave) btnSave.classList.toggle('dirty', this._isDirty || this._previewActive);
         const btnUndo = this.shadowRoot.getElementById('btn-undo');
         if (btnUndo) btnUndo.disabled = this._undo.length === 0;
+        const status = this.shadowRoot.getElementById('status');
+        if (status) {
+            const text = this._serviceError || (this._previewActive ? this._t('preview_active') : '');
+            status.textContent = text;
+            status.style.display = text ? '' : 'none';
+            status.classList.toggle('error', !!this._serviceError);
+        }
     }
 }
 

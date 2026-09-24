@@ -272,7 +272,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
     @callback
     def _handle_global_update(self):
-        """Handle global update signal (e.g. from Preview/Apply)."""
+        """Handle global update signal (scenario change, curve preview/apply/save)."""
+        # New target values take precedence over a smooth return still running
+        self.override_manager.end_reengaging()
         self.hass.async_create_task(self._update_hcl())
 
     @property
@@ -413,12 +415,17 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                             eid, self._calculated_brightness, self._calculated_kelvin
                         )
 
-                # 4. Filter Active Lights (Not Overridden)
+                # 4. Filter Active Lights (not overridden, not in their smooth return)
                 active_lights = []
                 for eid in all_lights:
                     state = self.hass.states.get(eid)
                     # Only control lights that are currently ON
-                    if state and state.state == STATE_ON and not self.override_manager.is_overridden(eid):
+                    if (
+                        state
+                        and state.state == STATE_ON
+                        and not self.override_manager.is_overridden(eid)
+                        and not self.override_manager.is_reengaging(eid)
+                    ):
                         active_lights.append(eid)
                 
                 # 5. Apply Batch
@@ -444,6 +451,10 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
             if not entity_id or not new_state:
                 return
+
+            if new_state.state != STATE_ON:
+                # A light that is off is no longer returning to HCL
+                self.override_manager.end_reengaging(entity_id)
 
             # 1. Fast Path (Turn On Event)
             if old_state and old_state.state != STATE_ON and new_state.state == STATE_ON:
@@ -487,7 +498,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return
 
-            # 2. Check for Manual Override
+            # 2. State reports caused by HCL's own commands (also late or
+            # intermediate ones during a transition) are never manual control
+            if self.controller.is_own_context(new_state.context):
+                return
+
+            # 3. Check for Manual Override
             is_override = self.override_manager.check_override(
                 entity_id, 
                 new_state,

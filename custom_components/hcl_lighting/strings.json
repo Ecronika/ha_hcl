@@ -111,7 +111,7 @@
                 },
                 "points": {
                     "name": "Control points",
-                    "description": "Control points with t (0-1440 min), b (0-100 %) and k (2000-7000 K), at least 2. Not used for revert."
+                    "description": "Control points with t (0-1440 min), b (0-100 %) and k (2000-7000 K), at least 2, each time only once. Not used for revert."
                 },
                 "mode": {
                     "name": "Mode",

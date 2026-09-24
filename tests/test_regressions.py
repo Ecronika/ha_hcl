@@ -407,7 +407,7 @@ async def test_b13_curve_sensor_exposes_brightness_limits(hass, no_frontend_regi
 
 
 # ---------------------------------------------------------------- B-14
-CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=0.6.0"
+CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=0.6.1"
 
 
 async def _register_with_storage(hass, hass_storage, items):

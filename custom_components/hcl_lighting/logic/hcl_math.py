@@ -36,6 +36,8 @@ class HCLCalculator:
     def __init__(self):
         """Initialize with default curve."""
         self.active_curve = []
+        # True while the lights follow unsaved points (preview/apply from the card)
+        self.preview_active = False
         # Boot with default config
         self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME)
 

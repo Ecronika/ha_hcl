@@ -111,7 +111,7 @@
 <body>
 
     <div class="container">
-        <h1>HCL Lighting Simulator (v0.3.0 / v0.2.1 Logic)</h1>
+        <h1>HCL Lighting Simulator (0.6.1)</h1>
 
         <div class="controls">
             <div class="control-group">
@@ -148,9 +148,10 @@
         </div>
 
         <p class="info-text">
-            This simulation uses the exact same <b>Cubic Hermite Spline</b> algorithm and <b>Elastic Interval</b> logic
-            as the Home Assistant integration. The curves show the calculated target values for color temperature
-            (Kelvin) and brightness.
+            This simulation uses the same calculation as the integration (0.6.1): the default curve generated from
+            the wake, midday and sleep time, <b>PCHIP</b> interpolation, and minimum/maximum brightness as limits
+            (curve values outside the limits are clipped). It shows the default curve only; a curve edited in the
+            dashboard card is not reflected here. Fixed scenarios are not shown.
         </p>
     </div>
 
@@ -159,170 +160,102 @@
          * HCL Logic Ported from Python (hcl_math.py)
          */
         class HCLCalculator {
+            // Port of custom_components/hcl_lighting/logic/hcl_math.py (0.6.1):
+            // default curve from the anchors (migrate_legacy_config) and
+            // PCHIP evaluation with min/max clipping (get_hcl_values).
             constructor() {
-                this.MINUTES_PER_DAY = 1440;
-                this.active_curve = [];
+                this.points = [];
             }
 
-            // Helper: Time string "HH:MM" to minutes
-            toMin(timeStr) {
-                const [h, m] = timeStr.split(':').map(Number);
-                return h * 60 + m;
-            }
-
-            // Helper: Duration between two times (with wrap-around)
-            getDuration(start, end) {
-                let d = end - start;
-                if (d < 0) d += 1440;
-                return d;
+            static toMin(value) {
+                const m = /^(\d{1,2}):(\d{2})/.exec(value || '');
+                return m ? (Number(m[1]) % 24) * 60 + Number(m[2]) : null;
             }
 
             generateCurve(wakeStr, middayStr, sleepStr) {
-                const w_min = this.toMin(wakeStr);
-                const m_min = this.toMin(middayStr);
-                const s_min = this.toMin(sleepStr);
+                let w = HCLCalculator.toMin(wakeStr) ?? 420;
+                let m = HCLCalculator.toMin(middayStr) ?? 750;
+                let s = HCLCalculator.toMin(sleepStr) ?? 1320;
 
-                // --- v0.2.1 Standard Logic Port (Simplified) ---
-                // No complex elastic offsets - just simple relative points.
-
-                const wake_peak_off = 120; // +2h
-
-                // Construct Points (Minute, Kelvin, Brightness)
-                // Exactly matching hcl_math.py v0.3.0 final logic
-                let points = [
-                    // --- Wake Sector (Morning Rise) ---
-                    [w_min, 2700, 30],                  // 07:00 Wake
-                    [w_min + 120, 4500, 50],            // 09:00 (+2h)
-                    [w_min + 150, 5500, 75],            // 09:30 (+2.5h)
-                    [w_min + 180, 6500, 100],           // 10:00 (+3h) Peak Start
-
-                    // --- Midday Sector (Focus & Dip) ---
-                    [m_min - 30, 6500, 100],            // 12:00 (-30m) Peak End
-                    [m_min, 4000, 50],                  // 12:30 Midday Dip Start
-                    [m_min + 30, 4000, 50],             // 13:00 (+30m) Dip Plateau
-                    [m_min + 60, 6000, 75],             // 13:30 (+1h) Recovery
-                    [m_min + 90, 6000, 75],             // 14:00 (+1.5h) Afternoon Plateau
-                    [m_min + 210, 4000, 50],            // 16:00 (+3.5h) Late Afternoon Fade
-
-                    // --- Sleep Sector (Evening) ---
-                    [s_min - 240, 2700, 30],            // 18:00 (-4h) Early Evening
-                    [s_min, 2200, 10]                   // 22:00 Sleep
+                let total = ((s - w) % 1440 + 1440) % 1440;
+                if (total <= 360) { // too short: defaults 07:00 / 12:30 / 22:00
+                    w = 420; m = 750; s = 1320;
+                    total = 900;
+                }
+                // [time, kelvin, brightness]
+                const build = (w0, m0, s0) => [
+                    [w0, 2700, 30], [w0 + 120, 4500, 50], [w0 + 150, 5500, 75], [w0 + 180, 6500, 100],
+                    [m0 - 30, 6500, 100], [m0, 4000, 50], [m0 + 30, 4000, 50], [m0 + 60, 6000, 75],
+                    [m0 + 90, 6000, 75], [m0 + 210, 4000, 50],
+                    [s0 - 240, 2700, 30], [s0, 2200, 10],
                 ];
-
-                // Add Anchors for 0 and 1440 (Virtual Midnight)
-                // Just to help the spline close the loop
-                points.push([0, 2200, 10]);
-                points.push([1440, 2200, 10]);
-
-                // Normalize and Sort
-                let final_points = [];
-                points.forEach(p => {
-                    let m = p[0];
-                    let k = p[1];
-                    let b = p[2];
-
-                    if (m < 0) m += 1440;
-                    if (m > 1440) m -= 1440;
-                    if (p[0] === 1440) m = 1440; // Keep explicit end anchor
-
-                    final_points.push({ m, k, b });
-                });
-
-                final_points.sort((a, b) => a.m - b.m);
-
-                // Deduplicate
-                this.active_curve = [];
-                let seen_times = new Set();
-                final_points.forEach(p => {
-                    if (!seen_times.has(p.m)) {
-                        this.active_curve.push(p);
-                        seen_times.add(p.m);
-                    } else {
-                        // Update existing (overwrite)
-                        let idx = this.active_curve.findIndex(x => x.m === p.m);
-                        if (idx !== -1) this.active_curve[idx] = p;
-                    }
-                });
-            }
-
-            getSlope(t1, v1, t2, v2) {
-                let dt = t2 - t1;
-                if (dt < 0) dt += this.MINUTES_PER_DAY;
-                if (dt === 0) return 0;
-                return (v2 - v1) / dt;
-            }
-
-            getValues(current_minutes, min_b_config, max_b_config) {
-                const points = this.active_curve;
-                const len = points.length;
-
-                // 1. Find Segment
-                let idx = len - 1;
-                for (let i = 0; i < len - 1; i++) {
-                    if (current_minutes >= points[i].m && current_minutes < points[i + 1].m) {
-                        idx = i;
-                        break;
-                    }
-                }
-
-                // 2. Extract Data
-                const p0 = points[idx];
-                const p1 = points[(idx + 1) % len];
-
-                // Wraparound handling for next/prev points
-                const p_minus = points[(idx - 1 + len) % len];
-                const p_plus = points[(idx + 2) % len];
-
-                let dt_interval = p1.m - p0.m;
-                if (dt_interval < 0) dt_interval += this.MINUTES_PER_DAY;
-
-                let kelvin, brightness;
-
-                // FIX: If interval is 0 (e.g., 1440->0 wrap), avoid division by zero.
-                // We keep the start values to prevent jump to 4000K.
-                if (dt_interval === 0) {
-                    kelvin = p0.k;
-                    brightness = p0.b;
+                let relM = ((m - w) % 1440 + 1440) % 1440;
+                const minRel = 180 + 30 + 1;
+                const maxRel = total - 240 - 210 - 1;
+                let raw;
+                if (minRel <= maxRel) {
+                    relM = Math.max(minRel, Math.min(maxRel, relM)); // midday moved into its window
+                    raw = build(w, w + relM, w + total);
                 } else {
-                    // 3. Normalize Time t
-                    let dist = current_minutes - p0.m;
-                    if (dist < 0) dist += this.MINUTES_PER_DAY;
-                    let t = dist / dt_interval;
-
-                    // 4. Slopes (Tangents)
-                    const m0_k = this.getSlope(p_minus.m, p_minus.k, p1.m, p1.k);
-                    const m1_k = this.getSlope(p0.m, p0.k, p_plus.m, p_plus.k);
-
-                    const m0_b = this.getSlope(p_minus.m, p_minus.b, p1.m, p1.b);
-                    const m1_b = this.getSlope(p0.m, p0.b, p_plus.m, p_plus.b);
-
-                    // 5. Cubic Hermite Interpolation
-                    const t2 = t * t;
-                    const t3 = t2 * t;
-
-                    const h00 = 2 * t3 - 3 * t2 + 1;
-                    const h10 = t3 - 2 * t2 + t;
-                    const h01 = -2 * t3 + 3 * t2;
-                    const h11 = t3 - t2;
-
-                    kelvin = h00 * p0.k + h10 * dt_interval * m0_k + h01 * p1.k + h11 * dt_interval * m1_k;
-                    brightness = h00 * p0.b + h10 * dt_interval * m0_b + h01 * p1.b + h11 * dt_interval * m1_b;
+                    const scale = total / 900; // short day: default profile scaled
+                    raw = build(0, 330, 900).map(([t, k, b]) => [w + Pyround(t * scale), k, b]);
                 }
+                const pts = raw.map(([t, k, b]) => ({ t: t >= 1440 ? t - 1440 : (t < 0 ? t + 1440 : t), k, b }));
+                pts.sort((a, c) => a.t - c.t);
+                this.points = pts.filter((p, i) => i === 0 || p.t !== pts[i - 1].t);
+            }
 
-                // 6. Scale Brightness
-                const INTERNAL_MIN = 10.0;
-                const INTERNAL_RANGE = 100.0 - INTERNAL_MIN;
+            static pchipSlope(tPrev, yPrev, tCurr, yCurr, tNext, yNext) {
+                const dtL = ((tCurr - tPrev) % 1440 + 1440) % 1440;
+                const dtR = ((tNext - tCurr) % 1440 + 1440) % 1440;
+                if (dtL === 0 || dtR === 0) return 0;
+                const dL = (yCurr - yPrev) / dtL;
+                const dR = (yNext - yCurr) / dtR;
+                if (dL * dR <= 0) return 0;
+                if (Math.abs(dL) < 1e-9 || Math.abs(dR) < 1e-9) return 0;
+                const w1 = 2 * dtR + dtL;
+                const w2 = dtR + 2 * dtL;
+                return (w1 + w2) / (w1 / dL + w2 / dR);
+            }
 
-                let norm_b = (brightness - INTERNAL_MIN) / INTERNAL_RANGE;
-                norm_b = Math.max(0, Math.min(1, norm_b));
+            static hermite(t, h, y0, y1, m0, m1) {
+                const t2 = t * t, t3 = t2 * t;
+                return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m0
+                    + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m1;
+            }
 
-                let scaled_b = parseInt(min_b_config) + norm_b * (parseInt(max_b_config) - parseInt(min_b_config));
-
+            getValues(minutes, minB, maxB) {
+                minB = Math.max(0, Math.min(100, parseInt(minB, 10)));
+                maxB = Math.max(0, Math.min(100, parseInt(maxB, 10)));
+                if (minB >= maxB) { minB = 10; maxB = 100; }
+                const pts = this.points;
+                const now = minutes % 1440;
+                const n = pts.length;
+                let idx = n - 1;
+                for (let i = 0; i < n - 1; i++) {
+                    if (pts[i].t <= now && now < pts[i + 1].t) { idx = i; break; }
+                }
+                const prev = pts[(idx - 1 + n) % n], curr = pts[idx];
+                const next = pts[(idx + 1) % n], next2 = pts[(idx + 2) % n];
+                const slope = (a, b, c, key) => HCLCalculator.pchipSlope(a.t, a[key], b.t, b[key], c.t, c[key]);
+                let dt = next.t - curr.t; if (dt < 0) dt += 1440;
+                if (dt === 0) return { b: curr.b, k: curr.k };
+                let dist = now - curr.t; if (dist < 0) dist += 1440;
+                const t = dist / dt;
+                const k = HCLCalculator.hermite(t, dt, curr.k, next.k, slope(prev, curr, next, 'k'), slope(curr, next, next2, 'k'));
+                let b = HCLCalculator.hermite(t, dt, curr.b, next.b, slope(prev, curr, next, 'b'), slope(curr, next, next2, 'b'));
+                b = Math.max(minB, Math.min(maxB, b)); // the limits clip the curve
                 return {
-                    b: Math.max(1, Math.min(100, scaled_b)),
-                    k: Math.max(2000, Math.min(6500, kelvin))
+                    b: Math.max(1, Math.min(100, Pyround(b))),
+                    k: Math.max(2000, Math.min(7000, Pyround(k))),
                 };
             }
+        }
+
+        // Python's round(): halves to the nearest even integer
+        function Pyround(x) {
+            const r = Math.round(x);
+            return (Math.abs(x % 1) === 0.5 && r % 2 !== 0) ? r - 1 : r;
         }
 
         /**

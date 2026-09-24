@@ -21,6 +21,10 @@ from .const import (
     DEFAULT_MAX_BRIGHTNESS,
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
+    CONF_WAKE_TIME,
+    CONF_SLEEP_TIME,
+    DEFAULT_WAKE_TIME,
+    DEFAULT_SLEEP_TIME,
     SCENARIO_DEFAULTS,
     CONFIGURABLE_SCENARIOS,
     scenario_option_keys,
@@ -164,7 +168,16 @@ class HCLLightingCurveSensor(SensorEntity):
             "max_brightness": max_b,
             # Fixed values of the scenarios (drawn as lines in the card)
             "scenarios": self._scenario_values(),
+            # Anchor times (HH:MM); the card's night checks use sleep → wake
+            "wake_time": self._anchor(CONF_WAKE_TIME, DEFAULT_WAKE_TIME),
+            "sleep_time": self._anchor(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME),
+            # The lights follow unsaved points (preview) until save, revert or reload
+            "preview_active": bool(self._hcl_calc.preview_active),
         }
+
+    def _anchor(self, key: str, default: str) -> str:
+        value = self._entry.options.get(key) or self._entry.data.get(key) or default
+        return str(value)[:5]
 
     def _scenario_values(self) -> dict[str, dict[str, int]]:
         values = {}
