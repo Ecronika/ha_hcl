@@ -11,7 +11,7 @@ update_curve:
           integration: hcl_lighting
     points:
       name: Control Points
-      description: "List of control points [{t, b, k}] (t 0-1440 min, b 0-100 %, k 2000-7000 K, at least 2). Not used for revert."
+      description: "List of control points [{t, b, k}] (t 0-1440 min, b 0-100 %, k 2000-7000 K, at least 2, each time only once). Not used for revert."
       required: false
       selector:
         object:

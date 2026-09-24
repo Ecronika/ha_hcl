@@ -254,6 +254,7 @@ class OverrideManager:
 
         if is_override:
             light_data["manual_override_time"] = now
+            light_data.pop("reengage_until", None)
             self._notify()
             return True
             
@@ -279,6 +280,33 @@ class OverrideManager:
             self._notify()
         return ready
 
+    def set_reengaging(self, entity_id: str, seconds: float) -> None:
+        """Protect a light that is returning to HCL with a smooth transition.
+
+        Normal update cycles leave it alone until the transition has ended.
+        """
+        self._override_state.setdefault(entity_id, {})["reengage_until"] = (
+            dt_util.now() + timedelta(seconds=float(seconds))
+        )
+
+    def is_reengaging(self, entity_id: str) -> bool:
+        """Whether a light is still in its smooth return to HCL."""
+        data = self._override_state.get(entity_id)
+        until = data.get("reengage_until") if data else None
+        if until is None:
+            return False
+        if dt_util.now() < until:
+            return True
+        data.pop("reengage_until", None)
+        return False
+
+    def end_reengaging(self, entity_id: str | None = None) -> None:
+        """End the smooth return of one light (or of all lights)."""
+        targets = [entity_id] if entity_id else list(self._override_state)
+        for eid in targets:
+            if eid in self._override_state:
+                self._override_state[eid].pop("reengage_until", None)
+
     def set_override(self, entity_id: str) -> None:
         """Mark a light as manually controlled.
 
@@ -288,6 +316,7 @@ class OverrideManager:
         if entity_id not in self._override_state:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["manual_override_time"] = dt_util.now()
+        self._override_state[entity_id].pop("reengage_until", None)
         self._notify()
 
     def reset_override(self, entity_id: str):

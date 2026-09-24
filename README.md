@@ -13,9 +13,10 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🎨 Interactive Dashboard Card
 - **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
-- **Now marker**: A line shows the current time; below the charts the current values are shown (including the brightness limits).
-- **Presets**: One-click profiles **Default**, **Focus**, **Relax**, **Early Bird** and **Night Owl**.
-- **Live Validation**: Immediate hints on implausible curves (e.g. bright, cold light at night).
+- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the current values are shown (including the brightness limits).
+- **Save status**: Save is confirmed by Home Assistant; errors are shown in the card and the changes stay marked as unsaved. While the lights follow an unsaved preview, the card shows a hint.
+- **Presets**: One-click profiles **Default** (the integration's default curve), **Focus**, **Relax**, **Early Bird** and **Night Owl**.
+- **Live Validation**: Immediate hints on implausible curves (e.g. bright, cold light at night; night = sleep time to wake time).
 - **Language and theme**: German/English texts following the Home Assistant language; colours follow the active (light or dark) theme.
 
 ### 🧬 Curve
@@ -31,7 +32,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Brightness and colour temperature separately**: Two switches per instance let HCL adapt only the colour temperature, only the brightness or both.
 - **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K).
 - **Instant-On**: Lights receive the HCL values right after they are switched on.
-- **Capabilities**: Auto-detects RGB/XY support and simulates colour temperatures outside a bulb's native CT range via XY on colour-capable bulbs (supported range of the curve: 2000–7000 K). CT-only bulbs are driven to the nearest temperature they can reach.
+- **Capabilities**: Auto-detects colour support (XY, HS, RGB, RGBW, RGBWW) and simulates colour temperatures outside a bulb's native CT range via XY on colour-capable bulbs (supported range of the curve: 2000–7000 K). CT-only bulbs are driven to the nearest temperature they can reach.
 
 ---
 
@@ -64,6 +65,8 @@ entity: sensor.hcl_lighting_curve_data
 The sensor is named `sensor.<instance name>_curve_data` (e.g. `sensor.living_room_curve_data`); the Repair Issue shows the exact entity ID.
 
 *(The frontend resource `hcl-curve-card.js` is registered automatically when Lovelace resources are managed in the UI (storage mode). In YAML mode, add `/hcl_lighting_static/hcl-curve-card.js` as a `module` resource yourself.)*
+
+**After an update** of the integration, reload the dashboard page in the browser without cache (Ctrl+F5, on a Mac Cmd+Shift+R; in the companion app, reset the frontend cache in the app settings) so the new card version is loaded.
 
 ---
 
@@ -109,7 +112,7 @@ Each instance is a device with these entities (IDs of new installations; existin
 | Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone |
 | Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
 | Scenario | `select.living_room_scenario` | Auto, Focus, Relax, Cleaning, Guest, Sleep (also the chips of the card). Attribute `until`: end of a timed scenario. |
-| Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change) |
+| Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change). Attributes include `preview_active` (the lights follow an unsaved preview), `wake_time` and `sleep_time`. |
 
 The name part of the IDs follows the language Home Assistant used when the entity was created (e.g. `_hcl_aktiv` in German).
 
@@ -126,7 +129,7 @@ HCL pauses a light (only this light; the HCL switch stays on) when
 
 Changes of an attribute that HCL does not adapt (see the two adapt switches) do not pause the light.
 
-A paused light returns to HCL when it is switched off and on again, or automatically after the configured time (default 4 hours, smooth 3-minute transition) if it is still on; HCL never switches a light on. Paused lights stay paused when the curve or the options are saved, and optionally across restarts.
+A paused light returns to HCL when it is switched off and on again, or automatically after the configured time (default 4 hours) if it is still on, with a smooth 3-minute transition during which the normal updates leave the light alone (a scenario change ends it early); HCL never switches a light on. Paused lights stay paused when the curve or the options are saved, and optionally across restarts.
 
 By default a light that is switched on receives the HCL values immediately, even if the turn-on command contained its own values. Enable **Keep values of turn-on commands** to keep them instead.
 
@@ -136,11 +139,11 @@ By default a light that is switched on receives the HCL values immediately, even
 
 *   **Update Loop**: every 27 seconds by default (configurable).
 *   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
-*   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State changes that are not caused by a Home Assistant command are compared with the thresholds above.
+*   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State reports caused by HCL's own commands are ignored. State changes that are not caused by a Home Assistant command are compared with the thresholds above. Home Assistant assigns the context of the last command to state changes of a light within 5 seconds, so a change on the device itself within these 5 seconds after an HCL update is not detected.
 *   **Traffic Optimization**:
     *   Brightness: Updates only if delta > 1%
     *   Kelvin: Updates only if delta > 50K (compared with the temperature the light can reach; lights in XY mode are compared by colour)
-*   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them, `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}`, not needed for `revert`). Invalid input is rejected.
+*   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them, `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}` with different times, not needed for `revert`). Invalid input is rejected.
 
 ---
 

@@ -14,6 +14,8 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 
 Voraussetzung: Home Assistant **2024.7** oder neuer.
 
+**Nach einem Update** die Dashboard-Seite im Browser ohne Cache neu laden (Strg+F5, am Mac Cmd+Shift+R; in der Companion-App den Frontend-Cache in den App-Einstellungen zurücksetzen), damit die neue Karte geladen wird.
+
 ## Entitäten je Instanz
 | Entität | Zweck |
 |---|---|
@@ -21,7 +23,7 @@ Voraussetzung: Home Assistant **2024.7** oder neuer.
 | **Helligkeit anpassen** (Schalter) | Aus: HCL lässt die Helligkeit unverändert |
 | **Farbtemperatur anpassen** (Schalter) | Aus: HCL lässt die Farbtemperatur unverändert |
 | **Szenario** (Auswahl) | Auto, Fokus, Entspannen, Putzen, Gast, Schlafen. Attribut `until`: Ende eines zeitlich begrenzten Szenarios |
-| **Curve Data** (Sensor) | Daten für die Karte |
+| **Curve Data** (Sensor) | Daten für die Karte. Attribute u. a. `preview_active` (Lichter folgen einer ungespeicherten Vorschau), `wake_time`, `sleep_time` |
 
 Bestehende Installationen behalten ihre Entity-IDs; nur die Anzeigenamen ändern sich.
 
@@ -36,7 +38,7 @@ HCL pausiert ein einzelnes Licht, wenn
 - Home Assistant Helligkeit oder Farbe mit einem Befehl ändert, der nicht von HCL stammt (App, Dashboard, Szene, Automation, Sprachassistent), oder
 - das Licht Werte meldet, die von HCL abweichen (z. B. Wandtaster, Hersteller-App).
 
-Das Licht kehrt zu HCL zurück, wenn es aus- und wieder eingeschaltet wird oder nach der eingestellten Zeit (Standard 4 Stunden). HCL schaltet nie ein Licht ein. Einstellbar sind außerdem: ob Ausschalten die manuelle Steuerung beendet, ob sie Neustarts überdauert und ob Einschaltbefehle mit eigenen Werten (z. B. Szenen) respektiert werden.
+Das Licht kehrt zu HCL zurück, wenn es aus- und wieder eingeschaltet wird oder nach der eingestellten Zeit (Standard 4 Stunden) mit einem sanften Übergang über 3 Minuten, den die normalen Aktualisierungen nicht unterbrechen. HCL schaltet nie ein Licht ein. Einstellbar sind außerdem: ob Ausschalten die manuelle Steuerung beendet, ob sie Neustarts überdauert und ob Einschaltbefehle mit eigenen Werten (z. B. Szenen) respektiert werden.
 
 ## Optionen (Integration → Konfigurieren)
 1. **Kurve und Lichter**: Lichter, Ankerzeiten, minimale/maximale Helligkeit, Kompatibilitätsmodus. Eine in der Karte gespeicherte Kurve hat Vorrang; wer eine Ankerzeit ändert, verwirft sie.
@@ -44,4 +46,4 @@ Das Licht kehrt zu HCL zurück, wenn es aus- und wieder eingeschaltet wird oder 
 3. **Szenarien**: Werte von Fokus, Entspannen und Putzen sowie deren Dauer.
 
 ## Dashboard-Karte
-Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖ oder Entf löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen. **Vorschau** sendet die ungespeicherte Kurve bis zum nächsten Neuladen an die Lichter, **Speichern** übernimmt sie dauerhaft, **Verwerfen** lädt die gespeicherte Kurve. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit, darunter stehen die aktuellen Werte.
+Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖ oder Entf löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen. **Vorschau** sendet die ungespeicherte Kurve bis zum nächsten Neuladen an die Lichter (die Karte zeigt dann „Vorschau aktiv – nicht gespeichert“), **Speichern** übernimmt sie dauerhaft, **Verwerfen** lädt die gespeicherte Kurve. Schlägt Speichern fehl, zeigt die Karte den Fehler und die Änderungen bleiben als ungespeichert markiert. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit (Zeitzone von Home Assistant), darunter stehen die aktuellen Werte. Die Nacht-Hinweise gelten von der Schlafens- bis zur Aufwachzeit. RGBW- und RGBWW-Leuchten werden wie Farbleuchten über XY gesteuert.

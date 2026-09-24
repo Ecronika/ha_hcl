@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-09-25
+### Fixed
+- **Smooth return after manual control**: when the manual-control time has expired, the light returns to HCL with the documented 3-minute transition. Before, the next normal update (same cycle and the following ones) overwrote it with the 20-s update transition. A scenario change, a curve preview/save or switching the light off ends the smooth return early.
+- **Own state reports counted as manual control**: a state report of a light caused by HCL's own command (e.g. a late or intermediate value during a transition) could pause the light. State changes that carry HCL's context are now ignored; changes by other commands and by the device (wall switch, manufacturer app) are detected as before.
+- **Guest mode after a reload**: reloading the integration (e.g. after saving the options) sent one update with Auto values before the scenario was restored, even in Guest mode. The scenario is now restored before the first update (an ended timed scenario is restored as Auto).
+- **Colour mode depended on earlier queries**: whether a light is driven with its native colour temperature or with the XY simulation was cached in 500-K steps, so e.g. 2600 K could stay native on a 2700–6500 K bulb after a query at 2800 K. The range is now checked for every target value.
+- **RGBW and RGBWW lights** without a colour-temperature mode were treated as dimmers (brightness only). They now get the colour temperature through the XY simulation like RGB/XY lights.
+- **Duplicate times**: `hcl_lighting.update_curve` rejects points with the same time instead of silently dropping one of them.
+- **Dashboard card, saving**: Save waits for Home Assistant to confirm; if saving (or preview/revert) fails, the error is shown and the changes stay marked as unsaved. While the lights follow an unsaved preview, the card says so and Save stays highlighted (new sensor attribute `preview_active`).
+- **Dashboard card, current time**: the "now" marker and values use the Home Assistant time zone instead of the browser's.
+- **Dashboard card, night checks**: the "night too bright/cold" hints use the configured sleep and wake time instead of a fixed 22:00–06:00 window (new sensor attributes `sleep_time` and `wake_time`).
+- **Dashboard card, preset "Default"**: now identical to the default curve of the integration (07:00 / 30 % … 22:00 / 10 %); before it started at 07:15 / 14 % and ended at 23:00 / 5 %.
+- **Simulator** (`docs/hcl_simulator.html`): uses the current calculation (PCHIP, min/max as limits, 2000–7000 K, midday correction) instead of the logic of v0.3.0, and no longer claims to show custom curves.
+- A test of the smooth return depended on the time of day and failed in CI between 10:00 and 12:00 (test time zone); the integration was not affected.
+
+### Documentation
+- README: hint to reload the browser page (Ctrl+F5) after an update so the new card is loaded.
+- CHANGELOG 0.4.0: added the missing note that minimum/maximum brightness clip the curve since 0.4.0 instead of scaling it.
+
 ## [0.6.0] - 2026-09-23
 ### Added
 - **Adapt brightness / Adapt colour temperature**: two switches per instance. With one of them off, HCL only controls the other attribute; changes of the attribute HCL does not adapt no longer pause the light. Sleep mode still switches lights off. Both switches keep their state across reloads and restarts.
@@ -100,6 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Interpolation Engine**: Upgraded to **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) for smoother, overshoot-free transitions between points.
+- **Minimum/maximum brightness** *(note added in 0.6.1)*: the limits clip the curve (values below the minimum are raised to it, values above the maximum are lowered to it). Up to 0.3.0 the whole curve was scaled into the min–max range. This change was not listed in the 0.4.0 notes.
 - **Performance**:
     - **Smart Traffic Control**: Reduced Zigbee/Z-Wave traffic by ~90% via intelligent debouncing and delta-checks.
     - **Frontend Optimization**: Hardware-accelerated rendering and efficient state synchronization to prevent UI lag.

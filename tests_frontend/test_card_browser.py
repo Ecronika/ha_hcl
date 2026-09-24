@@ -29,8 +29,12 @@ POINTS = [
 ]
 
 
-def _hass(mode: str, language: str = "en", dark: bool = False, extra: dict | None = None) -> dict:
+def _hass(
+    mode: str, language: str = "en", dark: bool = False, extra: dict | None = None,
+    time_zone: str | None = None,
+) -> dict:
     return {
+        "config": {"time_zone": time_zone} if time_zone else {},
         "language": language,
         "themes": {"darkMode": dark},
         "states": {
@@ -260,3 +264,89 @@ async def test_a07_scenario_line_uses_configured_values(page):
     await page.evaluate("() => { card._chartB.update('none'); card._chartK.update('none'); }")
     lines = await page.evaluate("() => window.__lines")
     assert ["chartB", 80] in lines and ["chartK", 5000] in lines
+
+
+# ---------------------------------------------------------------- 0.6.1
+async def _status(page):
+    return await page.evaluate("""() => { const s = card.shadowRoot.getElementById('status');
+        return {text: s.textContent, shown: s.style.display !== 'none', error: s.classList.contains('error')}; }""")
+
+
+async def test_b36_failed_save_keeps_the_draft_marked(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-add').click()")
+    assert await page.evaluate("() => card._isDirty") is True
+    await page.evaluate("() => { card._hass.callService = () => Promise.reject(new Error('points must have different times')); }")
+    await page.evaluate("() => card._saveCurve()")
+    assert await page.evaluate("() => card._isDirty") is True
+    status = await _status(page)
+    assert status["shown"] and status["error"] and "points must have different times" in status["text"]
+    assert await page.evaluate("() => card.shadowRoot.getElementById('btn-save').classList.contains('dirty')")
+    assert page.errors == []
+
+
+async def test_b36_save_clears_the_mark_only_after_confirmation(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-add').click()")
+    await page.evaluate("""() => { window.__resolve = null;
+        card._hass.callService = () => new Promise(r => { window.__resolve = r; }); }""")
+    await page.evaluate("() => { window.__saving = card._saveCurve(); }")
+    assert await page.evaluate("() => card._isDirty") is True  # not confirmed yet
+    await page.evaluate("async () => { window.__resolve(); await window.__saving; }")
+    assert await page.evaluate("() => card._isDirty") is False
+    assert (await _status(page))["shown"] is False
+    assert page.errors == []
+
+
+async def test_b36_active_preview_is_not_shown_as_saved(page):
+    await _set_hass(page, "auto", extra={"preview_active": True})
+    status = await _status(page)
+    assert status["shown"] and not status["error"] and status["text"].startswith("Preview active")
+    assert await page.evaluate("() => card.shadowRoot.getElementById('btn-save').classList.contains('dirty')")
+    await _set_hass(page, "auto", extra={"preview_active": False})
+    assert (await _status(page))["shown"] is False
+    assert not await page.evaluate("() => card.shadowRoot.getElementById('btn-save').classList.contains('dirty')")
+    assert page.errors == []
+
+
+async def test_b38_now_uses_the_home_assistant_time_zone(page):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    for zone in ("Pacific/Kiritimati", "Pacific/Pago_Pago"):  # UTC+14 / UTC-11
+        await _set_hass(page, "auto", time_zone=zone)
+        got = await page.evaluate("() => card._nowMinutes()")
+        now = datetime.now(ZoneInfo(zone))
+        expected = now.hour * 60 + now.minute
+        assert min(abs(got - expected), 1440 - abs(got - expected)) <= 1, zone
+        info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+        assert f"{got // 60:02d}:{got % 60:02d}" in info
+    assert page.errors == []
+
+
+async def _night_warnings(page):
+    return await page.evaluate("""() => card._validationResult.warnings
+        .filter(w => w.type === 'night').map(w => [w.xMin, w.xMax])""")
+
+
+async def test_b30_night_window_follows_sleep_and_wake_time(page):
+    # night shift: active 22:00–05:00, sleeping 08:00–16:00
+    shift = [
+        {"t": 60, "b": 100, "k": 6500}, {"t": 300, "b": 100, "k": 6500},
+        {"t": 480, "b": 5, "k": 2200}, {"t": 960, "b": 5, "k": 2200},
+        {"t": 1320, "b": 100, "k": 6500},
+    ]
+    await _set_hass(page, "auto", extra={"sleep_time": "08:00", "wake_time": "16:00"})
+    assert await page.evaluate("() => [card._valSettings.nightStart, card._valSettings.nightEnd]") == [480, 960]
+    await page.evaluate("(pts) => { card._points = pts; card._markChanged(true); }", shift)
+    assert await _night_warnings(page) == []
+    # with the usual anchors (22:00–07:00) the same curve is flagged
+    await _set_hass(page, "auto", extra={"sleep_time": "22:00", "wake_time": "07:00"})
+    await page.evaluate("(pts) => { card._points = pts; card._markChanged(true); }", shift)
+    assert await _night_warnings(page)
+    assert page.errors == []
+
+
+async def test_b24_default_preset_equals_the_backend_default_curve(page):
+    preset = await page.evaluate("() => card._presets.default.map(p => [p.t, p.b, p.k])")
+    assert preset == [[p["t"], p["b"], p["k"]] for p in POINTS]

@@ -111,7 +111,7 @@
                 },
                 "points": {
                     "name": "Stützpunkte",
-                    "description": "Stützpunkte mit t (0-1440 min), b (0-100 %) und k (2000-7000 K), mindestens 2. Nicht nötig für revert."
+                    "description": "Stützpunkte mit t (0-1440 min), b (0-100 %) und k (2000-7000 K), mindestens 2, jede Uhrzeit nur einmal. Nicht nötig für revert."
                 },
                 "mode": {
                     "name": "Modus",
