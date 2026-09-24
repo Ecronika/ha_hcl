@@ -3,12 +3,19 @@
         "step": {
             "user": {
                 "title": "Set up HCL Lighting",
-                "description": "Configure the Human Centric Lighting integration.",
+                "description": "Configure the Human Centric Lighting integration. The anchor times create the default curve; it can be edited later in the dashboard card.",
                 "data": {
                     "name": "Name",
-                    "target": "Lights to control"
+                    "target": "Lights to control",
+                    "wake_time": "Wake time (activation start)",
+                    "midday_time": "Social midday (peak & dip)",
+                    "sleep_time": "Sleep time (wind down)"
                 }
             }
+        },
+        "error": {
+            "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
+            "invalid_time": "Invalid time."
         },
         "abort": {
             "already_configured": "Device is already configured"
@@ -17,23 +24,99 @@
     "options": {
         "step": {
             "init": {
-                "title": "HCL Lighting Options",
+                "title": "HCL Lighting options",
+                "description": "A curve saved in the dashboard card has priority over the anchor times. Changing wake, midday or sleep time discards it and creates a new default curve.",
                 "data": {
                     "target": "Lights to control",
-                    "smart_transition": "Compatibility Mode (Slow/Complex Lights)",
-                    "min_brightness": "Minimum Brightness (%)",
-                    "max_brightness": "Maximum Brightness (%)"
+                    "smart_transition": "Compatibility mode (slow/complex lights)",
+                    "min_brightness": "Minimum brightness (%)",
+                    "max_brightness": "Maximum brightness (%)",
+                    "wake_time": "Wake time (activation start)",
+                    "midday_time": "Social midday (peak & dip)",
+                    "sleep_time": "Sleep time (wind down)"
+                }
+            },
+            "behavior": {
+                "title": "Updates and manual control",
+                "data": {
+                    "update_interval": "Update interval",
+                    "transition": "Transition of updates",
+                    "turn_on_transition": "Transition when a light is switched on",
+                    "override_timeout": "Return to HCL after manual control (min, 0 = never)",
+                    "override_reset_on_off": "Switching a light off ends manual control",
+                    "persist_overrides": "Keep manual control across restarts",
+                    "respect_turn_on_values": "Keep values of turn-on commands (scenes, automations, voice)"
+                },
+                "data_description": {
+                    "update_interval": "Seconds between two update cycles (default 27).",
+                    "transition": "Seconds; must be shorter than the update interval (default 20). Lights without transition support ignore it.",
+                    "turn_on_transition": "Seconds (default 0 = immediately).",
+                    "respect_turn_on_values": "If a light is switched on through Home Assistant with its own brightness or colour, HCL leaves it as it is (manual control)."
+                }
+            },
+            "scenarios": {
+                "title": "Scenarios",
+                "data": {
+                    "focus_brightness": "Focus: brightness",
+                    "focus_kelvin": "Focus: colour temperature",
+                    "relax_brightness": "Relax: brightness",
+                    "relax_kelvin": "Relax: colour temperature",
+                    "cleaning_brightness": "Cleaning: brightness",
+                    "cleaning_kelvin": "Cleaning: colour temperature",
+                    "scenario_duration": "Duration of Focus/Relax/Cleaning (min, 0 = until changed)"
                 }
             }
         },
         "error": {
-            "min_greater_max": "Minimum brightness must be lower than maximum."
+            "min_greater_max": "Minimum brightness must be lower than maximum.",
+            "transition_too_long": "The transition must be shorter than the update interval.",
+            "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
+            "invalid_time": "Invalid time."
         }
     },
     "entity": {
         "switch": {
             "hcl_switch": {
-                "name": "HCL Mode"
+                "name": "HCL active"
+            },
+            "adapt_brightness": {
+                "name": "Adapt brightness"
+            },
+            "adapt_color": {
+                "name": "Adapt colour temperature"
+            }
+        },
+        "select": {
+            "hcl_mode": {
+                "name": "Scenario",
+                "state": {
+                    "auto": "Auto (curve)",
+                    "sleep": "Sleep",
+                    "focus": "Focus",
+                    "relax": "Relax",
+                    "cleaning": "Cleaning",
+                    "guest": "Guest"
+                }
+            }
+        }
+    },
+    "services": {
+        "update_curve": {
+            "name": "Update curve",
+            "description": "Update the HCL control points (used by the dashboard card).",
+            "fields": {
+                "entity_id": {
+                    "name": "Entity",
+                    "description": "The HCL switch or curve sensor."
+                },
+                "points": {
+                    "name": "Control points",
+                    "description": "Control points with t (0-1440 min), b (0-100 %) and k (2000-7000 K), at least 2. Not used for revert."
+                },
+                "mode": {
+                    "name": "Mode",
+                    "description": "preview/apply: use the points until the next reload; save: store them; revert: reload the saved curve."
+                }
             }
         }
     },

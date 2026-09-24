@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -21,7 +20,10 @@ from .const import (
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
     CONF_MIN_BRIGHTNESS,
-    CONF_MAX_BRIGHTNESS
+    CONF_MAX_BRIGHTNESS,
+    SCENARIO_DEFAULTS,
+    CONFIGURABLE_SCENARIOS,
+    scenario_option_keys,
 )
 from .logic.hcl_math import HCLCalculator
 
@@ -46,6 +48,10 @@ class HCLLightingCurveSensor(SensorEntity):
     _attr_translation_key = "hcl_curve_sensor"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_should_poll = False # Event driven
+    # State: time of the last curve/mode update
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    # The curve data is only needed live by the card, not in the history database
+    _unrecorded_attributes = frozenset({ATTR_SAMPLES, "control_points", "scenarios"})
     
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, hcl_calc: HCLCalculator) -> None:
         """Initialize the sensor."""
@@ -53,7 +59,7 @@ class HCLLightingCurveSensor(SensorEntity):
         self._entry = entry
         self._hcl_calc = hcl_calc
         self._attr_unique_id = f"{entry.entry_id}_curve"
-        self._attr_native_value = datetime.now().isoformat() # Initial state
+        self._attr_native_value = dt_util.utcnow()
         
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
@@ -115,7 +121,7 @@ class HCLLightingCurveSensor(SensorEntity):
         
         self._update_attributes()
         # Update state to trigger push
-        self._attr_native_value = dt_util.now().isoformat()
+        self._attr_native_value = dt_util.utcnow()
         self.async_write_ha_state()
 
 
@@ -156,7 +162,22 @@ class HCLLightingCurveSensor(SensorEntity):
             # Brightness limits, shaded in the dashboard card
             "min_brightness": min_b,
             "max_brightness": max_b,
+            # Fixed values of the scenarios (drawn as lines in the card)
+            "scenarios": self._scenario_values(),
         }
+
+    def _scenario_values(self) -> dict[str, dict[str, int]]:
+        values = {}
+        for mode, defaults in SCENARIO_DEFAULTS.items():
+            if defaults["brightness"] is None:
+                continue
+            b, k = defaults["brightness"], defaults["kelvin"]
+            if mode in CONFIGURABLE_SCENARIOS:
+                key_b, key_k = scenario_option_keys(mode)
+                b = int(self._entry.options.get(key_b, b))
+                k = int(self._entry.options.get(key_k, k))
+            values[mode] = {"b": b, "k": k}
+        return values
 
     @property
     def device_info(self):

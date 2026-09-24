@@ -1,12 +1,17 @@
 {
   "domain": "hcl_lighting",
   "name": "HCL Lighting",
+  "after_dependencies": [
+    "lovelace"
+  ],
   "codeowners": [],
   "config_flow": true,
-  "dependencies": [],
-  "documentation": "https://www.home-assistant.io/",
-  "funding_url": "https://github.com/Ecronika/ha_hcl",
+  "dependencies": [
+    "http"
+  ],
+  "documentation": "https://github.com/Ecronika/ha_hcl",
   "iot_class": "calculated",
+  "issue_tracker": "https://github.com/Ecronika/ha_hcl/issues",
   "requirements": [],
-  "version": "0.5.1"
+  "version": "0.6.0"
 }

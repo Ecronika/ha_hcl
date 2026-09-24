@@ -3,12 +3,19 @@
         "step": {
             "user": {
                 "title": "HCL Lighting einrichten",
-                "description": "Konfiguriere die Human Centric Lighting Integration.",
+                "description": "Konfiguriere die Human Centric Lighting Integration. Aus den Ankerzeiten entsteht die Standardkurve; sie lässt sich später in der Dashboard-Karte bearbeiten.",
                 "data": {
                     "name": "Name",
-                    "target": "Zu steuernde Lichter"
+                    "target": "Zu steuernde Lichter",
+                    "wake_time": "Aufwachzeit (Start der Aktivierung)",
+                    "midday_time": "Sozialer Mittag (Höhepunkt & Dip)",
+                    "sleep_time": "Schlafenszeit (Entspannung)"
                 }
             }
+        },
+        "error": {
+            "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
+            "invalid_time": "Ungültige Uhrzeit."
         },
         "abort": {
             "already_configured": "Gerät ist bereits konfiguriert"
@@ -18,25 +25,98 @@
         "step": {
             "init": {
                 "title": "HCL Lighting Optionen",
+                "description": "Eine in der Dashboard-Karte gespeicherte Kurve hat Vorrang vor den Ankerzeiten. Wer Aufwach-, Mittags- oder Schlafenszeit ändert, verwirft sie und erhält eine neue Standardkurve.",
                 "data": {
                     "target": "Zu steuernde Lichter",
-                    "smart_transition": "Kompatibilitätsmodus (Langsame/Komplexe Lichter)",
+                    "smart_transition": "Kompatibilitätsmodus (langsame/komplexe Lichter)",
                     "min_brightness": "Minimale Helligkeit (%)",
                     "max_brightness": "Maximale Helligkeit (%)",
                     "wake_time": "Aufwachzeit (Start der Aktivierung)",
                     "midday_time": "Sozialer Mittag (Höhepunkt & Dip)",
                     "sleep_time": "Schlafenszeit (Entspannung)"
                 }
+            },
+            "behavior": {
+                "title": "Aktualisierung und manuelle Steuerung",
+                "data": {
+                    "update_interval": "Aktualisierungsintervall",
+                    "transition": "Übergangszeit der Aktualisierungen",
+                    "turn_on_transition": "Übergangszeit beim Einschalten",
+                    "override_timeout": "Rückkehr zu HCL nach manueller Steuerung (min, 0 = nie)",
+                    "override_reset_on_off": "Ausschalten beendet die manuelle Steuerung",
+                    "persist_overrides": "Manuelle Steuerung über Neustarts behalten",
+                    "respect_turn_on_values": "Werte von Einschaltbefehlen behalten (Szenen, Automationen, Sprache)"
+                },
+                "data_description": {
+                    "update_interval": "Sekunden zwischen zwei Aktualisierungen (Standard 27).",
+                    "transition": "Sekunden; muss kürzer als das Intervall sein (Standard 20). Lichter ohne Übergangsfunktion ignorieren den Wert.",
+                    "turn_on_transition": "Sekunden (Standard 0 = sofort).",
+                    "respect_turn_on_values": "Wird ein Licht über Home Assistant mit eigener Helligkeit oder Farbe eingeschaltet, lässt HCL es so (manuelle Steuerung)."
+                }
+            },
+            "scenarios": {
+                "title": "Szenarien",
+                "data": {
+                    "focus_brightness": "Fokus: Helligkeit",
+                    "focus_kelvin": "Fokus: Farbtemperatur",
+                    "relax_brightness": "Entspannen: Helligkeit",
+                    "relax_kelvin": "Entspannen: Farbtemperatur",
+                    "cleaning_brightness": "Putzen: Helligkeit",
+                    "cleaning_kelvin": "Putzen: Farbtemperatur",
+                    "scenario_duration": "Dauer von Fokus/Entspannen/Putzen (min, 0 = bis zur Änderung)"
+                }
             }
         },
         "error": {
-            "min_greater_max": "Minimale Helligkeit muss kleiner als Maximale sein."
+            "min_greater_max": "Minimale Helligkeit muss kleiner als Maximale sein.",
+            "transition_too_long": "Die Übergangszeit muss kürzer als das Aktualisierungsintervall sein.",
+            "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
+            "invalid_time": "Ungültige Uhrzeit."
         }
     },
     "entity": {
         "switch": {
             "hcl_switch": {
-                "name": "HCL Modus"
+                "name": "HCL aktiv"
+            },
+            "adapt_brightness": {
+                "name": "Helligkeit anpassen"
+            },
+            "adapt_color": {
+                "name": "Farbtemperatur anpassen"
+            }
+        },
+        "select": {
+            "hcl_mode": {
+                "name": "Szenario",
+                "state": {
+                    "auto": "Auto (Kurve)",
+                    "sleep": "Schlafen",
+                    "focus": "Fokus",
+                    "relax": "Entspannen",
+                    "cleaning": "Putzen",
+                    "guest": "Gast"
+                }
+            }
+        }
+    },
+    "services": {
+        "update_curve": {
+            "name": "Kurve aktualisieren",
+            "description": "Stützpunkte der HCL-Kurve ändern (von der Dashboard-Karte genutzt).",
+            "fields": {
+                "entity_id": {
+                    "name": "Entität",
+                    "description": "Der HCL-Schalter oder Kurven-Sensor."
+                },
+                "points": {
+                    "name": "Stützpunkte",
+                    "description": "Stützpunkte mit t (0-1440 min), b (0-100 %) und k (2000-7000 K), mindestens 2. Nicht nötig für revert."
+                },
+                "mode": {
+                    "name": "Modus",
+                    "description": "preview/apply: Punkte bis zum nächsten Neuladen nutzen; save: speichern; revert: gespeicherte Kurve neu laden."
+                }
             }
         }
     },

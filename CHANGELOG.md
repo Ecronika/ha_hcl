@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-23
+### Added
+- **Adapt brightness / Adapt colour temperature**: two switches per instance. With one of them off, HCL only controls the other attribute; changes of the attribute HCL does not adapt no longer pause the light. Sleep mode still switches lights off. Both switches keep their state across reloads and restarts.
+- **Manual control through Home Assistant**: HCL sends its commands with its own context. Commands from apps, dashboards, scenes, automations or voice assistants that change brightness or colour of a light that is on now pause the light immediately (also inside the 22-s window after an HCL update, where such changes were missed before).
+- **Option "Keep values of turn-on commands"** (default off): a light switched on through Home Assistant with its own values keeps them instead of receiving the HCL values.
+- **Manual-control options**: time until HCL takes a paused light back (default 240 min as before, 0 = never), whether switching a light off ends manual control (default on as before), and whether manual control survives Home Assistant restarts (default off as before).
+- **Attribute `manual_control`** on the HCL switch listing the paused lights.
+- **Scenario options**: brightness and colour temperature of Focus, Relax and Cleaning (defaults unchanged) and an optional duration after which they return to Auto (attribute `until` on the scenario select; kept across restarts).
+- **Update options**: update interval (default 27 s), transition of updates (default 20 s) and transition when a light is switched on (default 0 s).
+- **Setup**: wake, midday and sleep time can be set when adding the integration; wake and sleep time must be more than 6 hours apart (also checked in the options).
+- **Dashboard card**: add points (button or double-click), delete the selected point (button or Del), numeric input of time/brightness/colour temperature, undo (button or Ctrl+Z), a marker for the current time with the current values, the effective brightness under min/max limits as a dashed line, and scenario lines with the configured values.
+- **Dashboard card**: German and English texts following the Home Assistant language; colours follow the active Home Assistant theme (light and dark).
+- **Translations**: names of the scenario states, the new entities and options, and the `update_curve` service.
+- German quick guide `README.de.md`; hassfest check in the CI workflow.
+
+### Changed
+- **Entity names**: the HCL switch is now called "HCL active" ("HCL aktiv") and the mode select "Scenario" ("Szenario"). Existing installations keep their entity IDs; new installations get IDs like `switch.<name>_hcl_active` and `select.<name>_scenario`. The scenario select is no longer a configuration entity, so it appears in auto-generated dashboards and can be exposed to voice assistants.
+- **Targets** given as devices, areas, floors or labels are resolved again when the entity, device or area registry changes (e.g. a new light in a selected area).
+- **Curve sensor**: the state is a timestamp (device class `timestamp`, time of the last curve/scenario change); the curve data attributes are no longer written to the recorder database.
+- **Options** are split into three pages (curve and lights, updates and manual control, scenarios).
+- The `update_curve` service is registered once for the integration and stays available while no entry is loaded; the card resource is registered once per Home Assistant run instead of on every reload.
+- **Revert** in the card uses the anchor times entered at setup when no curve was saved and no anchor options exist.
+- A paused light that is found switched off during an update cycle is released (if switching off ends manual control), e.g. after a switch-off that HCL did not see.
+- README: descriptions of the default profile and presets corrected (midday dip is part of the default profile, not a norm requirement; there is no "Shift Work" preset).
+
+### Fixed
+- **Manifest**: `http` added as dependency and `lovelace` as after-dependency (the integration uses both); the invalid key `funding_url` was removed and `documentation`/`issue_tracker` point to the repository (hassfest).
+- `tests/test_hcl_math_v4.py` runs again (no Windows path and module mocks).
+
 ## [0.5.1] - 2026-09-23
 ### Fixed
 - **Sleep Mode**: A light switched on manually during Sleep mode is no longer switched off again by the next update cycle; it is treated as a manual override (as documented for 0.5.0-beta1).
@@ -141,6 +170,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Full UI configuration (no YAML required).
 - German and English translations.
 
+[0.6.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.6.0
 [0.5.1]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.5.1
 [0.4.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.4.0
 [0.3.0]: https://github.com/Ecronika/ha_hcl/releases/tag/v0.3.0

@@ -5,7 +5,9 @@ import logging
 import asyncio
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+import time
+
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_COLOR_TEMP_KELVIN,
@@ -40,7 +42,9 @@ from ..const import (
     CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS,
     DEFAULT_MAX_BRIGHTNESS,
-    XY_COLOR_DISTANCE_THRESHOLD
+    XY_COLOR_DISTANCE_THRESHOLD,
+    CONFIGURABLE_SCENARIOS,
+    scenario_option_keys,
 )
 
 from ..logic.hcl_math import HCLCalculator
@@ -71,6 +75,78 @@ class HCLLightController:
         
         # State Machine
         self.active_mode = MODE_AUTO
+
+        # Adaptation switches (brightness / colour temperature)
+        self._adapt_brightness = True
+        self._adapt_color = True
+
+        # Contexts of the service calls HCL sends itself ({context_id: monotonic time})
+        self._own_contexts: dict[str, float] = {}
+
+    @property
+    def adapt_brightness(self) -> bool:
+        """Whether HCL controls the brightness."""
+        return self._adapt_brightness
+
+    @adapt_brightness.setter
+    def adapt_brightness(self, value: bool) -> None:
+        self._adapt_brightness = bool(value)
+        self.override_manager.track_brightness = self._adapt_brightness
+
+    @property
+    def adapt_color(self) -> bool:
+        """Whether HCL controls the colour temperature."""
+        return self._adapt_color
+
+    @adapt_color.setter
+    def adapt_color(self, value: bool) -> None:
+        self._adapt_color = bool(value)
+        self.override_manager.track_color = self._adapt_color
+
+    def is_own_context(self, context: Context | None) -> bool:
+        """Return True if a context belongs to a service call sent by HCL."""
+        if context is None:
+            return False
+        return context.id in self._own_contexts or (
+            context.parent_id is not None and context.parent_id in self._own_contexts
+        )
+
+    def _new_context(self) -> Context:
+        now = time.monotonic()
+        # Contexts are only needed while the resulting state changes arrive
+        for ctx_id in [c for c, t in self._own_contexts.items() if now - t > 300]:
+            del self._own_contexts[ctx_id]
+        context = Context()
+        self._own_contexts[context.id] = now
+        return context
+
+    _BRIGHTNESS_KEYS = ("brightness_pct",)
+    _COLOR_KEYS = ("color_temp_kelvin", "xy_color")
+
+    def _filter_service_data(self, data: dict[str, Any]) -> dict[str, Any] | None:
+        """Drop the attributes HCL must not adapt; None if nothing is left to send.
+
+        Brightness 0 (Sleep mode switches lights off) is always kept.
+        """
+        data = dict(data)
+        if not self._adapt_brightness and data.get("brightness_pct") != 0:
+            for key in self._BRIGHTNESS_KEYS:
+                data.pop(key, None)
+        if not self._adapt_color:
+            for key in self._COLOR_KEYS:
+                data.pop(key, None)
+        if not any(key in data for key in self._BRIGHTNESS_KEYS + self._COLOR_KEYS):
+            return None
+        return data
+
+    async def _async_call(self, domain: str, service: str, data: dict[str, Any], blocking: bool = False):
+        """Send a light command with an HCL context (only the adapted attributes)."""
+        data = self._filter_service_data(data)
+        if data is None:
+            return
+        await self.hass.services.async_call(
+            domain, service, data, blocking=blocking, context=self._new_context()
+        )
         
     def set_active_mode(self, mode: str) -> None:
         """Set the active scenario mode."""
@@ -102,6 +178,13 @@ class HCLLightController:
             if self.active_mode == MODE_SLEEP:
                 return 0, 2000 # Off, but pre-heat to 2000K
                 
+            if self.active_mode in CONFIGURABLE_SCENARIOS:
+                key_b, key_k = scenario_option_keys(self.active_mode)
+                options = self.config_entry.options
+                return (
+                    int(options.get(key_b, settings["brightness"])),
+                    int(options.get(key_k, settings["kelvin"])),
+                )
             return settings["brightness"], settings["kelvin"]
 
         # 3. AUTO MODE (Curve)
@@ -199,7 +282,7 @@ class HCLLightController:
             
             if transition_val == 0 or not smart_transition:
                 # Bulk Update
-                tasks.append(self.hass.services.async_call(
+                tasks.append(self._async_call(
                     "light", "turn_on",
                     {"entity_id": lights_xy_sim, "brightness_pct": brightness, "xy_color": (x, y), "transition": transition_val},
                     blocking=True
@@ -213,7 +296,7 @@ class HCLLightController:
         if lights_ct:
             if transition_val == 0 or not smart_transition:
                 # Bulk Update
-                tasks.append(self.hass.services.async_call(
+                tasks.append(self._async_call(
                     "light", "turn_on",
                     {"entity_id": lights_ct, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": transition_val},
                     blocking=True
@@ -225,7 +308,7 @@ class HCLLightController:
 
         # Group 3: Dimmer Only
         if lights_dim:
-            tasks.append(self.hass.services.async_call(
+            tasks.append(self._async_call(
                 "light", "turn_on",
                 {"entity_id": lights_dim, "brightness_pct": brightness, "transition": transition_val},
                 blocking=True
@@ -249,7 +332,7 @@ class HCLLightController:
                             exc_info=res
                         )
 
-    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None):
+    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None, transition: float = 0):
         """Ultra-fast HCL application for turn-on events."""
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
         
@@ -270,7 +353,7 @@ class HCLLightController:
         service_data = {
             "entity_id": entity_id,
             "brightness_pct": brightness,
-            "transition": 0
+            "transition": transition
         }
         
         if cap_type == "ct":
@@ -285,7 +368,7 @@ class HCLLightController:
             return # onoff or unknown
 
         # Execute immediately in current task context (no double-scheduling)
-        await self.hass.services.async_call(
+        await self._async_call(
             "light", 
             "turn_on",
             service_data,
@@ -512,9 +595,17 @@ class HCLLightController:
         if self._is_group(entity_id):
             return False
 
+        # Only the adapted attributes count (brightness 0 = Sleep switches off)
+        check_b = self._adapt_brightness or target_b == 0
+        check_k = self._adapt_color
+        if not check_b and not check_k:
+            return False
+
         # Check Brightness
         delta_b = 0
-        if curr_b is not None:
+        if not check_b:
+            pass
+        elif curr_b is not None:
              delta_b = abs(curr_b_pct - target_b)
         else:
             # Unknown brightness, assume update needed
@@ -522,7 +613,9 @@ class HCLLightController:
             
         # Check Kelvin (if supported)
         delta_k = 0
-        if curr_k is not None:
+        if not check_k:
+            pass
+        elif curr_k is not None:
              # Compare with what the light can reach: a CT light clamps the
              # target to its own range and reports the clamped value.
              delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
@@ -662,16 +755,16 @@ class HCLLightController:
             delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * XY_COLOR_SENSITIVITY
             
             if delta_c > delta_b:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": transition}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": transition}, blocking=True)
             else:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True)
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
         except Exception as e:
             _LOGGER.error("Smart XY error %s: %s", entity_id, e)
             # Fallback
             try:
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0}, blocking=True)
             except Exception:
                 pass
 
@@ -688,20 +781,20 @@ class HCLLightController:
             if delta_k > delta_b:
                 # Check if brightness change is significant enough to warrant a snap
                 if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
-                    await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
+                    await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
                 # Send color without transition to avoid glitches on IKEA bulbs
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
             else:
                 # Only snap color if delta is significant. NEVER send transition with color_temp.
                 if abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
-                    await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
+                    await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
         except Exception as e:
             _LOGGER.error("Smart CT error %s: %s", entity_id, e)
             # Fallback
             try:
                 # Fallback: Send everything, NO transition (safest)
-                await self.hass.services.async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin}, blocking=True)
+                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin}, blocking=True)
             except Exception:
                 pass
 
