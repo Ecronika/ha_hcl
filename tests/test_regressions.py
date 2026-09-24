@@ -470,7 +470,9 @@ async def test_b17_expired_override_does_not_turn_on_off_light(hass, no_frontend
     assert _calls_for(calls, "light.a") == []
 
 
-async def test_b17_expired_override_reengages_light_that_is_on(hass, no_frontend_registration):
+async def _expire_override_of_light_at(hass, freezer, hour, minute):
+    """Light on at 100 %/6500 K, override expired; run one update cycle at hh:mm."""
+    freezer.move_to(dt_util.now().replace(hour=hour, minute=minute, second=0, microsecond=0))
     calls = async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
@@ -482,7 +484,24 @@ async def test_b17_expired_override_reengages_light_that_is_on(hass, no_frontend
     calls.clear()
     await sw._update_hcl()
     await hass.async_block_till_done()
+    return calls, om
+
+
+async def test_b17_expired_override_reengages_light_that_is_on(hass, no_frontend_registration, freezer):
+    # 20:00: the curve asks for warm, dim light, i.e. different values than the light has
+    calls, om = await _expire_override_of_light_at(hass, freezer, 20, 0)
+    assert not om.is_overridden("light.a")
     assert _calls_for(calls, "light.a"), "light that is on must be re-engaged"
+
+
+async def test_b17_expired_override_released_without_command_if_values_match(
+    hass, no_frontend_registration, freezer
+):
+    # 10:30: the default curve asks for 100 %/6500 K, the values the light already has;
+    # the light is released, traffic control sends nothing
+    calls, om = await _expire_override_of_light_at(hass, freezer, 10, 30)
+    assert not om.is_overridden("light.a")
+    assert _calls_for(calls, "light.a") == []
 
 
 # ---------------------------------------------------------------- B-20
