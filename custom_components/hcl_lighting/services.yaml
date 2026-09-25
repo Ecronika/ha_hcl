@@ -26,3 +26,84 @@ update_curve:
             - apply
             - save
             - revert
+
+apply:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: hcl_lighting
+    lights:
+      required: false
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    transition:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: s
+    release_manual_control:
+      required: false
+      default: false
+      selector:
+        boolean:
+
+set_manual_control:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: hcl_lighting
+    lights:
+      required: false
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    manual_control:
+      required: false
+      default: true
+      selector:
+        boolean:
+
+set_scenario:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: hcl_lighting
+    scenario:
+      required: true
+      selector:
+        select:
+          translation_key: scenario
+          options:
+            - auto
+            - sleep
+            - night_light
+            - focus
+            - relax
+            - cleaning
+            - guest
+    duration:
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1440
+          unit_of_measurement: min
+
+get_curve:
+  fields:
+    entity_id:
+      required: true
+      selector:
+        entity:
+          integration: hcl_lighting

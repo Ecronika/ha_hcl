@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from datetime import timedelta
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 from homeassistant.core import HomeAssistant, State
@@ -471,13 +470,21 @@ async def test_a15_service_registered_once_and_translated(hass, no_frontend_regi
 
 
 async def test_a16_frontend_registered_once(hass):
-    with patch("custom_components.hcl_lighting._async_register_lovelace_resource") as register:
-        set_light(hass, "light.a", "off", **CT_ATTRS)
-        entry = await setup_entry(hass, ["light.a"])
-        hass.config_entries.async_update_entry(entry, options={"max_brightness": 90})  # reload
-        await hass.async_block_till_done()
-        second = MockConfigEntry(domain=DOMAIN, title="Zwei", data={"name": "Zwei", "target": {"entity_id": ["light.a"]}})
-        second.add_to_hass(hass)
-        assert await hass.config_entries.async_setup(second.entry_id)
-        await hass.async_block_till_done()
-    assert register.call_count == 1
+    """Static path once per run; setup of further entries and reloads only check it."""
+    from unittest.mock import AsyncMock
+    from custom_components.hcl_lighting import _async_register_lovelace_resource
+
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "http", {})
+    hass.http.async_register_static_paths = AsyncMock()
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"])
+    hass.config_entries.async_update_entry(entry, options={"max_brightness": 90})  # reload
+    await hass.async_block_till_done()
+    second = MockConfigEntry(domain=DOMAIN, title="Zwei", data={"name": "Zwei", "target": {"entity_id": ["light.a"]}})
+    second.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(second.entry_id)
+    await hass.async_block_till_done()
+    await _async_register_lovelace_resource(hass)
+    assert hass.http.async_register_static_paths.await_count == 1

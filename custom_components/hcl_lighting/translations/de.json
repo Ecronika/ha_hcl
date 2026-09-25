@@ -33,7 +33,11 @@
                     "max_brightness": "Maximale Helligkeit (%)",
                     "wake_time": "Aufwachzeit (Start der Aktivierung)",
                     "midday_time": "Sozialer Mittag (Höhepunkt & Dip)",
-                    "sleep_time": "Schlafenszeit (Entspannung)"
+                    "sleep_time": "Schlafenszeit (Entspannung)",
+                    "brightness_scaling": "Min/Max skalieren statt begrenzen"
+                },
+                "data_description": {
+                    "brightness_scaling": "Aus (Standard): Kurvenwerte außerhalb von Min/Max werden abgeschnitten. An: der Kurvenbereich 10–100 % wird auf Min–Max abgebildet, die Form der Kurve bleibt erhalten."
                 }
             },
             "behavior": {
@@ -45,13 +49,15 @@
                     "override_timeout": "Rückkehr zu HCL nach manueller Steuerung (min, 0 = nie)",
                     "override_reset_on_off": "Ausschalten beendet die manuelle Steuerung",
                     "persist_overrides": "Manuelle Steuerung über Neustarts behalten",
-                    "respect_turn_on_values": "Werte von Einschaltbefehlen behalten (Szenen, Automationen, Sprache)"
+                    "respect_turn_on_values": "Werte von Einschaltbefehlen behalten (Szenen, Automationen, Sprache)",
+                    "scenario_transition": "Übergang bei Szenario-Wechsel"
                 },
                 "data_description": {
                     "update_interval": "Sekunden zwischen zwei Aktualisierungen (Standard 27).",
                     "transition": "Sekunden; muss kürzer als das Intervall sein (Standard 20). Lichter ohne Übergangsfunktion ignorieren den Wert.",
                     "turn_on_transition": "Sekunden (Standard 0 = sofort).",
-                    "respect_turn_on_values": "Wird ein Licht über Home Assistant mit eigener Helligkeit oder Farbe eingeschaltet, lässt HCL es so (manuelle Steuerung)."
+                    "respect_turn_on_values": "Wird ein Licht über Home Assistant mit eigener Helligkeit oder Farbe eingeschaltet, lässt HCL es so (manuelle Steuerung).",
+                    "scenario_transition": "Sekunden (Standard: wie der Übergang der Aktualisierungen). Gilt auch für die Rückkehr zu Auto am Ende eines Szenarios; darf länger als das Intervall sein."
                 }
             },
             "scenarios": {
@@ -63,7 +69,15 @@
                     "relax_kelvin": "Entspannen: Farbtemperatur",
                     "cleaning_brightness": "Putzen: Helligkeit",
                     "cleaning_kelvin": "Putzen: Farbtemperatur",
-                    "scenario_duration": "Dauer von Fokus/Entspannen/Putzen (min, 0 = bis zur Änderung)"
+                    "scenario_duration": "Dauer von Fokus/Entspannen/Putzen (min, 0 = bis zur Änderung)",
+                    "night_light_brightness": "Nachtlicht: Helligkeit",
+                    "night_light_kelvin": "Nachtlicht: Farbtemperatur",
+                    "scenario_limits": "Fokus/Entspannen/Putzen auf Min/Max begrenzen",
+                    "night_end_at_wake": "Schlafen und Nachtlicht enden zur Aufwachzeit"
+                },
+                "data_description": {
+                    "scenario_limits": "Aus (Standard): Szenarien nutzen ihre eigenen Werte. An: ihre Helligkeit bleibt innerhalb von Min/Max. Das Nachtlicht ist ausgenommen.",
+                    "night_end_at_wake": "An: Schlafen und Nachtlicht wechseln zur Aufwachzeit automatisch zu Auto."
                 }
             }
         },
@@ -95,8 +109,17 @@
                     "focus": "Fokus",
                     "relax": "Entspannen",
                     "cleaning": "Putzen",
-                    "guest": "Gast"
+                    "guest": "Gast",
+                    "night_light": "Nachtlicht"
                 }
+            }
+        },
+        "sensor": {
+            "target_brightness": {
+                "name": "Sollhelligkeit"
+            },
+            "target_color_temp": {
+                "name": "Sollfarbtemperatur"
             }
         }
     },
@@ -118,12 +141,93 @@
                     "description": "preview/apply: Punkte bis zum nächsten Neuladen nutzen; save: speichern; revert: gespeicherte Kurve neu laden."
                 }
             }
+        },
+        "apply": {
+            "name": "HCL-Werte anwenden",
+            "description": "Sendet die aktuellen HCL-Werte sofort an eingeschaltete Lichter. Schaltet nie ein; manuell gesteuerte Lichter werden übersprungen.",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL-Instanz",
+                    "description": "Eine Entität der HCL-Instanz (Schalter, Szenario oder Sensor)."
+                },
+                "lights": {
+                    "name": "Lichter",
+                    "description": "Lichter der Instanz; leer = alle."
+                },
+                "transition": {
+                    "name": "Übergang",
+                    "description": "Sekunden (Standard: Übergang der Aktualisierungen)."
+                },
+                "release_manual_control": {
+                    "name": "Manuelle Steuerung beenden",
+                    "description": "Auch manuell gesteuerte Lichter wieder HCL übergeben."
+                }
+            }
+        },
+        "set_manual_control": {
+            "name": "Manuelle Steuerung setzen",
+            "description": "Pausiert HCL für Lichter (an) oder übergibt sie wieder HCL (aus).",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL-Instanz",
+                    "description": "Eine Entität der HCL-Instanz (Schalter, Szenario oder Sensor)."
+                },
+                "lights": {
+                    "name": "Lichter",
+                    "description": "Lichter der Instanz; leer = alle."
+                },
+                "manual_control": {
+                    "name": "Manuelle Steuerung",
+                    "description": "An: HCL pausiert die Lichter; aus: sie folgen wieder HCL."
+                }
+            }
+        },
+        "set_scenario": {
+            "name": "Szenario setzen",
+            "description": "Wählt ein Szenario, optional mit Dauer.",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL-Instanz",
+                    "description": "Eine Entität der HCL-Instanz (Schalter, Szenario oder Sensor)."
+                },
+                "scenario": {
+                    "name": "Szenario",
+                    "description": "auto, sleep, night_light, focus, relax, cleaning oder guest."
+                },
+                "duration": {
+                    "name": "Dauer",
+                    "description": "Minuten bis zur Rückkehr zu Auto (0 = bis zur Änderung). Leer = wie eingestellt."
+                }
+            }
+        },
+        "get_curve": {
+            "name": "Kurve abrufen",
+            "description": "Gibt die Stützpunkte der aktiven und der gespeicherten Kurve sowie die Ankerzeiten zurück (z. B. zum Kopieren in eine andere Instanz über update_curve).",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL-Instanz",
+                    "description": "Eine Entität der HCL-Instanz (Schalter, Szenario oder Sensor)."
+                }
+            }
         }
     },
     "issues": {
-        "setup_curve_card": {
-            "title": "HCL Kurven-Karte einrichten",
-            "description": "Um deine Lichtkurve anzupassen, füge bitte die **HCL Curve Card** zu deinem Dashboard hinzu.\n\n1. Gehe zu deinem Dashboard\n2. Dashboard bearbeiten -> Karte hinzufügen\n3. Wähle 'Manuell' und füge ein:\n\n```yaml\ntype: custom:hcl-curve-card\nentity: {entity_id}\n```"
+        "light_in_multiple_instances": {
+            "title": "Licht in mehreren HCL-Instanzen",
+            "description": "{light} wird von mehreren HCL-Instanzen gesteuert ({instances}), die dieselbe Eigenschaft anpassen. Die Instanzen überschreiben sich gegenseitig. Entferne das Licht aus einer Instanz oder schalte dort „Helligkeit anpassen“ bzw. „Farbtemperatur anpassen“ aus."
+        }
+    },
+    "selector": {
+        "scenario": {
+            "options": {
+                "auto": "Auto (Kurve)",
+                "sleep": "Schlafen",
+                "night_light": "Nachtlicht",
+                "focus": "Fokus",
+                "relax": "Entspannen",
+                "cleaning": "Putzen",
+                "guest": "Gast"
+            }
         }
     }
 }

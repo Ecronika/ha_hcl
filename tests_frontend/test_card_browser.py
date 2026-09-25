@@ -8,6 +8,7 @@ HCL_TEST_REQUIRE_BROWSER=1 is set (CI), then a missing browser is an error.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -36,6 +37,7 @@ def _hass(
     return {
         "config": {"time_zone": time_zone} if time_zone else {},
         "language": language,
+        "locale": {"language": language, "time_format": "24"},
         "themes": {"darkMode": dark},
         "states": {
             "sensor.hcl_curve_data": {
@@ -69,7 +71,9 @@ async def page():
         pg.on("pageerror", lambda e: errors.append(str(e)))
         await pg.set_content("<html><body></body></html>")
         await pg.add_script_tag(content=(FRONTEND / "chart.js").read_text(encoding="utf-8"))
-        await pg.add_script_tag(content=(FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8"))
+        # The card is a JavaScript module (Lovelace resource type "module")
+        await pg.add_script_tag(content=(FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8"), type="module")
+        await pg.wait_for_function("() => !!customElements.get('hcl-curve-card')")
         await pg.evaluate(
             """() => {
                 window.__calls = [];
@@ -109,6 +113,9 @@ async def test_b12_chip_click_still_calls_select_service(page):
     await page.evaluate("() => card.shadowRoot.querySelector('.chip[data-mode=relax]').click()")
     calls = await page.evaluate("() => window.__calls")
     assert calls[-1] == ["select", "select_option", {"entity_id": "select.mode", "option": "relax"}]
+    # 0.7.0 (B-43): the active chip follows the confirmed state of the select
+    assert await _active_chips(page) == ["auto"]
+    await _set_hass(page, "relax")
     assert await _active_chips(page) == ["relax"]
 
 
@@ -171,7 +178,7 @@ async def test_a09_german_texts(page):
 
 async def test_a09_chart_colours_follow_theme(page):
     await _set_hass(page, "auto")
-    await page.evaluate("() => { card.style.setProperty('--divider-color', 'rgb(1, 2, 3)'); card.style.setProperty('--secondary-text-color', 'rgb(4, 5, 6)'); }")
+    await page.evaluate("() => { card.style.setProperty('--divider-color', 'rgb(1, 2, 3)'); card.style.setProperty('--primary-text-color', 'rgb(4, 5, 6)'); }")
     await _set_hass(page, "auto", dark=True)  # theme change
     await page.wait_for_timeout(100)
     grid, ticks = await page.evaluate("() => [card._chartB.options.scales.y.grid.color, card._chartK.options.scales.y.ticks.color]")
@@ -269,7 +276,7 @@ async def test_a07_scenario_line_uses_configured_values(page):
 # ---------------------------------------------------------------- 0.6.1
 async def _status(page):
     return await page.evaluate("""() => { const s = card.shadowRoot.getElementById('status');
-        return {text: s.textContent, shown: s.style.display !== 'none', error: s.classList.contains('error')}; }""")
+        return {text: s.textContent, shown: s.textContent.trim() !== '', error: s.classList.contains('error')}; }""")
 
 
 async def test_b36_failed_save_keeps_the_draft_marked(page):
@@ -350,3 +357,348 @@ async def test_b30_night_window_follows_sleep_and_wake_time(page):
 async def test_b24_default_preset_equals_the_backend_default_curve(page):
     preset = await page.evaluate("() => card._presets.default.map(p => [p.t, p.b, p.k])")
     assert preset == [[p["t"], p["b"], p["k"]] for p in POINTS]
+
+
+# ---------------------------------------------------------------- 0.7.0 (frontend review cdcc389)
+async def _set_points(page, points, **kwargs):
+    await page.evaluate(
+        "(h) => { h.callService = card._hass.callService; card.hass = h; }",
+        _hass("auto", extra={"control_points": points, **kwargs.pop("extra", {})}, **kwargs),
+    )
+    await page.wait_for_timeout(100)
+
+
+async def test_b40_server_update_does_not_overwrite_a_newer_draft(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._pushUndo(); card._points[0].b = 40; card._markChanged(); }")
+    await page.evaluate("""() => { window.__res = null;
+        card._hass.callService = () => new Promise(r => { window.__res = r; });
+        window.__p = card._saveCurve(); }""")
+    await page.evaluate("() => { card._pushUndo(); card._points[0].b = 55; card._markChanged(); }")
+    saved = [dict(p) for p in POINTS]
+    saved[0]["b"] = 40
+    await _set_points(page, saved)  # the server reports the saved (older) curve
+    await page.evaluate("async () => { window.__res(); await window.__p; }")
+    assert await page.evaluate("() => card._points[0].b") == 55
+    assert await page.evaluate("() => card._isDirty") is True
+    assert await page.evaluate("() => card._undo.length") == 2
+    assert "changed elsewhere" not in (await _status(page))["text"]  # own save, no conflict
+    assert page.errors == []
+
+
+async def test_b40_foreign_change_while_editing_is_offered_not_applied(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._points[2].b = 60; card._markChanged(); }")
+    other = [dict(p) for p in POINTS]
+    other[5]["b"] = 20  # another card saved something else
+    await _set_points(page, other)
+    assert await page.evaluate("() => card._points[2].b") == 60
+    status = await _status(page)
+    assert "changed elsewhere" in status["text"]
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-adopt').click()")
+    assert await page.evaluate("() => [card._points[2].b, card._points[5].b, card._isDirty]") == [75, 20, False]
+    await page.evaluate("() => card._undoLast()")  # the draft is not lost
+    assert await page.evaluate("() => card._points[2].b") == 60
+
+
+async def test_b40_clean_card_follows_foreign_changes(page):
+    await _set_hass(page, "auto")
+    other = [dict(p) for p in POINTS]
+    other[5]["b"] = 20
+    await _set_points(page, other)
+    assert await page.evaluate("() => [card._points[5].b, card._isDirty]") == [20, False]
+
+
+async def test_b40_failed_revert_keeps_the_draft(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._points[0].b = 44; card._markChanged(); window.confirm = () => true; }")
+    await page.evaluate("() => { card._hass.callService = () => Promise.reject(new Error('offline')); }")
+    await page.evaluate("() => card._revertCurve()")
+    assert await page.evaluate("() => [card._points[0].b, card._isDirty]") == [44, True]
+    assert "offline" in (await _status(page))["text"]
+    await page.evaluate("() => { card._hass.callService = () => Promise.resolve(); }")
+    await page.evaluate("() => card._revertCurve()")
+    assert await page.evaluate("() => [card._points[0].b, card._isDirty]") == [30, False]
+
+
+async def test_b41_midnight_24_00_is_the_same_as_00_00(page):
+    got = await page.evaluate("""() => {
+        const { normalize: hclNormalize, valueAt: hclValueAt } = customElements.get('hcl-curve-card').curve;
+        const pts = hclNormalize([{t: 0, b: 10, k: 2200}, {t: 720, b: 50, k: 4000}, {t: 1440, b: 90, k: 6500}]);
+        const owl = hclNormalize([{t: 540, b: 20, k: 2700}, {t: 1200, b: 21, k: 2700}, {t: 1440, b: 5, k: 2200}]);
+        return [pts.map(p => p.t), hclValueAt(pts, 0).b, owl.map(p => p.t), hclValueAt(owl, 0).b]; }""")
+    assert got == [[0, 720], 10, [0, 540, 1200], 5]
+    presets = await page.evaluate("() => Object.values(card._presets).every(p => p.every(x => x.t < 1440))")
+    assert presets
+
+
+async def test_b42_invalid_inputs_change_nothing(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => card._select(2)")
+    before = await _points(page)
+    for field, value in (("in-t", ""), ("in-t", "7:"), ("in-b", ""), ("in-k", "abc")):
+        await page.evaluate("""([f, v]) => { const $ = (id) => card.shadowRoot.getElementById(id);
+            card._updateEditor(); $(f).value = v; $(f).dispatchEvent(new Event('change')); }""", [field, value])
+        assert await _points(page) == before, field
+    assert await page.evaluate("() => card._undo.length") == 0
+    assert (await _status(page))["error"] is True
+    assert page.errors == []
+
+
+async def test_b43_failed_mode_change_is_reported_and_not_shown_active(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("""() => { card._hass.callService = () => Promise.reject(new Error('not allowed'));
+        card.shadowRoot.querySelector('.chip[data-mode=focus]').click(); }""")
+    await page.wait_for_timeout(100)
+    assert await _active_chips(page) == ["auto"]
+    assert await page.evaluate("() => card.shadowRoot.querySelector('.chip.pending')") is None
+    status = await _status(page)
+    assert status["error"] and "not allowed" in status["text"]
+    assert page.errors == []
+
+
+async def test_b44_missing_unavailable_or_invalid_entity_is_shown(page):
+    await _set_hass(page, "auto")
+    h = _hass("auto")
+    del h["states"]["sensor.hcl_curve_data"]
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(100)
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('.handle').length") == 0
+    assert await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent") == ""
+    assert "not found" in (await _status(page))["text"]
+    h = _hass("auto")
+    h["states"]["sensor.hcl_curve_data"] = {"state": "unavailable", "attributes": {}}
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(100)
+    assert "unavailable" in (await _status(page))["text"]
+    h = _hass("auto", extra={"control_points": "bogus"})
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(100)
+    assert "not an HCL curve sensor" in (await _status(page))["text"]
+    await _set_hass(page, "auto")  # data is back
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
+    assert page.errors == []
+
+
+async def test_b44_entity_change_resets_the_card(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._points[0].b = 1; card._markChanged(); card.setConfig({entity: 'sensor.other'}); }")
+    await page.wait_for_timeout(100)
+    assert await page.evaluate("() => [card._points.length, card._isDirty, card._undo.length]") == [0, False, 0]
+    assert "sensor.other" in (await _status(page))["text"]
+
+
+async def test_b45_curve_editable_in_every_mode_with_hint(page):
+    await _set_hass(page, "guest")
+    await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle[data-idx="1"]')
+        .dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowUp', bubbles: true}))""")
+    assert (await _points(page))[1][1] == 51
+    assert await page.evaluate("() => card.shadowRoot.querySelector('.charts.disabled')") is None
+    assert "applies in Auto" in (await _status(page))["text"]
+
+
+async def test_b46_cancelled_drag_ends_cleanly(page):
+    await _set_hass(page, "auto")
+    original = await page.evaluate("() => card._points[3].b")
+    await page.evaluate("""() => { const h = card.shadowRoot.querySelector('#handles-b .handle[data-idx="3"]');
+        h.setPointerCapture = () => {};  // synthetic pointer: capture would throw
+        const r = h.getBoundingClientRect();
+        h.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, composed: true, pointerId: 7, clientX: r.x + 5, clientY: r.y + 5}));
+        h.dispatchEvent(new PointerEvent('pointermove', {bubbles: true, composed: true, pointerId: 7, clientX: r.x + 5, clientY: r.y + 40}));
+        h.dispatchEvent(new PointerEvent('pointercancel', {bubbles: true, composed: true, pointerId: 7})); }""")
+    moved = await page.evaluate("() => card._points[3].b")
+    assert moved != original  # the drag really started
+    # listeners are gone: further moves change nothing
+    await page.evaluate("() => window.dispatchEvent(new PointerEvent('pointermove', {pointerId: 7, clientX: 10, clientY: 10}))")
+    assert await page.evaluate("() => card._points[3].b") == moved
+    # server updates are processed again
+    other = [dict(p) for p in POINTS]
+    other[0]["b"] = 33
+    await page.evaluate("() => card._undoLast()")
+    await _set_points(page, other)
+    assert await page.evaluate("() => card._points[0].b") == 33
+
+
+async def test_b47_narrow_cards_do_not_cut_off_content(page):
+    for width in (240, 288):
+        await page.evaluate("(w) => { card.style.display = 'block'; card.style.width = w + 'px'; }", width)
+        await _set_hass(page, "auto")
+        await page.wait_for_timeout(200)
+        right = await page.evaluate("""() => { const host = card.getBoundingClientRect(); let maxR = 0;
+            card.shadowRoot.querySelectorAll('ha-card *').forEach(e => { const r = e.getBoundingClientRect();
+              if (r.width && !e.classList.contains('handle') && !e.closest('.handle')) maxR = Math.max(maxR, r.right); });
+            return [host.width, Math.round(maxR - host.left)]; }""")
+        assert right[1] <= right[0], (width, right)
+
+
+async def test_b48_each_chart_has_its_own_time_axis(page):
+    await _set_hass(page, "auto")
+    axes = await page.evaluate("""() => [card._chartB, card._chartK].map(c =>
+        [c.options.scales.x.display, c.scales.x.ticks.map(t => t.label).filter(Boolean)])""")
+    for display, labels in axes:
+        assert display is True
+        assert labels == ["00:00", "06:00", "12:00", "18:00", "24:00"]
+    assert await page.evaluate("() => card.shadowRoot.querySelector('.axis-labels')") is None
+
+
+async def test_b49_now_shows_the_active_setpoint(page):
+    extra = {"scenarios": {"focus": {"b": 80, "k": 5000}},
+             "target_brightness_entity_id": "sensor.tb", "target_color_temp_entity_id": "sensor.tk"}
+    h = _hass("focus", extra=extra)
+    h["states"]["sensor.tb"] = {"state": "80", "attributes": {}}
+    h["states"]["sensor.tk"] = {"state": "5000", "attributes": {}}
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(150)
+    info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+    assert "Focus" in info and "80 %" in info and "5,000 K" in info
+    await _set_hass(page, "guest", extra=extra)
+    assert "HCL sends no values" in await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+    # a draft is shown separately
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._points.forEach(p => p.b = 5); card._markChanged(); }")
+    assert (await page.evaluate("() => card.shadowRoot.getElementById('draft-info').textContent")).startswith("Draft")
+
+
+async def test_b50_night_warning_times_are_valid_clock_times(page):
+    await _set_hass(page, "auto", extra={"sleep_time": "22:00", "wake_time": "07:00"})
+    msgs = await page.evaluate("() => card._validationResult.warnings.filter(w => w.type === 'night').map(w => w.msg)")
+    assert len(msgs) == 1 and "24:" not in msgs[0] and "22:15–07:00" in msgs[0]
+    await page.evaluate("() => card._applyPreset('default_night')")
+    assert await _night_warnings(page) == []
+
+
+async def test_b51_foreign_chart_js_is_not_used(browser_page_factory):
+    page, requests = await browser_page_factory(foreign_chart=True)
+    assert await page.evaluate("() => card._Chart && card._Chart.version") == "4.5.1"
+    assert await page.evaluate("() => window.Chart.version") == "2.9.4"  # restored for the other card
+    assert any("/hcl_lighting_static/chart.js?v=9.9.9" in r for r in requests)
+    assert page.errors == []
+
+
+async def test_b53_card_removed_while_loading_does_not_initialise(browser_page_factory):
+    page, _requests = await browser_page_factory(foreign_chart=False, delay_chart=True, attach=False)
+    await page.evaluate("""() => { window.card = document.createElement('hcl-curve-card');
+        card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card); card.remove(); }""")
+    await page.wait_for_timeout(1500)
+    assert await page.evaluate("() => [card._initialized, card._chartB, card._nowTimer]") == [False, None, None]
+    await page.evaluate("() => document.body.appendChild(card)")
+    await page.wait_for_timeout(500)
+    assert await page.evaluate("() => card._initialized && !!card._chartB") is True
+    assert page.errors == []
+
+
+async def test_k5_semantics_keyboard_and_formats(page):
+    h = _hass("relax")
+    h["locale"] = {"language": "en", "time_format": "12", "number_format": "decimal_comma"}
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(150)
+    pressed = await page.evaluate("() => [...card.shadowRoot.querySelectorAll('.chip')].map(c => [c.dataset.mode, c.getAttribute('aria-pressed')])")
+    assert ["relax", "true"] in pressed and ["auto", "false"] in pressed
+    assert "Brightness over the day" in await page.evaluate("() => card.shadowRoot.getElementById('chartB').getAttribute('aria-label')")
+    handle = "card.shadowRoot.querySelector('#handles-k .handle[data-idx=\"1\"]')"
+    assert await page.evaluate(f"() => {handle}.getAttribute('aria-describedby')") == "handle-help"
+    await page.evaluate(f"() => {handle}.dispatchEvent(new KeyboardEvent('keydown', {{key: 'End', bubbles: true}}))")
+    assert (await _points(page))[1][2] == 7000
+    await page.evaluate(f"() => {handle}.dispatchEvent(new KeyboardEvent('keydown', {{key: 'PageDown', bubbles: true}}))")
+    assert (await _points(page))[1][2] == 6500
+    text = await page.evaluate(f"() => {handle}.getAttribute('aria-valuetext')")
+    assert text == "9:00 AM, 6.500 K"
+    axis = await page.evaluate("() => card._chartB.scales.x.ticks.map(t => t.label).filter(Boolean)")
+    assert axis[0] == "12:00 AM" and axis[2] == "12:00 PM"
+
+
+async def test_k6_stub_config_and_editor(page):
+    stub = await page.evaluate("""() => customElements.get('hcl-curve-card').getStubConfig({states: {
+        'sensor.x': {attributes: {}}, 'sensor.wohnen_curve_data': {attributes: {control_points: [], mode_entity_id: 'select.m'}}}})""")
+    assert stub == {"entity": "sensor.wohnen_curve_data"}
+    changed = await page.evaluate("""() => new Promise(resolve => {
+        const ed = customElements.get('hcl-curve-card').getConfigElement();
+        document.body.appendChild(ed);
+        ed.hass = {language: 'de', states: {
+            'sensor.a_curve_data': {attributes: {control_points: [], mode_entity_id: 'select.a', friendly_name: 'A'}},
+            'sensor.b_curve_data': {attributes: {control_points: [], mode_entity_id: 'select.b', friendly_name: 'B'}}}};
+        ed.setConfig({type: 'custom:hcl-curve-card', entity: 'sensor.a_curve_data'});
+        ed.addEventListener('config-changed', (e) => resolve(e.detail.config));
+        const sel = ed.shadowRoot.getElementById('entity');
+        sel.value = 'sensor.b_curve_data'; sel.dispatchEvent(new Event('change'));
+    })""")
+    assert changed == {"type": "custom:hcl-curve-card", "entity": "sensor.b_curve_data", "view": "full"}
+    assert await page.evaluate("() => card.getGridOptions()") == {"columns": 12, "min_columns": 6}
+
+
+async def test_k3_compact_view_hides_the_editor_until_opened(page):
+    await page.evaluate("() => card.setConfig({entity: 'sensor.hcl_curve_data', view: 'compact'})")
+    await _set_hass(page, "auto")
+    assert await page.evaluate("() => card.shadowRoot.getElementById('editor-section').hidden") is True
+    assert await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent") != ""
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-toggle-editor').click()")
+    await page.wait_for_timeout(200)
+    assert await page.evaluate("() => card.shadowRoot.getElementById('editor-section').hidden") is False
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
+
+
+async def test_k7_night_light_chip_and_scaled_effective_curve(page):
+    await _set_hass(page, "night_light", extra={"min_brightness": 20, "max_brightness": 60, "brightness_scaling": True})
+    assert await _active_chips(page) == ["night_light"]
+    effective = await page.evaluate("() => card._chartB.data.datasets[1].data.find(p => p.x === 750).y")
+    assert round(effective) == 38  # 20 + (50 - 10) * 40/90, same as the integration
+    assert page.errors == []
+
+
+@pytest.fixture
+async def browser_page_factory():
+    """Page served from a fake HA origin (module URLs, versioned Chart.js)."""
+    async with playwright_api.async_playwright() as pw:
+        try:
+            browser = await pw.chromium.launch(executable_path=CHROMIUM if Path(CHROMIUM).exists() else None)
+        except Exception as err:  # noqa: BLE001
+            if os.environ.get("HCL_TEST_REQUIRE_BROWSER") == "1":
+                raise
+            pytest.skip(f"Chromium not available: {err}")
+
+        async def make(foreign_chart=False, delay_chart=False, attach=True):
+            page = await browser.new_page()
+            page.errors = []
+            page.on("pageerror", lambda e: page.errors.append(str(e)))
+            requests: list[str] = []
+            page.on("request", lambda r: requests.append(r.url))
+            chart = (FRONTEND / "chart.js").read_text(encoding="utf-8")
+            card = (FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8")
+            foreign = "<script>window.Chart = {version: '2.9.4'};</script>" if foreign_chart else ""
+            html = f"<html><body>{foreign}<script type='module' src='/hcl_lighting_static/hcl-curve-card.js?v=9.9.9'></script></body></html>"
+
+            async def route(r):
+                url = r.request.url
+                if "chart.js" in url:
+                    if delay_chart:
+                        await asyncio.sleep(1)
+                    await r.fulfill(body=chart, content_type="application/javascript")
+                elif "hcl-curve-card.js" in url:
+                    await r.fulfill(body=card, content_type="application/javascript")
+                else:
+                    await r.fulfill(body=html, content_type="text/html")
+
+            await page.route("http://hcl.test/**", route)
+            await page.goto("http://hcl.test/lovelace")
+            await page.wait_for_function("() => !!customElements.get('hcl-curve-card')")
+            if attach:
+                await page.evaluate("""(h) => { window.card = document.createElement('hcl-curve-card');
+                    card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card);
+                    h.callService = () => 0; card.hass = h; }""", _hass("auto"))
+                await page.wait_for_function("() => card._initialized")
+            return page, requests
+
+        yield make
+        await browser.close()
+
+
+async def test_b53_card_moved_while_loading_initialises(browser_page_factory):
+    """Masonry dashboards detach and re-attach cards while they load."""
+    page, _requests = await browser_page_factory(foreign_chart=False, delay_chart=True, attach=False)
+    await page.evaluate("""() => { window.card = document.createElement('hcl-curve-card');
+        card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card);
+        const column = document.createElement('div'); document.body.appendChild(column);
+        card.remove(); column.appendChild(card); }""")
+    await page.wait_for_timeout(1800)
+    assert await page.evaluate("() => card._initialized && !!card._chartB") is True
+    assert page.errors == []

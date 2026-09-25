@@ -11,7 +11,9 @@ from ..const import (
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_WAKE_TIME,
     DEFAULT_MIDDAY_TIME,
-    DEFAULT_SLEEP_TIME
+    DEFAULT_SLEEP_TIME,
+    CURVE_SCALE_LOW,
+    CURVE_SCALE_HIGH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,63 +48,38 @@ class HCLCalculator:
         self.calculate_curve_from_points(config['points'])
 
     def calculate_curve_from_points(self, points: List[HCLPoint]):
-        """Calculate the 24h curve (96 points) from explicit control points using Cosine Interpolation.
-        Matches logic in hcl_dashboard.html (v0.4.7).
+        """Set the control points of the active curve.
+
+        The curve is cyclic over one day. 24:00 (t=1440) is the same moment as
+        00:00 and is stored as t=0; if both are given, the 00:00 point wins
+        (the value the lights got at midnight before 0.7.0). Points are sorted
+        and each time is kept once. get_hcl_values() interpolates them with
+        PCHIP at runtime (same algorithm as the dashboard card).
         """
         if not points:
              _LOGGER.error("No points provided for curve calculation!")
              return
 
-        # Sort points by time
-        sorted_points = sorted(points, key=lambda p: p['t'])
-        
-        # Prepare X, B, K arrays with wrapping (-1440, 0, +1440)
-        X = []
-        B = []
-        K = []
-        
-        for offset in [-1440, 0, 1440]:
-            for p in sorted_points:
-                X.append(p['t'] + offset)
-                B.append(p['b'])
-                K.append(p['k'])
-        
-        # Interpolate 24h cycle (every 15 min -> 97 points incl 1440)
-        # We store this as self.active_curve for lookup.
-        # Format: (t, k, b) tuple list.
-        # NOTE: self.active_curve in v0.3.0 logic was a list of Control Points used for Spline calculation at runtime.
-        # In v0.4.0 (Free-hand), we are pre-calculating the 15-min resolution curve here? 
-        # OR are we storing the Control Points and interpolating at runtime?
-        # The Dashboard does PCHIP at runtime.
-        # BUT: The switch logic expects `self.active_curve` to be the Spline Control Points for Cubic Hermite.
-        # 
-        # CRITICAL DECISION:
-        # To support "Free-hand" with potentially many points, the old "Hermite Loop" in get_hcl_values is too rigid (it assumes sparse points).
-        # We should PRE-CALCULATE the 24h curve at high resolution (e.g. 1 min or 5 min) and just look it up.
-        # OR we verify if we can just use the Cosine Interp at runtime.
-        # Given the dashboard code uses Cosine Interp ("pchip" named function), we should use that at runtime.
-        # So `active_curve` will store the Control Points (sorted, distinct).
-        
-        self.active_curve = []
-        # Logic: We just store the points as Tuples (t, k, b) for compatibility with get_hcl_values logic?
-        # No, get_hcl_values logic is hardcoded for Cubic Hermite. 
-        # We need to UPDATE get_hcl_values to use the new interpolation if we change the structure.
-        # For now, let's keep active_curve as the explicit list of control points (tuples),
-        # And update get_hcl_values to use Cosine Interpolation instead of Hermite.
-        
-        # Convert HCLPoints to tuples for internal storage
-        # Tuple: (t, k, b) - wait, HCLPoint is t,b,k? No, HCLPoint is dict. 
-        # existing points were (t, k, b). HCLPoint has keys.
-        # Let's verify usage in get_hcl_values. p0[0] is t, p0[1] is k, p0[2] is b.
-        
+        normalized = []
+        has_midnight = any(int(p['t']) % 1440 == 0 and int(p['t']) != 1440 for p in points)
+        for p in points:
+            t = int(p['t'])
+            if t == 1440:
+                if has_midnight:
+                    _LOGGER.warning(
+                        "Curve has points at 00:00 and 24:00 (the same moment); using the 00:00 point"
+                    )
+                    continue
+                t = 0
+            normalized.append({"t": t, "k": p['k'], "b": p['b']})
+
         unique_points = []
         seen = set()
-        for p in sorted_points:
+        for p in sorted(normalized, key=lambda p: p['t']):
             if p['t'] not in seen:
-                 # Store as internal DICT for frontend compatibility + readability
-                 unique_points.append({"t": p['t'], "k": p['k'], "b": p['b']})
-                 seen.add(p['t'])
-        
+                unique_points.append(p)
+                seen.add(p['t'])
+
         self.active_curve = unique_points
         _LOGGER.debug("Calculated HCL Curve with %d control points", len(self.active_curve))
 
@@ -203,7 +180,9 @@ class HCLCalculator:
     
     MINUTES_PER_DAY = 1440
     
-    def get_hcl_values(self, now, min_brightness: int, max_brightness: int) -> tuple[int, int]:
+    def get_hcl_values(
+        self, now, min_brightness: int, max_brightness: int, scale: bool = False
+    ) -> tuple[int, int]:
         """Calculate target Brightness and Color Temp using PCHIP Interpolation (Monotone).
         
         Args:
@@ -346,7 +325,13 @@ class HCLCalculator:
         # 4. Clamp Results
         # Clamping (WYSIWYG)
         
-        # Apply user min/max to brightness
+        # Apply user min/max to brightness: clip (default) or map the curve
+        # range 10–100 % onto min–max (option "scale", as up to 0.3.0)
+        if scale:
+            span = CURVE_SCALE_HIGH - CURVE_SCALE_LOW
+            brightness = min_brightness + (brightness - CURVE_SCALE_LOW) * (
+                max_brightness - min_brightness
+            ) / span
         brightness = max(min_brightness, min(max_brightness, brightness))
         
         # Global bounds

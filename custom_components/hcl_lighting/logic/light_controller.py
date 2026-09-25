@@ -44,6 +44,11 @@ from ..const import (
     DEFAULT_MAX_BRIGHTNESS,
     XY_COLOR_DISTANCE_THRESHOLD,
     CONFIGURABLE_SCENARIOS,
+    LIMITABLE_SCENARIOS,
+    CONF_SCENARIO_LIMITS,
+    DEFAULT_SCENARIO_LIMITS,
+    CONF_BRIGHTNESS_SCALING,
+    DEFAULT_BRIGHTNESS_SCALING,
     scenario_option_keys,
 )
 
@@ -78,6 +83,8 @@ class HCLLightController:
         
         # State Machine
         self.active_mode = MODE_AUTO
+        # Set when the scenario changed; the next update uses the scenario transition
+        self._mode_change_pending = False
 
         # Adaptation switches (brightness / colour temperature)
         self._adapt_brightness = True
@@ -151,12 +158,18 @@ class HCLLightController:
             domain, service, data, blocking=blocking, context=self._new_context()
         )
         
-    def set_active_mode(self, mode: str) -> None:
-        """Set the active scenario mode."""
+    def set_active_mode(self, mode: str, announce: bool = True) -> None:
+        """Set the active scenario mode.
+
+        announce=False (restore at startup/reload): the next update is not
+        treated as a scenario change (normal transition).
+        """
         if self.active_mode == mode:
             return
             
         self.active_mode = mode
+        if announce:
+            self._mode_change_pending = True
         _LOGGER.debug("HCL Mode changed to: %s", mode)
         
         # Trigger immediate update logic is handled by the caller (select entity) calling switch.update_ha_state() 
@@ -175,31 +188,57 @@ class HCLLightController:
 
         # 2. FIXED SCENARIOS
         if self.active_mode in SCENARIO_DEFAULTS:
-            settings = SCENARIO_DEFAULTS[self.active_mode]
-            
             # Special Handling: Sleep (Off)
             if self.active_mode == MODE_SLEEP:
                 return 0, 2000 # Off, but pre-heat to 2000K
                 
-            if self.active_mode in CONFIGURABLE_SCENARIOS:
-                key_b, key_k = scenario_option_keys(self.active_mode)
-                options = self.config_entry.options
-                return (
-                    int(options.get(key_b, settings["brightness"])),
-                    int(options.get(key_k, settings["kelvin"])),
-                )
-            return settings["brightness"], settings["kelvin"]
+            return self.scenario_setpoint(self.active_mode)
 
         # 3. AUTO MODE (Curve)
         if self.active_mode == MODE_AUTO:
-            # Dynamic Config resolution moved here to keep Switch dumb
-            min_b = self.config_entry.options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)
-            max_b = self.config_entry.options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)
-            
-            return self.hcl_calc.get_hcl_values(now, min_b, max_b)
+            min_b, max_b = self.brightness_limits()
+            scale = self.config_entry.options.get(CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING)
+            return self.hcl_calc.get_hcl_values(now, min_b, max_b, scale=bool(scale))
             
         # Fallback
         return None, None
+
+    def consume_mode_change(self) -> bool:
+        """True once after a scenario change (for the scenario transition)."""
+        pending = self._mode_change_pending
+        self._mode_change_pending = False
+        return pending
+
+    def scenario_setpoint(self, mode: str) -> tuple[int, int]:
+        """Brightness and colour temperature of a fixed scenario (options, limits)."""
+        settings = SCENARIO_DEFAULTS[mode]
+        options = self.config_entry.options
+        brightness, kelvin = settings["brightness"], settings["kelvin"]
+        if mode in CONFIGURABLE_SCENARIOS:
+            key_b, key_k = scenario_option_keys(mode)
+            brightness = int(options.get(key_b, brightness))
+            kelvin = int(options.get(key_k, kelvin))
+        # Option: Focus/Relax/Cleaning stay within the min/max brightness
+        if mode in LIMITABLE_SCENARIOS and options.get(CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS):
+            min_b, max_b = self.brightness_limits()
+            brightness = max(min_b, min(max_b, brightness))
+        return brightness, kelvin
+
+    def scenario_values(self) -> dict[str, dict[str, int]]:
+        """Values of all scenarios with fixed values (for the card)."""
+        return {
+            mode: dict(zip(("b", "k"), self.scenario_setpoint(mode)))
+            for mode, settings in SCENARIO_DEFAULTS.items()
+            if settings["brightness"] is not None
+        }
+
+    def brightness_limits(self) -> tuple[int, int]:
+        """Configured min/max brightness of the curve."""
+        options = self.config_entry.options
+        return (
+            options.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS),
+            options.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS),
+        )
 
     def prune_cache(self, valid_entity_ids: set[str]) -> None:
         """Prune capability cache of invalid/removed entities."""
@@ -407,6 +446,10 @@ class HCLLightController:
         # Normal update cycles must not cut the smooth transition short
         if entity_id in updated:
             self.override_manager.set_reengaging(entity_id, duration)
+
+    def capability_for(self, entity_id: str, kelvin: int) -> str:
+        """How a light is driven for a colour temperature (ct, xy_sim, dim, onoff)."""
+        return self._get_capability(entity_id, kelvin)
 
     def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
         """Determine how a light is driven for a target colour temperature.
@@ -650,8 +693,12 @@ class HCLLightController:
             return max_k
         return kelvin
 
-    def resolve_targets(self, target_config: dict[str, Any]) -> set[str]:
-        """Resolve target config to a set of entity IDs."""
+    def resolve_targets(self, target_config: dict[str, Any], groups: set[str] | None = None) -> set[str]:
+        """Resolve target config to a set of entity IDs.
+
+        groups (optional) collects the light groups that were expanded, so the
+        caller can watch their member lists.
+        """
         # Extracted directly from old switch.py
         entity_ids = set()
         er_registry = er.async_get(self.hass)
@@ -727,6 +774,8 @@ class HCLLightController:
             group_members = state.attributes.get(ATTR_ENTITY_ID)
             if group_members and isinstance(group_members, (list, tuple, set)):
                  to_process.extend(group_members)
+                 if groups is not None:
+                     groups.add(eid)
             elif (state.attributes.get("is_hue_group") or state.attributes.get("lights") or state.attributes.get("hue_type")):
                 continue # Skip raw Hue groups
             else:

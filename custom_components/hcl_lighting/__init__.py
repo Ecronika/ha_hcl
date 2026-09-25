@@ -12,7 +12,9 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import async_get as async_get_restore_state
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
+from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -32,9 +34,12 @@ from .const import (
     DEFAULT_PERSIST_OVERRIDES,
     HCL_MODES,
     MODE_AUTO,
+    EVENT_MANUAL_CONTROL,
 )
+from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
+from .services import async_register_services
 from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,12 +70,27 @@ async def _async_setup_override_manager(
         await store.async_remove()
 
     signal = f"{DOMAIN}_{entry.entry_id}_overrides"
+    reported = set(manager.overridden_entities())
 
     @callback
     def _on_change() -> None:
         if persist:
             store.async_delay_save(manager.export_overrides, 2)
         async_dispatcher_send(hass, signal)
+        # Event (and logbook entry) per light whose manual control started/ended
+        current = set(manager.overridden_entities())
+        for light in sorted(current ^ reported):
+            hass.bus.async_fire(
+                EVENT_MANUAL_CONTROL,
+                {
+                    "entity_id": light,
+                    "manual_control": light in current,
+                    "instance": entry.title,
+                    "config_entry_id": entry.entry_id,
+                },
+            )
+        reported.clear()
+        reported.update(current)
 
     manager.on_change = _on_change
 
@@ -120,12 +140,19 @@ def _validate_update_curve(data: dict) -> dict:
     """Points are required (at least two) for every mode except 'revert'."""
     if data["mode"] != "revert" and len(data.get("points") or []) < 2:
         raise vol.Invalid("points (at least 2) are required for mode " + data["mode"])
-    times = [point["t"] for point in data.get("points") or []]
+    points = data.get("points") or []
+    times = [point["t"] for point in points]
     duplicates = sorted({t for t in times if times.count(t) > 1})
     if duplicates:
         raise vol.Invalid(
             "points must have different times; duplicate t (minutes): "
             + ", ".join(str(t) for t in duplicates)
+        )
+    # 00:00 (t=0) and 24:00 (t=1440) are the same moment of the daily curve
+    at_midnight = {(p["b"], p["k"]) for p in points if p["t"] in (0, 1440)}
+    if len(at_midnight) > 1:
+        raise vol.Invalid(
+            "points at 00:00 (t=0) and 24:00 (t=1440) are the same moment and must have the same values"
         )
     return data
 
@@ -153,6 +180,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await _async_update_curve_service(hass, call)
 
     hass.services.async_register(DOMAIN, "update_curve", _handle, schema=UPDATE_CURVE_SCHEMA)
+    async_register_services(hass)
     return True
 
 
@@ -269,7 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     controller.adapt_brightness = _restored_switch_state(hass, entry, "adapt_brightness")
     controller.adapt_color = _restored_switch_state(hass, entry, "adapt_color")
     # ... and the scenario (the HCL switch is set up before the mode select)
-    controller.set_active_mode(_restored_mode(hass, entry))
+    controller.set_active_mode(_restored_mode(hass, entry), announce=False)
 
     # Store shared logic core
     hass.data[DOMAIN][entry.entry_id] = {
@@ -280,113 +308,149 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
-    # Static path and Lovelace resource: once per Home Assistant run
-    if not hass.data.get(DATA_FRONTEND_REGISTERED):
-        hass.data[DATA_FRONTEND_REGISTERED] = True
-        await _async_register_lovelace_resource(hass)
+    # Static path and Lovelace resource (retried after startup if not ready)
+    if not await _async_register_lovelace_resource(hass):
+        async def _retry(_hass: HomeAssistant) -> None:
+            await _async_register_lovelace_resource(hass)
+
+        entry.async_on_unload(async_at_started(hass, _retry))
     
     entry.async_on_unload(entry.add_update_listener(update_listener))
     
-    # 4. Create Setup Issue (Onboarding)
-    # This guides the user to add the dashboard card
-    # Lookup the created sensor entity to be helpful
-    ent_reg = er.async_get(hass)
-    curve_sensor_id = ent_reg.async_get_entity_id("sensor", DOMAIN, f"{entry.entry_id}_curve")
-    
-    # Fallback if registry lookup fails (though it shouldn't if setup was successful)
-    if not curve_sensor_id:
-        normalized_name = entry.title.lower().replace(" ", "_").replace("-", "_")
-        curve_sensor_id = f"sensor.{normalized_name}_curve_data"
-
-    from homeassistant.helpers import issue_registry as ir
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        f"setup_curve_card_{entry.entry_id}", # Unique per instance
-        is_fixable=False,
-        severity=ir.IssueSeverity.WARNING,
-        translation_key="setup_curve_card",
-        translation_placeholders={
-            "entity_id": curve_sensor_id
-        }
-    )
+    # Onboarding: a one-time notification how to add the dashboard card
+    await _async_card_hint(hass, entry)
 
     return True
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers import entity_registry as er
 
-async def _async_register_lovelace_resource(hass: HomeAssistant):
-    """Register the Lovelace card resource if not already present."""
-    # 1. Register Static Path
-    # This maps /hcl_lighting_static/ -> custom_components/hcl_lighting/frontend/
-    path = hass.config.path("custom_components/hcl_lighting/frontend")
-    
-    await hass.http.async_register_static_paths([
-        StaticPathConfig(
-            url_path="/hcl_lighting_static",
-            path=path,
-            cache_headers=False
+CARD_BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
+ONBOARDING_STORE_VERSION = 1
+
+_CARD_HINT = {
+    "de": (
+        "HCL Lighting: Dashboard-Karte hinzufügen",
+        "Die Tageskurve von **{title}** bearbeitest du in der Dashboard-Karte: "
+        "Dashboard bearbeiten → Karte hinzufügen → „HCL Curve Card“ wählen "
+        "(oder manuell `type: custom:hcl-curve-card` mit `entity: {entity_id}`).",
+    ),
+    "en": (
+        "HCL Lighting: add the dashboard card",
+        "Edit the daily curve of **{title}** in the dashboard card: "
+        "edit dashboard → add card → choose “HCL Curve Card” "
+        "(or manually `type: custom:hcl-curve-card` with `entity: {entity_id}`).",
+    ),
+}
+
+
+def _onboarding_store(hass: HomeAssistant) -> Store:
+    return Store(hass, ONBOARDING_STORE_VERSION, f"{DOMAIN}.onboarding")
+
+
+async def _async_card_hint(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Show the card hint once per instance as a dismissible notification.
+
+    Up to 0.6 the hint was a repair issue that could not be dismissed; it is
+    removed, and instances that already had it do not get the hint again.
+    """
+    from homeassistant.components import persistent_notification
+    from homeassistant.helpers import issue_registry as ir
+
+    store = _onboarding_store(hass)
+    data = await store.async_load() or {}
+    shown = set(data.get("shown", []))
+    issue_id = f"setup_curve_card_{entry.entry_id}"
+    had_issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    ir.async_delete_issue(hass, DOMAIN, issue_id)
+    if entry.entry_id in shown:
+        return
+    if not had_issue:
+        entity_id = er.async_get(hass).async_get_entity_id(
+            "sensor", DOMAIN, f"{entry.entry_id}_curve"
+        ) or "sensor.<name>_curve_data"
+        title, message = _CARD_HINT.get((hass.config.language or "en").split("-")[0], _CARD_HINT["en"])
+        persistent_notification.async_create(
+            hass,
+            message.format(title=entry.title, entity_id=entity_id),
+            title=title,
+            notification_id=f"{DOMAIN}_card_{entry.entry_id}",
         )
-    ])
-    
-    # 2. Register Lovelace Resource
+    shown.add(entry.entry_id)
+    await store.async_save({"shown": sorted(shown)})
+
+
+
+async def _async_register_lovelace_resource(hass: HomeAssistant) -> bool:
+    """Serve the card files and keep the dashboard resource current.
+
+    Two independent, idempotent steps: the static path (once per run) and the
+    Lovelace resource (storage mode only; YAML resources are managed by the
+    user). Each step is marked as done only after it succeeded, so a later
+    entry setup or the retry after startup tries again. Returns True when the
+    resource is in place (or managed by the user).
+    """
+    state = hass.data.setdefault(DATA_FRONTEND_REGISTERED, {})
+    if not state.get("static"):
+        path = hass.config.path("custom_components/hcl_lighting/frontend")
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(url_path="/hcl_lighting_static", path=path, cache_headers=False)
+        ])
+        state["static"] = True
+    if state.get("resource"):
+        return True
+
+    # The version of the card URL comes from manifest.json (cache busting)
+    version = (await async_get_integration(hass, DOMAIN)).version
+    full_url = f"{CARD_BASE_URL}?v={version}"
+
+    lovelace_data = hass.data.get("lovelace")
+    resources = None
+    if lovelace_data is not None:
+        resources = getattr(lovelace_data, "resources", None)
+        if resources is None and isinstance(lovelace_data, dict):
+            resources = lovelace_data.get("resources")
+    if resources is None:
+        _LOGGER.debug("Lovelace resources not available yet; HCL card registration is retried")
+        return False
+
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
-    
-    BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
-    # Append version to URL to force cache bust on update
-    FULL_URL = f"{BASE_URL}?v=0.6.1"
-    
-    if "lovelace" not in hass.data:
-        return
 
-    lovelace_data = hass.data["lovelace"]
-    
-    # Handle deprecation: .resources attribute instead of .get("resources")
-    if hasattr(lovelace_data, "resources"):
-        resources = lovelace_data.resources
-    else:
-        # Fallback for older versions (though likely dict access)
-        resources = lovelace_data.get("resources")
-
-    if not resources:
-        return
-
-    # YAML-mode resources are read-only (no create/delete); the user manages
-    # them in configuration.yaml.
+    # YAML-mode resources are read-only; the user manages them in configuration.yaml
     if not isinstance(resources, ResourceStorageCollection):
-        _LOGGER.info("Lovelace resources are in YAML mode; add %s manually", FULL_URL)
-        return
+        _LOGGER.info("Lovelace resources are in YAML mode; add %s as a module resource", full_url)
+        state["resource"] = True
+        return True
 
-    # Storage-mode resources are loaded lazily. Load them before reading or
-    # writing, otherwise existing entries are missed and a write replaces the
-    # stored resource list.
-    await resources.async_get_info()
+    try:
+        # Storage-mode resources are loaded lazily; load them before reading or
+        # writing, otherwise existing entries are missed and a write replaces
+        # the stored resource list.
+        await resources.async_get_info()
+        ours = [r for r in resources.async_items() if str(r.get("url", "")).startswith(CARD_BASE_URL)]
+        current = [r for r in ours if r["url"] == full_url]
+        if current:
+            keep = current[0]
+        elif ours:
+            # Update the existing entry in place (no gap without a resource)
+            keep = ours[0]
+            _LOGGER.info("Updating HCL Curve Card resource to %s", full_url)
+            await resources.async_update_item(keep["id"], {"res_type": "module", "url": full_url})
+        else:
+            _LOGGER.info("Registering HCL Curve Card resource %s", full_url)
+            keep = await resources.async_create_item({"res_type": "module", "url": full_url})
+        for resource in ours:
+            if resource["id"] != keep["id"]:
+                await resources.async_delete_item(resource["id"])
+    except Exception:  # noqa: BLE001 - never break the integration setup
+        _LOGGER.warning(
+            "Could not register the HCL Curve Card resource; add %s as a module resource "
+            "(Settings → Dashboards → Resources) or restart Home Assistant", full_url, exc_info=True,
+        )
+        return False
+    state["resource"] = True
+    return True
 
-    # Check for existing and cleanup old versions
-    found = False
-    # Collect items to delete to avoid modifying while iterating
-    to_delete = []
-    
-    for resource in resources.async_items():
-        if resource["url"].startswith(BASE_URL):
-            if resource["url"] == FULL_URL:
-                found = True
-            else:
-                to_delete.append(resource["id"])
-                
-    # Remove old versions
-    for res_id in to_delete:
-        _LOGGER.info("Removing old HCL Curve Card resource (cache cleanup): %s", res_id)
-        await resources.async_delete_item(res_id)
-        
-    # Create if not found
-    if not found:
-        _LOGGER.info("Auto-registering HCL Curve Card resource: %s", FULL_URL)
-        try:
-            await resources.async_create_item({"res_type": "module", "url": FULL_URL})
-        except Exception as e:
-            _LOGGER.warning("Failed to auto-register HCL Curve Card: %s", e)
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
@@ -394,6 +458,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
         if not hass.data[DOMAIN]:
             hass.data.pop(DOMAIN)
+        async_check_conflicts(hass)
 
     return unload_ok
 
@@ -402,8 +467,15 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Clean up state that outlives reloads when an entry is deleted."""
     hass.data.get(DATA_OVERRIDE_MANAGERS, {}).pop(entry.entry_id, None)
     await _override_store(hass, entry.entry_id).async_remove()
+    from homeassistant.components import persistent_notification
     from homeassistant.helpers import issue_registry as ir
+
     ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
+    persistent_notification.async_dismiss(hass, f"{DOMAIN}_card_{entry.entry_id}")
+    store = _onboarding_store(hass)
+    data = await store.async_load() or {}
+    shown = [e for e in data.get("shown", []) if e != entry.entry_id]
+    await store.async_save({"shown": shown})
 
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
