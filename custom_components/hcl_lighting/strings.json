@@ -33,7 +33,11 @@
                     "max_brightness": "Maximum brightness (%)",
                     "wake_time": "Wake time (activation start)",
                     "midday_time": "Social midday (peak & dip)",
-                    "sleep_time": "Sleep time (wind down)"
+                    "sleep_time": "Sleep time (wind down)",
+                    "brightness_scaling": "Scale to min/max instead of clipping"
+                },
+                "data_description": {
+                    "brightness_scaling": "Off (default): curve values outside min/max are clipped. On: the curve range 10–100 % is mapped onto min–max, the shape of the curve is kept."
                 }
             },
             "behavior": {
@@ -45,13 +49,15 @@
                     "override_timeout": "Return to HCL after manual control (min, 0 = never)",
                     "override_reset_on_off": "Switching a light off ends manual control",
                     "persist_overrides": "Keep manual control across restarts",
-                    "respect_turn_on_values": "Keep values of turn-on commands (scenes, automations, voice)"
+                    "respect_turn_on_values": "Keep values of turn-on commands (scenes, automations, voice)",
+                    "scenario_transition": "Transition when the scenario changes"
                 },
                 "data_description": {
                     "update_interval": "Seconds between two update cycles (default 27).",
                     "transition": "Seconds; must be shorter than the update interval (default 20). Lights without transition support ignore it.",
                     "turn_on_transition": "Seconds (default 0 = immediately).",
-                    "respect_turn_on_values": "If a light is switched on through Home Assistant with its own brightness or colour, HCL leaves it as it is (manual control)."
+                    "respect_turn_on_values": "If a light is switched on through Home Assistant with its own brightness or colour, HCL leaves it as it is (manual control).",
+                    "scenario_transition": "Seconds (default: same as the update transition). Also used when a scenario ends and returns to Auto; may be longer than the update interval."
                 }
             },
             "scenarios": {
@@ -63,7 +69,15 @@
                     "relax_kelvin": "Relax: colour temperature",
                     "cleaning_brightness": "Cleaning: brightness",
                     "cleaning_kelvin": "Cleaning: colour temperature",
-                    "scenario_duration": "Duration of Focus/Relax/Cleaning (min, 0 = until changed)"
+                    "scenario_duration": "Duration of Focus/Relax/Cleaning (min, 0 = until changed)",
+                    "night_light_brightness": "Night light: brightness",
+                    "night_light_kelvin": "Night light: colour temperature",
+                    "scenario_limits": "Limit Focus/Relax/Cleaning to min/max brightness",
+                    "night_end_at_wake": "Sleep and Night light end at the wake time"
+                },
+                "data_description": {
+                    "scenario_limits": "Off (default): scenarios use their own values. On: their brightness stays within min/max. The night light is not limited.",
+                    "night_end_at_wake": "On: Sleep and Night light switch back to Auto at the wake time."
                 }
             }
         },
@@ -95,8 +109,17 @@
                     "focus": "Focus",
                     "relax": "Relax",
                     "cleaning": "Cleaning",
-                    "guest": "Guest"
+                    "guest": "Guest",
+                    "night_light": "Night light"
                 }
+            }
+        },
+        "sensor": {
+            "target_brightness": {
+                "name": "Target brightness"
+            },
+            "target_color_temp": {
+                "name": "Target colour temperature"
             }
         }
     },
@@ -118,12 +141,93 @@
                     "description": "preview/apply: use the points until the next reload; save: store them; revert: reload the saved curve."
                 }
             }
+        },
+        "apply": {
+            "name": "Apply HCL values",
+            "description": "Sends the current HCL values to lights that are on right away. Never switches lights on; lights under manual control are skipped.",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL instance",
+                    "description": "Any entity of the HCL instance (switch, scenario or sensor)."
+                },
+                "lights": {
+                    "name": "Lights",
+                    "description": "Lights of the instance; empty = all."
+                },
+                "transition": {
+                    "name": "Transition",
+                    "description": "Seconds (default: update transition)."
+                },
+                "release_manual_control": {
+                    "name": "Release manual control",
+                    "description": "Also hand lights under manual control back to HCL."
+                }
+            }
+        },
+        "set_manual_control": {
+            "name": "Set manual control",
+            "description": "Pauses HCL for lights (on) or hands them back to HCL (off).",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL instance",
+                    "description": "Any entity of the HCL instance (switch, scenario or sensor)."
+                },
+                "lights": {
+                    "name": "Lights",
+                    "description": "Lights of the instance; empty = all."
+                },
+                "manual_control": {
+                    "name": "Manual control",
+                    "description": "On: HCL pauses the lights; off: they follow HCL again."
+                }
+            }
+        },
+        "set_scenario": {
+            "name": "Set scenario",
+            "description": "Selects a scenario, optionally for a duration.",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL instance",
+                    "description": "Any entity of the HCL instance (switch, scenario or sensor)."
+                },
+                "scenario": {
+                    "name": "Scenario",
+                    "description": "auto, sleep, night_light, focus, relax, cleaning or guest."
+                },
+                "duration": {
+                    "name": "Duration",
+                    "description": "Minutes until the return to Auto (0 = until changed). Empty = as configured."
+                }
+            }
+        },
+        "get_curve": {
+            "name": "Get curve",
+            "description": "Returns the points of the active and the saved curve and the anchor times (e.g. to copy them to another instance with update_curve).",
+            "fields": {
+                "entity_id": {
+                    "name": "HCL instance",
+                    "description": "Any entity of the HCL instance (switch, scenario or sensor)."
+                }
+            }
         }
     },
     "issues": {
-        "setup_curve_card": {
-            "title": "Configure HCL Curve",
-            "description": "To customize your lighting curve, please add the **HCL Curve Card** to your dashboard.\n\n1. Go to your Dashboard\n2. Edit Dashboard -> Add Card\n3. Select 'Manual' and enter:\n\n```yaml\ntype: custom:hcl-curve-card\nentity: {entity_id}\n```"
+        "light_in_multiple_instances": {
+            "title": "Light in several HCL instances",
+            "description": "{light} is controlled by several HCL instances ({instances}) that adapt the same attribute. They overwrite each other. Remove the light from one instance or turn off “Adapt brightness” or “Adapt colour temperature” there."
+        }
+    },
+    "selector": {
+        "scenario": {
+            "options": {
+                "auto": "Auto (curve)",
+                "sleep": "Sleep",
+                "night_light": "Night light",
+                "focus": "Focus",
+                "relax": "Relax",
+                "cleaning": "Cleaning",
+                "guest": "Guest"
+            }
         }
     }
 }

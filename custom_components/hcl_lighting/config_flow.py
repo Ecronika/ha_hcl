@@ -26,6 +26,10 @@ from .const import (
     DEFAULT_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_RESET_ON_OFF, DEFAULT_PERSIST_OVERRIDES,
     DEFAULT_RESPECT_TURN_ON_VALUES, DEFAULT_SCENARIO_DURATION,
     SCENARIO_DEFAULTS, CONFIGURABLE_SCENARIOS, scenario_option_keys,
+    CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING,
+    CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS,
+    CONF_SCENARIO_TRANSITION,
+    CONF_NIGHT_END_AT_WAKE, DEFAULT_NIGHT_END_AT_WAKE,
 )
 
 from homeassistant.const import CONF_NAME
@@ -173,6 +177,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),
                 vol.Optional(CONF_MIN_BRIGHTNESS, default=schema_defaults.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(CONF_MAX_BRIGHTNESS, default=schema_defaults.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+                vol.Optional(CONF_BRIGHTNESS_SCALING, default=schema_defaults.get(CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING)): selector.BooleanSelector(),
             }
         )
 
@@ -211,6 +216,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_UPDATE_INTERVAL, default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): _number(10, 600, unit="s"),
                 vol.Required(CONF_TRANSITION, default=current.get(CONF_TRANSITION, DEFAULT_TRANSITION)): _number(0, 300, unit="s"),
                 vol.Required(CONF_TURN_ON_TRANSITION, default=current.get(CONF_TURN_ON_TRANSITION, DEFAULT_TURN_ON_TRANSITION)): _number(0, 30, unit="s"),
+                # Default: the update transition (behaviour up to 0.6)
+                vol.Required(CONF_SCENARIO_TRANSITION, default=current.get(CONF_SCENARIO_TRANSITION, current.get(CONF_TRANSITION, DEFAULT_TRANSITION))): _number(0, 300, unit="s"),
                 vol.Required(CONF_OVERRIDE_TIMEOUT, default=current.get(CONF_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_TIMEOUT)): _number(0, 1440, unit="min"),
                 vol.Required(CONF_OVERRIDE_RESET_ON_OFF, default=current.get(CONF_OVERRIDE_RESET_ON_OFF, DEFAULT_OVERRIDE_RESET_ON_OFF)): selector.BooleanSelector(),
                 vol.Required(CONF_PERSIST_OVERRIDES, default=current.get(CONF_PERSIST_OVERRIDES, DEFAULT_PERSIST_OVERRIDES)): selector.BooleanSelector(),
@@ -234,4 +241,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             fields[vol.Required(key_b, default=current.get(key_b, SCENARIO_DEFAULTS[mode]["brightness"]))] = _number(1, 100, unit="%")
             fields[vol.Required(key_k, default=current.get(key_k, SCENARIO_DEFAULTS[mode]["kelvin"]))] = _number(2000, 7000, step=50, unit="K")
         fields[vol.Required(CONF_SCENARIO_DURATION, default=current.get(CONF_SCENARIO_DURATION, DEFAULT_SCENARIO_DURATION))] = _number(0, 1440, unit="min")
+        fields[vol.Required(CONF_SCENARIO_LIMITS, default=current.get(CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS))] = selector.BooleanSelector()
+        fields[vol.Required(CONF_NIGHT_END_AT_WAKE, default=current.get(CONF_NIGHT_END_AT_WAKE, DEFAULT_NIGHT_END_AT_WAKE))] = selector.BooleanSelector()
         return self.async_show_form(step_id="scenarios", data_schema=vol.Schema(fields))

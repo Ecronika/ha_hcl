@@ -12,6 +12,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.util.dt import utcnow
@@ -50,8 +51,10 @@ from .const import (
     DEFAULT_TRANSITION,
     DEFAULT_TURN_ON_TRANSITION,
     DEFAULT_RESPECT_TURN_ON_VALUES,
+    CONF_SCENARIO_TRANSITION,
 )
 
+from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
@@ -68,6 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     override_manager = logic_core["override_manager"]
     
     switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
+    logic_core["switch"] = switch
 
     async_add_entities([
         switch,
@@ -122,10 +126,15 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         self._transition = float(options.get(CONF_TRANSITION, DEFAULT_TRANSITION))
         self._turn_on_transition = float(options.get(CONF_TURN_ON_TRANSITION, DEFAULT_TURN_ON_TRANSITION))
+        # Transition when the scenario changes (default: the update transition)
+        self._scenario_transition = float(options.get(CONF_SCENARIO_TRANSITION, self._transition))
         self._respect_turn_on_values = bool(
             options.get(CONF_RESPECT_TURN_ON_VALUES, DEFAULT_RESPECT_TURN_ON_VALUES)
         )
         self._cancel_reresolve = None
+        # Light groups among the targets (their member lists are watched)
+        self._target_groups: set[str] = set()
+        self._group_listener_remove_callback = None
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
@@ -175,6 +184,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
         self._is_on = False # Prevent further updates
+        if self._group_listener_remove_callback:
+            self._group_listener_remove_callback()
+            self._group_listener_remove_callback = None
         if self._timer_remove_callback:
             self._timer_remove_callback()
             self._timer_remove_callback = None
@@ -283,6 +295,16 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         return self._is_on
 
     @property
+    def resolved_targets(self) -> set[str]:
+        """Lights this instance controls (resolved targets)."""
+        return set(self._resolved_targets)
+
+    @property
+    def instance_name(self) -> str:
+        """Name of the HCL instance (config entry title)."""
+        return self._entry.title
+
+    @property
     def device_info(self):
         """Return device info."""
         from homeassistant.helpers.entity import DeviceInfo
@@ -330,9 +352,13 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             self._state_listener_remove_callback = None
 
         # Resolve targets dynamically
+        groups: set[str] = set()
         self._resolved_targets = self.controller.resolve_targets(
-            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
+            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {},
+            groups=groups,
         )
+        self._watch_groups(groups)
+        async_check_conflicts(self.hass)
         
         # Start new listener if targets exist
         if self._resolved_targets and self._state_listener_remove_callback is None:
@@ -342,10 +368,92 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         _LOGGER.debug("HCL Switch targets re-evaluated. Listening to: %s", self._resolved_targets)
 
 
+    @callback
+    def _watch_groups(self, groups: set[str]) -> None:
+        """Re-resolve the targets when the members of a target light group change."""
+        if groups == self._target_groups and self._group_listener_remove_callback:
+            return
+        if self._group_listener_remove_callback:
+            self._group_listener_remove_callback()
+            self._group_listener_remove_callback = None
+        self._target_groups = set(groups)
+        if not groups:
+            return
+
+        @callback
+        def _group_changed(event: Event) -> None:
+            old = event.data.get("old_state")
+            new = event.data.get("new_state")
+            members = lambda st: tuple(st.attributes.get("entity_id") or ()) if st else ()  # noqa: E731
+            if members(old) != members(new):
+                self._handle_registry_updated(event)
+
+        self._group_listener_remove_callback = async_track_state_change_event(
+            self.hass, list(groups), _group_changed
+        )
+
+    async def async_apply(
+        self,
+        lights: list[str] | None,
+        transition: float | None,
+        release_manual_control: bool,
+    ) -> None:
+        """Send the current HCL values now (service hcl_lighting.apply).
+
+        Never switches a light on; lights under manual control are skipped
+        unless release_manual_control is set.
+        """
+        brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
+        if brightness is None:
+            raise ServiceValidationError("HCL sends no values in Guest mode")
+        if not self._resolved_targets:
+            await self._re_evaluate_targets_and_listeners()
+        targets = self._checked_lights(lights)
+        if release_manual_control:
+            for eid in targets:
+                self.override_manager.reset_override(eid)
+        active = [
+            eid for eid in targets
+            if (state := self.hass.states.get(eid)) is not None
+            and state.state == STATE_ON
+            and not self.override_manager.is_overridden(eid)
+        ]
+        for eid in active:
+            self.override_manager.end_reengaging(eid)
+        if active:
+            await self.controller.apply_batch(
+                active, brightness, kelvin,
+                transition=self._transition if transition is None else transition,
+            )
+
+    async def async_set_manual_control(self, lights: list[str] | None, manual_control: bool) -> None:
+        """Pause lights (manual control) or hand them back to HCL (service)."""
+        if not self._resolved_targets:
+            await self._re_evaluate_targets_and_listeners()
+        targets = self._checked_lights(lights)
+        for eid in targets:
+            if manual_control:
+                self.override_manager.set_override(eid)
+            else:
+                self.override_manager.reset_override(eid)
+        if not manual_control:
+            await self._update_hcl()
+
+    def _checked_lights(self, lights: list[str] | None) -> list[str]:
+        if not lights:
+            return sorted(self._resolved_targets)
+        unknown = sorted(set(lights) - self._resolved_targets)
+        if unknown:
+            raise ServiceValidationError(
+                f"Not controlled by this HCL instance: {', '.join(unknown)}"
+            )
+        return list(lights)
+
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         self._is_on = False
         self.async_write_ha_state() # Ensure UI updates immediately
+        async_check_conflicts(self.hass)
         
         if self._timer_remove_callback:
             self._timer_remove_callback()
@@ -428,14 +536,21 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                     ):
                         active_lights.append(eid)
                 
-                # 5. Apply Batch
+                # 5. Apply Batch (a scenario change uses the scenario transition)
+                scenario_change = self.controller.consume_mode_change()
+                transition = self._scenario_transition if scenario_change else self._transition
                 if active_lights:
-                    await self.controller.apply_batch(
+                    updated = await self.controller.apply_batch(
                         active_lights, 
                         self._calculated_brightness, 
                         self._calculated_kelvin,
-                        transition=self._transition
+                        transition=transition
                     )
+                    # The scenario transition may be longer than the update
+                    # interval: the following cycles must not cut it short
+                    if scenario_change and transition > self._transition:
+                        for eid in updated:
+                            self.override_manager.set_reengaging(eid, transition)
             except Exception:
                  _LOGGER.exception("Error in HCL update loop")
 
@@ -550,6 +665,7 @@ class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
     async def _async_set(self, value: bool) -> None:
         setattr(self._controller, self._key, value)
         self.async_write_ha_state()
+        async_check_conflicts(self.hass)
         async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
 
     async def async_turn_on(self, **kwargs: Any) -> None:

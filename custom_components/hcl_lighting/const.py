@@ -60,10 +60,12 @@ MODE_FOCUS = "focus"
 MODE_RELAX = "relax"
 MODE_CLEANING = "cleaning"
 MODE_GUEST = "guest"
+MODE_NIGHT_LIGHT = "night_light"
  
 HCL_MODES = [
     MODE_AUTO,
     MODE_SLEEP,
+    MODE_NIGHT_LIGHT,
     MODE_FOCUS,
     MODE_RELAX,
     MODE_CLEANING,
@@ -79,6 +81,8 @@ SCENARIO_DEFAULTS = {
     MODE_CLEANING: {"brightness": 100, "kelvin": 4000},
     # Sleep logic handles the "0", but we define it data-model wise
     MODE_SLEEP: {"brightness": 0, "kelvin": 2000}, 
+    # Dim warm light for the night; never switches lights on or off
+    MODE_NIGHT_LIGHT: {"brightness": 3, "kelvin": 2200},
     MODE_GUEST: {"brightness": None, "kelvin": None}, 
 }
 
@@ -103,7 +107,26 @@ DEFAULT_RESPECT_TURN_ON_VALUES = False
 CONF_SCENARIO_DURATION = "scenario_duration"        # minutes until Focus/Relax/Cleaning return to Auto, 0 = never
 DEFAULT_SCENARIO_DURATION = 0
 TIMED_MODES = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
-CONFIGURABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
+CONFIGURABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING, MODE_NIGHT_LIGHT)
+# Scenarios that the option "limit scenarios to min/max brightness" applies to
+LIMITABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
+# Scenarios that can end automatically at the wake time
+NIGHT_MODES = (MODE_SLEEP, MODE_NIGHT_LIGHT)
+
+# v0.7.0 Event fired when manual control of a light starts or ends
+EVENT_MANUAL_CONTROL = f"{DOMAIN}_manual_control"
+
+# v0.7.0 Options
+CONF_BRIGHTNESS_SCALING = "brightness_scaling"      # map the curve range 10–100 % onto min–max instead of clipping
+CONF_SCENARIO_LIMITS = "scenario_limits"            # Focus/Relax/Cleaning stay within min/max brightness
+CONF_SCENARIO_TRANSITION = "scenario_transition"    # seconds, transition when the scenario changes
+CONF_NIGHT_END_AT_WAKE = "night_end_at_wake"        # Sleep/Night light return to Auto at the wake time
+DEFAULT_BRIGHTNESS_SCALING = False
+DEFAULT_SCENARIO_LIMITS = False
+DEFAULT_NIGHT_END_AT_WAKE = False
+# Curve brightness range that scaling maps onto min–max (range of the default curve)
+CURVE_SCALE_LOW = 10
+CURVE_SCALE_HIGH = 100
 
 
 def scenario_option_keys(mode: str) -> tuple[str, str]:

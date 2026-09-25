@@ -14,7 +14,6 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import floor_registry as fr
-from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers import label_registry as lr
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -407,7 +406,7 @@ async def test_b13_curve_sensor_exposes_brightness_limits(hass, no_frontend_regi
 
 
 # ---------------------------------------------------------------- B-14
-CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=0.6.1"
+CARD_URL = "/hcl_lighting_static/hcl-curve-card.js?v=" + json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))["version"]
 
 
 async def _register_with_storage(hass, hass_storage, items):
@@ -505,11 +504,12 @@ async def test_b17_expired_override_released_without_command_if_values_match(
 
 
 # ---------------------------------------------------------------- B-20
-def test_b20_english_translation_has_repair_issue_and_name_label():
+def test_b20_english_translation_has_issue_texts_and_name_label():
+    # 0.7.0: the card hint is a notification (Ä-20); the only repair issue is F-08
     for fname in ("en.json", "de.json"):
         data = json.loads((COMPONENT / "translations" / fname).read_text(encoding="utf-8"))
-        assert data["issues"]["setup_curve_card"]["title"], fname
-        assert "{entity_id}" in data["issues"]["setup_curve_card"]["description"], fname
+        issue = data["issues"]["light_in_multiple_instances"]
+        assert issue["title"] and "{light}" in issue["description"], fname
         assert data["config"]["step"]["user"]["data"]["name"], fname
     strings = json.loads((COMPONENT / "strings.json").read_text(encoding="utf-8"))
     assert strings["config"]["step"]["user"]["data"]["name"]
@@ -544,15 +544,21 @@ async def test_b21_update_curve_valid_calls_still_work(hass, no_frontend_registr
     assert entry.options[CONF_CURVE_CONFIG]["points"] == CUSTOM_POINTS
 
 
-# ---------------------------------------------------------------- B-23
-async def test_b23_repair_issue_removed_with_entry(hass, no_frontend_registration):
+# ---------------------------------------------------------------- B-23 / Ä-20
+async def test_b23_card_hint_removed_with_entry(hass, no_frontend_registration):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    issue_id = f"setup_curve_card_{entry.entry_id}"
-    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
+    notification_id = f"{DOMAIN}_card_{entry.entry_id}"
+    assert notification_id in _notifications(hass)
     await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
-    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+    assert notification_id not in _notifications(hass)
+
+
+def _notifications(hass):
+    from homeassistant.components import persistent_notification
+
+    return persistent_notification._async_get_or_create_notifications(hass)
 
 
 async def test_b05_clamped_light_small_change_is_not_a_false_override(hass, berlin, no_frontend_registration):

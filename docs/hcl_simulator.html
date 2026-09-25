@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HCL Lighting Curve Simulator</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js"></script>
     <style>
         :root {
             --bg-color: #1a1a1a;
@@ -111,7 +111,7 @@
 <body>
 
     <div class="container">
-        <h1>HCL Lighting Simulator (0.6.1)</h1>
+        <h1>HCL Lighting Simulator (0.7.0)</h1>
 
         <div class="controls">
             <div class="control-group">
@@ -135,6 +135,9 @@
                 </div>
             </div>
             <div class="control-group">
+                <label><input type="checkbox" id="scaleBri"> Scale to min/max instead of clipping</label>
+            </div>
+            <div class="control-group">
                 <label>Maximum Brightness (%)</label>
                 <div class="slider-container">
                     <input type="range" id="maxBri" min="50" max="100" value="100">
@@ -148,9 +151,10 @@
         </div>
 
         <p class="info-text">
-            This simulation uses the same calculation as the integration (0.6.1): the default curve generated from
+            This simulation uses the same calculation as the integration (0.7.0): the default curve generated from
             the wake, midday and sleep time, <b>PCHIP</b> interpolation, and minimum/maximum brightness as limits
-            (curve values outside the limits are clipped). It shows the default curve only; a curve edited in the
+            (curve values outside the limits are clipped, or with the option “scale” the curve range 10–100 % is
+            mapped onto min–max). It shows the default curve only; a curve edited in the
             dashboard card is not reflected here. Fixed scenarios are not shown.
         </p>
     </div>
@@ -224,7 +228,7 @@
                     + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m1;
             }
 
-            getValues(minutes, minB, maxB) {
+            getValues(minutes, minB, maxB, scale = false) {
                 minB = Math.max(0, Math.min(100, parseInt(minB, 10)));
                 maxB = Math.max(0, Math.min(100, parseInt(maxB, 10)));
                 if (minB >= maxB) { minB = 10; maxB = 100; }
@@ -244,6 +248,7 @@
                 const t = dist / dt;
                 const k = HCLCalculator.hermite(t, dt, curr.k, next.k, slope(prev, curr, next, 'k'), slope(curr, next, next2, 'k'));
                 let b = HCLCalculator.hermite(t, dt, curr.b, next.b, slope(prev, curr, next, 'b'), slope(curr, next, next2, 'b'));
+                if (scale) b = minB + (b - 10) * (maxB - minB) / 90; // curve range 10–100 % → min–max
                 b = Math.max(minB, Math.min(maxB, b)); // the limits clip the curve
                 return {
                     b: Math.max(1, Math.min(100, Pyround(b))),
@@ -270,6 +275,7 @@
             sleep: document.getElementById('sleepTime'),
             minBri: document.getElementById('minBri'),
             maxBri: document.getElementById('maxBri'),
+            scaleBri: document.getElementById('scaleBri'),
             minBriVal: document.getElementById('minBriVal'),
             maxBriVal: document.getElementById('maxBriVal')
         };
@@ -293,7 +299,7 @@
 
             // Calculate every 5 minutes for performance/precision balance
             for (let m = 0; m <= 1440; m += 5) {
-                const res = hcl.getValues(m, inputs.minBri.value, inputs.maxBri.value);
+                const res = hcl.getValues(m, inputs.minBri.value, inputs.maxBri.value, inputs.scaleBri.checked);
 
                 // Format Time Label
                 let h = Math.floor(m / 60);

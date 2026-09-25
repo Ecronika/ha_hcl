@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b1] - 2026-09-25
+Pre-release (beta) of 0.7.0.
+
+### Added
+- **Setpoint sensors**: two new sensors per instance, "Target brightness" (%) and "Target colour temperature" (K). They show the values HCL would send now, including scenario, minimum/maximum and brightness scaling, independent of the adapt switches and of manual control. Guest mode → `unknown`, Sleep → 0 %. No `state_class` (no long-term statistics). Use them e.g. to switch a light on with the HCL values or to pass the values to a KNX/DALI gateway.
+- **Scenario "Night light"**: dim, warm light for the night (default 3 % / 2200 K, configurable). Like all scenarios it never switches lights on or off; lights that are on get the night-light values. Colour lights get the colour temperature through the XY simulation.
+- **Option "Scenarios end at wake time"** (default off): Sleep and Night light return to Auto at the next wake time. A duration given with `set_scenario` takes precedence (0 = until changed).
+- **Option "Scale brightness to minimum/maximum"** (default off = limit as in 0.4–0.6): the curve range 10–100 % is mapped to minimum–maximum instead of being cut off. Card, simulator and sensors show the scaled curve.
+- **Option "Limit scenarios to minimum/maximum"** (default off): Focus, Relax and Cleaning also respect minimum and maximum brightness. Sleep, Night light and Guest are not affected.
+- **Option "Transition on scenario change"** (default: same as the update transition, 20 s): used when the scenario is changed and when a timed scenario ends. Lights are protected from the next update cycle until a longer transition has finished.
+- **Services**:
+  - `hcl_lighting.apply`: send the current HCL values now to all or selected lights of an instance, with optional transition; never switches a light on; lights under manual control are skipped unless `release_manual_control` is set. Not available in Guest mode (error message).
+  - `hcl_lighting.set_manual_control`: pause lights (manual control) or hand them back to HCL.
+  - `hcl_lighting.set_scenario`: set the scenario, optionally with a duration in minutes (0 = no duration).
+  - `hcl_lighting.get_curve`: returns the curve points, the saved points, whether a preview is active and the anchor times as response data (e.g. to copy a curve to another instance with `update_curve`).
+- **Event `hcl_lighting_manual_control`** (`entity_id`, `manual_control`, `instance`, `config_entry_id`) when a light starts or stops being under manual control, and **logbook entries** for it and for scenario changes.
+- **Diagnostics**: download from the integration page (options, targets and their capabilities, manual control, curve).
+- **Repair issue** when the same light is adapted by more than one HCL instance for the same attribute (brightness or colour temperature). It disappears when the conflict is resolved. Splitting one light between two instances via the adapt switches is not reported.
+- **Dashboard card**: visual card editor (instance and view), `view: compact` (status and scenario chips, editor can be expanded), size hints for Sections dashboards (`getGridOptions`), a "Night light" chip, presets "Default with quiet night" and "Default without midday dip", and the "now" values from the new setpoint sensors.
+
+### Changed
+- **Card hint after setup**: the hint to add the dashboard card is a one-time notification instead of a repair issue. The existing "setup curve card" repair issue is removed on update; installations that had it get no new notification.
+- **Dashboard card**:
+  - The curve can be edited in every scenario; a hint says that the curve only applies in Auto.
+  - Times follow the time format of the Home Assistant profile (12/24 h), numbers its number format.
+  - In Sections dashboards the card now reports its size; the full view still uses the full width.
+  - Scenario chips show the confirmed state of the scenario select (with a pending state while switching) and are announced as toggle buttons.
+  - Chart.js is loaded with a fixed version by the card itself; a different Chart.js version loaded by another card is no longer used.
+- **Group members**: when the members of a targeted light group change (its `entity_id` attribute), the lights are resolved again, also without a registry event.
+- **Card resource**: the dashboard resource is updated in place on version changes (one entry with `?v=<version>`); if Lovelace is not ready at startup, registration is retried once Home Assistant has started.
+- **Simulator** (`docs/hcl_simulator.html`): Chart.js pinned to 4.5.1, option for brightness scaling.
+
+### Fixed
+- **Midnight in curves**: a point at 24:00 is treated as 00:00. Curves containing both 00:00 and 24:00 keep the 00:00 point (warning in the log); `update_curve` rejects contradictory values for 00:00 and 24:00.
+- **Dashboard card, unsaved changes**: updates from Home Assistant (another browser, a second card, a service call) no longer overwrite an unsaved draft; the card shows a hint with "Load that curve" instead. "Revert" only shows the saved curve after Home Assistant has confirmed it.
+- **Dashboard card, input**: empty or invalid numbers no longer set a point to 0; the point stays unchanged and the field shows a hint.
+- **Dashboard card, dragging**: a drag interrupted by the browser (pointer cancel, lost capture, removed card) ends cleanly instead of leaving the point attached to the pointer.
+- **Dashboard card, states**: missing, unavailable or invalid sensor data shows a message instead of an empty or broken chart.
+- **Dashboard card, night checks**: times in warnings are shown modulo 24 h (00:15 instead of 24:15); warnings spanning midnight are merged.
+- **Dashboard card, layout**: usable from 240 px width, time axis per chart, text contrast in light and dark theme.
+- **Dashboard card in Masonry dashboards** could stay empty when the dashboard moved the card while it was loading.
+
+### Removed
+- `docs/hcl_dashboard.html` (outdated demo, not a Home Assistant card).
+
+### Not included
+- RGBWW lights keep getting the colour temperature through the XY simulation. Sending `color_temp_kelvin` and letting Home Assistant convert it was checked and dropped: Home Assistant does not expose the white-channel range of such lights and produces invalid (negative) channel values outside it.
+
 ## [0.6.1] - 2026-09-25
 ### Fixed
 - **Smooth return after manual control**: when the manual-control time has expired, the light returns to HCL with the documented 3-minute transition. Before, the next normal update (same cycle and the following ones) overwrote it with the 20-s update transition. A scenario change, a curve preview/save or switching the light off ends the smooth return early.
