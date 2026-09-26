@@ -163,11 +163,10 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 self._pending.update(user_input)
                 return await self.async_step_behavior()
 
-        # Compatibility wrapper for older HA versions
-        # Use current options/data as defaults if user_input is None
+        # Current options/data as defaults if user_input is None
         schema_defaults = user_input or self._current()
         
-        # Manually inject defaults into base schema for fallback compatibility
+        # Defaults in the schema; suggested values below show the current settings
         base_schema = vol.Schema(
             {
                 vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET) or {}): selector.TargetSelector(
@@ -181,16 +180,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
 
-        if hasattr(self, "add_suggested_values_to_schema"):
-            try:
-                # Provide the defaults object to HA helper
-                data_schema = self.add_suggested_values_to_schema(base_schema, schema_defaults)
-            except Exception:
-                _LOGGER.exception("Failed to apply suggested schema defaults, falling back to base schema")
-                data_schema = base_schema
-        else:
-            # Fallback for old HA: use the base_schema which already has defaults injected manually above
-            data_schema = base_schema
+        # Available in every supported Home Assistant version (2024.7+); an
+        # error here is a real bug and is not hidden behind a fallback.
+        data_schema = self.add_suggested_values_to_schema(base_schema, schema_defaults)
 
         return self.async_show_form(
             step_id="init",

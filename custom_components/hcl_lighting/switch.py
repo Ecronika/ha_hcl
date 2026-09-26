@@ -11,7 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback, Event
+from homeassistant.core import Context, HomeAssistant, callback, Event
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
@@ -119,8 +119,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self.override_manager = override_manager
         self.controller = controller
 
-        # Concurrency Guard
+        # Concurrency guard: one light update at a time (periodic cycle,
+        # requested update or apply service). The timer skips a cycle while
+        # the lock is held; requested updates wait and are coalesced.
         self._update_lock = asyncio.Lock()
+        self._update_requested = False
+        self._request_context: Context | None = None
 
         options = entry.options
         self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
@@ -200,7 +204,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         if not self._is_on:
             return
         await self._re_evaluate_targets_and_listeners()
-        await self._update_hcl()
+        await self.async_request_update()
 
     @callback
     def _handle_overrides_changed(self) -> None:
@@ -226,7 +230,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             old_targets = set(self._resolved_targets)
             await self._re_evaluate_targets_and_listeners()
             if self._resolved_targets != old_targets:
-                await self._update_hcl()
+                await self.async_request_update()
 
         self._cancel_reresolve = async_call_later(self.hass, 2, _reresolve)
 
@@ -283,11 +287,11 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     # async_options_updated is handled by reload in __init__.py
 
     @callback
-    def _handle_global_update(self):
+    def _handle_global_update(self, context: Context | None = None):
         """Handle global update signal (scenario change, curve preview/apply/save)."""
         # New target values take precedence over a smooth return still running
         self.override_manager.end_reengaging()
-        self.hass.async_create_task(self._update_hcl())
+        self.hass.async_create_task(self.async_request_update(context))
 
     @property
     def is_on(self) -> bool:
@@ -341,8 +345,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         
         await self._re_evaluate_targets_and_listeners()
 
-        # Immediate update
-        await self._update_hcl()
+        # Immediate update (linked to the request that switched HCL on)
+        await self.async_request_update(self._context)
 
     async def _re_evaluate_targets_and_listeners(self) -> None:
         """Re-evaluate target entities and update state listeners."""
@@ -397,32 +401,41 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         lights: list[str] | None,
         transition: float | None,
         release_manual_control: bool,
+        context: Context | None = None,
     ) -> None:
         """Send the current HCL values now (service hcl_lighting.apply).
 
         Never switches a light on; lights under manual control are skipped
-        unless release_manual_control is set.
+        unless release_manual_control is set. Runs after an update cycle that
+        is still sending, so the newer request is the one that is sent last.
         """
-        brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
-        if brightness is None:
+        if self.controller.calculate_target_values(dt_util.now())[0] is None:
             raise ServiceValidationError("HCL sends no values in Guest mode")
         if not self._resolved_targets:
             await self._re_evaluate_targets_and_listeners()
         targets = self._checked_lights(lights)
-        if release_manual_control:
-            for eid in targets:
-                self.override_manager.reset_override(eid)
-        active = [
-            eid for eid in targets
-            if (state := self.hass.states.get(eid)) is not None
-            and state.state == STATE_ON
-            and not self.override_manager.is_overridden(eid)
-        ]
-        for eid in active:
-            self.override_manager.end_reengaging(eid)
-        if active:
+        async with self._update_lock:
+            # Values at the time of sending (the wait may have taken a while)
+            brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
+            if brightness is None:
+                raise ServiceValidationError("HCL sends no values in Guest mode")
+            if release_manual_control:
+                for eid in targets:
+                    self.override_manager.reset_override(eid)
+            active = [
+                eid for eid in targets
+                if (state := self.hass.states.get(eid)) is not None
+                and state.state == STATE_ON
+                and not self.override_manager.is_overridden(eid)
+            ]
+            for eid in active:
+                self.override_manager.end_reengaging(eid)
+            if not active:
+                return
             transition = self._transition if transition is None else float(transition)
-            updated = await self.controller.apply_batch(active, brightness, kelvin, transition=transition)
+            updated = await self.controller.apply_batch(
+                active, brightness, kelvin, transition=transition, parent=context
+            )
             # A transition longer than the update transition must not be cut
             # short by the next update cycles (like a long scenario transition);
             # a scenario change, a new apply or switching the light off ends it.
@@ -430,7 +443,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 for eid in updated:
                     self.override_manager.set_reengaging(eid, transition)
 
-    async def async_set_manual_control(self, lights: list[str] | None, manual_control: bool) -> None:
+    async def async_set_manual_control(
+        self, lights: list[str] | None, manual_control: bool, context: Context | None = None
+    ) -> None:
         """Pause lights (manual control) or hand them back to HCL (service)."""
         if not self._resolved_targets:
             await self._re_evaluate_targets_and_listeners()
@@ -441,7 +456,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             else:
                 self.override_manager.reset_override(eid)
         if not manual_control:
-            await self._update_hcl()
+            await self.async_request_update(context)
 
     def _checked_lights(self, lights: list[str] | None) -> list[str]:
         if not lights:
@@ -467,96 +482,127 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
 
-    async def _update_hcl(self, now=None):
-        """Main HCL Update Loop."""
+        # The member lists of target groups are watched only while HCL is on
+        self._watch_groups(set())
+        self._cancel_pending_reresolve()
+
+    async def async_request_update(self, context: Context | None = None) -> None:
+        """Run an update now (scenario change, curve preview/revert, release of
+        manual control, targets changed, HCL switched on).
+
+        Unlike the periodic timer, a request is never dropped: if a cycle is
+        still sending, the request waits and runs afterwards. Requests that
+        arrive while waiting are combined into one cycle with the newest values.
+        """
         if not self._is_on:
-             return
-             
-        # prevent reentrancy
-        if self._update_lock.locked():
-             _LOGGER.warning("Update loop skipped: Previous cycle still running!")
-             return
-
+            return
+        self._update_requested = True
+        if context is not None:
+            self._request_context = context
         async with self._update_lock:
-            try:
-                # 1. Calculate Target Values (Delegate to Controller Priority Stack)
-                brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
-                
-                # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
-                if brightness is None and kelvin is None:
-                    # GUEST MODE: no updates, no re-engagement
-                    self.async_write_ha_state()
-                    return
+            if not self._update_requested:
+                return  # a cycle that started after this request covered it
+            await self._run_cycle()
 
-                # Special Case: Sleep Mode handling (If brightness is 0)
-                # calculate_target_values returns 0, 2000 for sleep
-                is_sleep = (brightness == 0)
-                
-                # Update State for UI/Debugging
-                self._calculated_brightness = brightness
-                self._calculated_kelvin = kelvin
-                _LOGGER.debug(
-                    "HCL Update Cycle: Target B=%s%%, K=%sK", 
-                    self._calculated_brightness, self._calculated_kelvin
-                )
+    async def _update_hcl(self, now=None):
+        """Periodic HCL update (timer)."""
+        if not self._is_on:
+            return
+        # A cycle, a requested update or an apply is still sending: the next
+        # tick follows anyway, requested updates are not affected.
+        if self._update_lock.locked():
+            _LOGGER.debug("Periodic update skipped: previous update still running")
+            return
+        async with self._update_lock:
+            await self._run_cycle()
+
+    async def _run_cycle(self) -> None:
+        """One update of all lights (caller holds the update lock)."""
+        self._update_requested = False
+        parent = self._request_context
+        self._request_context = None
+        if not self._is_on:
+            return
+        try:
+            # 1. Calculate Target Values (Delegate to Controller Priority Stack)
+            brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
+            
+            # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
+            if brightness is None and kelvin is None:
+                # GUEST MODE: no updates, no re-engagement
                 self.async_write_ha_state()
+                return
 
-                # 2. Resolve Targets (Cached)
-                all_lights = self._resolved_targets
-                
-                # Prune cache to avoid memory leaks (Both Controller and Override Manager)
-                self.controller.prune_cache(all_lights)
-                self.override_manager.prune_stale_entities(all_lights)
-                
-                # Lights that are off are no longer under manual control
-                # (covers switch-offs HCL did not see, e.g. while it was off)
-                if self.override_manager.reset_on_off:
-                    for eid in self.override_manager.overridden_entities():
-                        eid_state = self.hass.states.get(eid)
-                        if eid_state is not None and eid_state.state == STATE_OFF:
-                            self.override_manager.reset_override(eid)
+            # Special Case: Sleep Mode handling (If brightness is 0)
+            # calculate_target_values returns 0, 2000 for sleep
+            is_sleep = (brightness == 0)
+            
+            # Update State for UI/Debugging
+            self._calculated_brightness = brightness
+            self._calculated_kelvin = kelvin
+            _LOGGER.debug(
+                "HCL Update Cycle: Target B=%s%%, K=%sK", 
+                self._calculated_brightness, self._calculated_kelvin
+            )
+            self.async_write_ha_state()
 
-                # 3. Check for Re-engagements (Expired Overrides)
-                expired_overrides = self.override_manager.get_pending_reengagements()
-                for eid in expired_overrides:
-                    # Only lights that are still on are brought back to HCL;
-                    # re-engaging must never switch a light on.
+            # 2. Resolve Targets (Cached)
+            all_lights = self._resolved_targets
+            
+            # Prune cache to avoid memory leaks (Both Controller and Override Manager)
+            self.controller.prune_cache(all_lights)
+            self.override_manager.prune_stale_entities(all_lights)
+            
+            # Lights that are off are no longer under manual control
+            # (covers switch-offs HCL did not see, e.g. while it was off)
+            if self.override_manager.reset_on_off:
+                for eid in self.override_manager.overridden_entities():
                     eid_state = self.hass.states.get(eid)
-                    if eid in all_lights and eid_state and eid_state.state == STATE_ON:
-                        await self.controller.reengage_light(
-                            eid, self._calculated_brightness, self._calculated_kelvin
-                        )
+                    if eid_state is not None and eid_state.state == STATE_OFF:
+                        self.override_manager.reset_override(eid)
 
-                # 4. Filter Active Lights (not overridden, not in their smooth return)
-                active_lights = []
-                for eid in all_lights:
-                    state = self.hass.states.get(eid)
-                    # Only control lights that are currently ON
-                    if (
-                        state
-                        and state.state == STATE_ON
-                        and not self.override_manager.is_overridden(eid)
-                        and not self.override_manager.is_reengaging(eid)
-                    ):
-                        active_lights.append(eid)
-                
-                # 5. Apply Batch (a scenario change uses the scenario transition)
-                scenario_change = self.controller.consume_mode_change()
-                transition = self._scenario_transition if scenario_change else self._transition
-                if active_lights:
-                    updated = await self.controller.apply_batch(
-                        active_lights, 
-                        self._calculated_brightness, 
-                        self._calculated_kelvin,
-                        transition=transition
+            # 3. Check for Re-engagements (Expired Overrides)
+            expired_overrides = self.override_manager.get_pending_reengagements()
+            for eid in expired_overrides:
+                # Only lights that are still on are brought back to HCL;
+                # re-engaging must never switch a light on.
+                eid_state = self.hass.states.get(eid)
+                if eid in all_lights and eid_state and eid_state.state == STATE_ON:
+                    await self.controller.reengage_light(
+                        eid, self._calculated_brightness, self._calculated_kelvin, parent=parent
                     )
-                    # The scenario transition may be longer than the update
-                    # interval: the following cycles must not cut it short
-                    if scenario_change and transition > self._transition:
-                        for eid in updated:
-                            self.override_manager.set_reengaging(eid, transition)
-            except Exception:
-                 _LOGGER.exception("Error in HCL update loop")
+
+            # 4. Filter Active Lights (not overridden, not in their smooth return)
+            active_lights = []
+            for eid in all_lights:
+                state = self.hass.states.get(eid)
+                # Only control lights that are currently ON
+                if (
+                    state
+                    and state.state == STATE_ON
+                    and not self.override_manager.is_overridden(eid)
+                    and not self.override_manager.is_reengaging(eid)
+                ):
+                    active_lights.append(eid)
+            
+            # 5. Apply Batch (a scenario change uses the scenario transition)
+            scenario_change = self.controller.consume_mode_change()
+            transition = self._scenario_transition if scenario_change else self._transition
+            if active_lights:
+                updated = await self.controller.apply_batch(
+                    active_lights, 
+                    self._calculated_brightness, 
+                    self._calculated_kelvin,
+                    transition=transition,
+                    parent=parent,
+                )
+                # The scenario transition may be longer than the update
+                # interval: the following cycles must not cut it short
+                if scenario_change and transition > self._transition:
+                    for eid in updated:
+                        self.override_manager.set_reengaging(eid, transition)
+        except Exception:
+             _LOGGER.exception("Error in HCL update loop")
 
     async def _handle_light_state_change(self, event: Event) -> None:
         """Handle state changes of monitored lights."""
@@ -670,7 +716,7 @@ class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
         setattr(self._controller, self._key, value)
         self.async_write_ha_state()
         async_check_conflicts(self.hass)
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._context)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Let HCL adapt this attribute."""

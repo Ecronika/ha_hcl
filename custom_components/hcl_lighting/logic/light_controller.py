@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import time
@@ -121,12 +122,19 @@ class HCLLightController:
             context.parent_id is not None and context.parent_id in self._own_contexts
         )
 
-    def _new_context(self) -> Context:
+    def _new_context(self, parent: Context | None = None) -> Context:
+        """New context for an HCL command.
+
+        parent: context of the request that caused the command (service call,
+        scenario change). It is linked as parent_id, like automations and
+        scripts do, so logbook and traces show the origin; the command itself
+        runs with HCL's permissions (no user_id).
+        """
         now = time.monotonic()
         # Contexts are only needed while the resulting state changes arrive
         for ctx_id in [c for c, t in self._own_contexts.items() if now - t > 300]:
             del self._own_contexts[ctx_id]
-        context = Context()
+        context = Context(parent_id=parent.id if parent is not None else None)
         self._own_contexts[context.id] = now
         return context
 
@@ -149,14 +157,26 @@ class HCLLightController:
             return None
         return data
 
-    async def _async_call(self, domain: str, service: str, data: dict[str, Any], blocking: bool = False):
-        """Send a light command with an HCL context (only the adapted attributes)."""
+    async def _async_call(
+        self,
+        domain: str,
+        service: str,
+        data: dict[str, Any],
+        blocking: bool = False,
+        parent: Context | None = None,
+    ) -> bool:
+        """Send a light command with an HCL context (only the adapted attributes).
+
+        Returns True when a command was sent, False when nothing was left to
+        send. Errors of the command are raised to the caller.
+        """
         data = self._filter_service_data(data)
         if data is None:
-            return
+            return False
         await self.hass.services.async_call(
-            domain, service, data, blocking=blocking, context=self._new_context()
+            domain, service, data, blocking=blocking, context=self._new_context(parent)
         )
+        return True
         
     def set_active_mode(self, mode: str, announce: bool = True) -> None:
         """Set the active scenario mode.
@@ -252,142 +272,163 @@ class HCLLightController:
             _LOGGER.debug("Pruned %d stale entities from capability cache", len(to_remove))
 
     async def apply_batch(
-        self, 
-        lights: list[str], 
-        brightness: int, 
-        kelvin: int, 
+        self,
+        lights: list[str],
+        brightness: int,
+        kelvin: int,
         transition: float | None = None,
-        fast_mode: bool = False
-    ):
-        """Apply settings to a batch of lights (Parallel Execution).
+        fast_mode: bool = False,
+        parent: Context | None = None,
+        on_failure: Callable[[list[str]], None] | None = None,
+    ) -> list[str]:
+        """Apply settings to a batch of lights (parallel commands).
 
-        Returns the lights that received a command.
+        Returns the lights whose command succeeded. Lights whose command failed
+        get their previous tracking values back, so the next state report is
+        not taken for manual control.
+
+        fast_mode: the commands run in the background (the caller does not
+        wait); the lights a command was sent to are returned, and on_failure
+        is called with the lights of a command that failed later.
         """
         if not lights:
             return []
 
-        # 1. Update Tracking (Immediate to prevent Race Conditions)
-        # Delegate to OverrideManager
-        if transition is None:
-            # Default transition not defined here? Passed from switch.py usually.
-            # If None, assume 0 or handle upstream.
-            transition_val = 0
-        else:
-            transition_val = transition
+        transition_val = 0 if transition is None else transition
 
-        # 2. Filter & Grouping
-        lights_ct = []
-        lights_dim = []
-        lights_xy_sim = []
+        lights_ct: list[str] = []
+        lights_dim: list[str] = []
+        lights_xy_sim: list[str] = []
+        previous: dict[str, tuple[int, int] | None] = {}
 
-        # -- Capability Resolution & Threshold Check --
+        # -- Capability resolution & threshold check --
         for entity_id in lights:
-            # Check Thresholds to avoid redundant traffic
+            # Check thresholds to avoid redundant traffic
             if not self._needs_update(entity_id, brightness, kelvin):
-                 continue
-            
-            # NOTE: Override Tracking has been moved inside the capability check blocks
-            # below to ensure we only ignore-window lights that ACTUALLY get an update command.
-
+                continue
             cap_type = self._get_capability(entity_id, kelvin)
             if cap_type == "ct":
                 lights_ct.append(entity_id)
-                self.override_manager.set_last_set_values(
-                    entity_id, brightness, self.reachable_kelvin(entity_id, kelvin)
-                )
-                self.override_manager.set_ignore_window(entity_id, transition_val)
+                tracked_kelvin = self.reachable_kelvin(entity_id, kelvin)
             elif cap_type == "xy_sim":
                 lights_xy_sim.append(entity_id)
-                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
-                self.override_manager.set_ignore_window(entity_id, transition_val)
+                tracked_kelvin = kelvin
             elif cap_type == "dim":
                 lights_dim.append(entity_id)
-                self.override_manager.set_last_set_values(entity_id, brightness, kelvin)
-                self.override_manager.set_ignore_window(entity_id, transition_val)
+                tracked_kelvin = kelvin
+            else:
+                continue
+            # Tracking is set before sending (state reports may arrive at once);
+            # a failed command restores the previous values.
+            previous[entity_id] = self.override_manager.get_last_set_values(entity_id)
+            self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
+            self.override_manager.set_ignore_window(entity_id, transition_val)
 
-        # 3. Task Collection for Parallel Execution
-        tasks = []
         smart_transition = self.config_entry.options.get(CONF_SMART_TRANSITION, False)
-        
-        # Helper wrappers
-        async def _smart_xy_single(entity_id, x, y):
-             await self._apply_smart_xy_single(entity_id, x, y, brightness, transition_val)
-        
-        async def _smart_ct_single(entity_id):
-             await self._apply_smart_ct_single(entity_id, kelvin, brightness, transition_val)
+        bulk = transition_val == 0 or not smart_transition
+        # (lights of the command, command)
+        jobs: list[tuple[list[str], Awaitable[bool]]] = []
 
-        # Group 1: XY Simulation
+        # Group 1: XY simulation
         if lights_xy_sim:
-            rgb = color_temperature_to_rgb(kelvin)
-            x, y = color_RGB_to_xy(*rgb)
-            
-            if transition_val == 0 or not smart_transition:
-                # Bulk Update
-                tasks.append(self._async_call(
+            x, y = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+            if bulk:
+                jobs.append((lights_xy_sim, self._async_call(
                     "light", "turn_on",
                     {"entity_id": lights_xy_sim, "brightness_pct": brightness, "xy_color": (x, y), "transition": transition_val},
-                    blocking=True
-                ))
+                    blocking=True, parent=parent,
+                )))
             else:
-                # Parallel Smart Transitions
                 for eid in lights_xy_sim:
-                    tasks.append(_smart_xy_single(eid, x, y))
+                    jobs.append(([eid], self._apply_smart_xy_single(eid, x, y, brightness, transition_val, parent)))
 
-        # Group 2: Standard CT
+        # Group 2: native colour temperature, each light gets the value it can
+        # reach (lights with different ranges get separate commands)
         if lights_ct:
-            if transition_val == 0 or not smart_transition:
-                # Bulk Update
-                tasks.append(self._async_call(
-                    "light", "turn_on",
-                    {"entity_id": lights_ct, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": transition_val},
-                    blocking=True
-                ))
-            else:
-                # Parallel Smart Transitions
-                for eid in lights_ct:
-                    tasks.append(_smart_ct_single(eid))
+            by_kelvin: dict[int, list[str]] = {}
+            for eid in lights_ct:
+                by_kelvin.setdefault(self.reachable_kelvin(eid, kelvin), []).append(eid)
+            for ct_kelvin, eids in by_kelvin.items():
+                if bulk:
+                    jobs.append((eids, self._async_call(
+                        "light", "turn_on",
+                        {"entity_id": eids, "brightness_pct": brightness, "color_temp_kelvin": ct_kelvin, "transition": transition_val},
+                        blocking=True, parent=parent,
+                    )))
+                else:
+                    for eid in eids:
+                        jobs.append(([eid], self._apply_smart_ct_single(eid, ct_kelvin, brightness, transition_val, parent)))
 
-        # Group 3: Dimmer Only
+        # Group 3: dimmer only
         if lights_dim:
-            tasks.append(self._async_call(
+            jobs.append((lights_dim, self._async_call(
                 "light", "turn_on",
                 {"entity_id": lights_dim, "brightness_pct": brightness, "transition": transition_val},
-                blocking=True
-            ))
+                blocking=True, parent=parent,
+            )))
 
-        # 4. EXECUTE ALL IN PARALLEL
-        updated = lights_ct + lights_xy_sim + lights_dim
-        if tasks:
-            if fast_mode:
-                # Fire-and-forget: schedule all tasks without waiting
-                for t in tasks:
-                    self.hass.async_create_task(t)
-            else:
+        if not jobs:
+            return []
 
-                # Standard Mode: Wait for all to finish, catch individual failures
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for i, res in enumerate(results):
-                    if isinstance(res, BaseException):
-                        _LOGGER.error(
-                            "Batch light update task %d/%d failed: %s", 
-                            i + 1, len(results), res, 
-                            exc_info=res
-                        )
+        if fast_mode:
+            attempted: list[str] = []
+            for eids, job in jobs:
+                task = self.hass.async_create_task(job)
+                task.add_done_callback(
+                    lambda t, eids=eids: self._background_result(t, eids, previous, on_failure)
+                )
+                attempted.extend(eids)
+            return attempted
+
+        results = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
+        updated: list[str] = []
+        for (eids, _job), result in zip(jobs, results):
+            if result is True:
+                updated.extend(eids)
+                continue
+            if isinstance(result, BaseException):
+                _LOGGER.error("Light update for %s failed: %s", ", ".join(eids), result, exc_info=result)
+            self._restore_tracking(eids, previous)
         return updated
 
-    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None, transition: float = 0):
-        """Ultra-fast HCL application for turn-on events."""
+    def _restore_tracking(self, eids: list[str], previous: dict[str, tuple[int, int] | None]) -> None:
+        """A command was not sent or failed: the light keeps its previous values."""
+        for eid in eids:
+            self.override_manager.restore_last_set_values(eid, previous.get(eid))
+
+    def _background_result(
+        self,
+        task: asyncio.Task,
+        eids: list[str],
+        previous: dict[str, tuple[int, int] | None],
+        on_failure: Callable[[list[str]], None] | None,
+    ) -> None:
+        """Result of a command sent in fast mode."""
+        if task.cancelled():
+            error: BaseException | None = asyncio.CancelledError()
+        else:
+            error = task.exception()
+        if error is None and task.result() is True:
+            return
+        if error is not None:
+            _LOGGER.error("Light update for %s failed: %s", ", ".join(eids), error, exc_info=error)
+        self._restore_tracking(eids, previous)
+        if on_failure is not None:
+            on_failure(eids)
+
+    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None, transition: float = 0) -> bool:
+        """Ultra-fast HCL application for turn-on events (True if a command was sent)."""
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
         
         # Use passed state object or fallback to lookup (performance optimization)
         state = state_obj or self.hass.states.get(entity_id)
         
         if state is None:
-            return
+            return False
 
         if self._is_group(entity_id, state):
              _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
-             return
+             return False
 
         # Redundant tracking removed (handled in switch.py synchronously)
         
@@ -400,7 +441,7 @@ class HCLLightController:
         }
         
         if cap_type == "ct":
-             service_data["color_temp_kelvin"] = kelvin
+             service_data["color_temp_kelvin"] = self.reachable_kelvin(entity_id, kelvin, state)
         elif cap_type == "xy_sim":
             rgb = color_temperature_to_rgb(kelvin)
             x, y = color_RGB_to_xy(*rgb)
@@ -408,17 +449,19 @@ class HCLLightController:
         elif cap_type == "dim":
             pass
         else:
-            return # onoff or unknown
+            return False  # onoff or unknown
 
         # Execute immediately in current task context (no double-scheduling)
-        await self._async_call(
+        return await self._async_call(
             "light", 
             "turn_on",
             service_data,
             blocking=True
         )
 
-    async def reengage_light(self, entity_id: str, target_brightness: int, target_kelvin: int):
+    async def reengage_light(
+        self, entity_id: str, target_brightness: int, target_kelvin: int, parent: Context | None = None
+    ) -> None:
         """Smoothly re-engage a light back to HCL values."""
         _LOGGER.debug("Re-engaging %s (Smooth Transition)", entity_id)
         
@@ -436,15 +479,22 @@ class HCLLightController:
         
         duration = REENGAGE_STEPS * REENGAGE_INTERVAL_SECONDS
         
-        updated = await self.apply_batch(
+        def _failed(eids: list[str]) -> None:
+            # The command failed: the normal updates take the light back
+            for eid in eids:
+                self.override_manager.end_reengaging(eid)
+
+        sent = await self.apply_batch(
             [entity_id], 
             target_brightness, 
             target_kelvin, 
             transition=duration,
-            fast_mode=True # Don't block main loop
+            fast_mode=True,  # Don't block main loop
+            parent=parent,
+            on_failure=_failed,
         )
         # Normal update cycles must not cut the smooth transition short
-        if entity_id in updated:
+        if entity_id in sent:
             self.override_manager.set_reengaging(entity_id, duration)
 
     def capability_for(self, entity_id: str, kelvin: int) -> str:
@@ -694,66 +744,68 @@ class HCLLightController:
         return kelvin
 
     def resolve_targets(self, target_config: dict[str, Any], groups: set[str] | None = None) -> set[str]:
-        """Resolve target config to a set of entity IDs.
+        """Resolve target config to a set of light entity IDs.
+
+        Follows Home Assistant's own target resolution (service calls):
+        - entities given directly are always used;
+        - entities reached through a device, area, floor or label are skipped
+          when they are hidden or a config/diagnostic entity (entity_category),
+          e.g. the status LED of a wall switch;
+        - an area includes the entities of its devices only if the entity has
+          no area of its own (an entity assigned to another area is not part
+          of the device's area);
+        - disabled entities are not included.
+        Light groups are expanded to their members afterwards.
 
         groups (optional) collects the light groups that were expanded, so the
         caller can watch their member lists.
         """
-        # Extracted directly from old switch.py
-        entity_ids = set()
         er_registry = er.async_get(self.hass)
         dr_registry = dr.async_get(self.hass)
-        
-        # 1. Direct Entities
-        if "entity_id" in target_config:
-            ents = target_config["entity_id"]
-            if isinstance(ents, str): ents = [ents]
-            entity_ids.update(ents)
-            
-        # 2. Devices
-        if "device_id" in target_config:
-            devices = target_config["device_id"]
-            if isinstance(devices, str): devices = [devices]
-            for device_id in devices:
-                for entry in er.async_entries_for_device(er_registry, device_id):
-                     if entry.domain == "light":
-                        entity_ids.add(entry.entity_id)
-
-        # 3. Floors and labels (offered by the target selector) expand to
-        #    areas, devices and entities
-        areas = target_config.get("area_id") or []
-        if isinstance(areas, str): areas = [areas]
-        areas = list(areas)
         ar_registry = ar.async_get(self.hass)
 
-        floors = target_config.get("floor_id") or []
-        if isinstance(floors, str): floors = [floors]
-        for floor_id in floors:
-            areas.extend(a.id for a in ar.async_entries_for_floor(ar_registry, floor_id))
+        def as_list(key: str) -> list[str]:
+            value = target_config.get(key) or []
+            return [value] if isinstance(value, str) else list(value)
 
-        labels = target_config.get("label_id") or []
-        if isinstance(labels, str): labels = [labels]
-        for label_id in labels:
+        def is_primary_light(entry: er.RegistryEntry) -> bool:
+            return entry.domain == "light" and entry.hidden_by is None and entry.entity_category is None
+
+        # 1. Entities given directly
+        entity_ids: set[str] = set(as_list("entity_id"))
+
+        device_ids: set[str] = set(as_list("device_id"))
+        area_ids: set[str] = set(as_list("area_id"))
+
+        # 2. Labels: labelled entities (not hidden), devices and areas
+        for label_id in as_list("label_id"):
             for entry in er.async_entries_for_label(er_registry, label_id):
-                if entry.domain == "light":
+                if entry.domain == "light" and entry.hidden_by is None:
                     entity_ids.add(entry.entity_id)
-            for device in dr.async_entries_for_label(dr_registry, label_id):
-                for entry in er.async_entries_for_device(er_registry, device.id):
-                    if entry.domain == "light":
-                        entity_ids.add(entry.entity_id)
-            areas.extend(a.id for a in ar.async_entries_for_label(ar_registry, label_id))
+            device_ids.update(d.id for d in dr.async_entries_for_label(dr_registry, label_id))
+            area_ids.update(a.id for a in ar.async_entries_for_label(ar_registry, label_id))
 
-        # 4. Areas
-        if areas:
-            for area_id in areas:
-                for entry in er.async_entries_for_area(er_registry, area_id):
-                    if entry.domain == "light":
+        # 3. Floors expand to their areas
+        for floor_id in as_list("floor_id"):
+            area_ids.update(a.id for a in ar.async_entries_for_floor(ar_registry, floor_id))
+
+        # 4. Devices (targeted or labelled): their primary lights
+        for device_id in device_ids:
+            for entry in er.async_entries_for_device(er_registry, device_id):
+                if is_primary_light(entry):
+                    entity_ids.add(entry.entity_id)
+
+        # 5. Areas: lights assigned to the area, and lights of the area's
+        #    devices that have no area of their own
+        for area_id in area_ids:
+            for entry in er.async_entries_for_area(er_registry, area_id):
+                if is_primary_light(entry):
+                    entity_ids.add(entry.entity_id)
+            for device in dr.async_entries_for_area(dr_registry, area_id):
+                for entry in er.async_entries_for_device(er_registry, device.id):
+                    if is_primary_light(entry) and not entry.area_id:
                         entity_ids.add(entry.entity_id)
-                for device in dr.async_entries_for_area(dr_registry, area_id):
-                    for entry in er.async_entries_for_device(er_registry, device.id):
-                        if entry.domain == "light":
-                            entity_ids.add(entry.entity_id)
-        
+
         # Expand Groups
         final_entities = set()
         to_process = list(entity_ids)
@@ -784,60 +836,84 @@ class HCLLightController:
                 
         return final_entities
 
-    async def _apply_smart_xy_single(self, entity_id, x, y, brightness, transition):
+    async def _apply_smart_xy_single(
+        self, entity_id, x, y, brightness, transition, parent: Context | None = None
+    ) -> bool:
+        """Colour and brightness in two steps; the larger change gets the transition.
+
+        If the two-step command fails, the values are sent once without
+        transition. If that fails too, the error is raised to apply_batch.
+        """
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return False
         try:
-            state = self.hass.states.get(entity_id)
-            if not state: return
             curr_bri = state.attributes.get("brightness") or 0
             curr_xy = state.attributes.get("xy_color") or (x, y)
             target_bri_byte = int(round(float(brightness) * 255 / 100))
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             curr_x, curr_y = curr_xy
             delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * XY_COLOR_SENSITIVITY
-            
-            if delta_c > delta_b:
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": transition}, blocking=True)
-            else:
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True)
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
-        except Exception as e:
-            _LOGGER.error("Smart XY error %s: %s", entity_id, e)
-            # Fallback
-            try:
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0}, blocking=True)
-            except Exception:
-                pass
 
-    async def _apply_smart_ct_single(self, entity_id, kelvin, brightness, transition):
+            if delta_c > delta_b:
+                first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
+                second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": transition}, blocking=True, parent=parent)
+            else:
+                first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True, parent=parent)
+                second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
+            return first or second
+        except Exception as err:  # the fallback below reports a final failure
+            _LOGGER.warning(
+                "Smart transition for %s failed (%s); sending the values without transition", entity_id, err
+            )
+        return await self._async_call(
+            "light", "turn_on",
+            {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0},
+            blocking=True, parent=parent,
+        )
+
+    async def _apply_smart_ct_single(
+        self, entity_id, kelvin, brightness, transition, parent: Context | None = None
+    ) -> bool:
+        """Colour temperature without transition, brightness with it (IKEA-safe).
+
+        kelvin is already limited to the light's range. If the command fails,
+        the values are sent once without transition; if that fails too, the
+        error is raised to apply_batch.
+        """
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return False
         try:
-            state = self.hass.states.get(entity_id)
-            if not state: return
             curr_bri = state.attributes.get("brightness") or 0
             curr_kelvin = state.attributes.get("color_temp_kelvin") or 2700
             target_bri_byte = int(round(float(brightness) * 255 / 100))
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
-            
+            sent = False
+
             if delta_k > delta_b:
                 # Check if brightness change is significant enough to warrant a snap
                 if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
-                    await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True)
+                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
                 # Send color without transition to avoid glitches on IKEA bulbs
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
+                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True, parent=parent)
             else:
                 # Only snap color if delta is significant. NEVER send transition with color_temp.
                 if abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
-                    await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True)
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True)
-        except Exception as e:
-            _LOGGER.error("Smart CT error %s: %s", entity_id, e)
-            # Fallback
-            try:
-                # Fallback: Send everything, NO transition (safest)
-                await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin}, blocking=True)
-            except Exception:
-                pass
+                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True, parent=parent)
+                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
+            return sent
+        except Exception as err:  # the fallback below reports a final failure
+            _LOGGER.warning(
+                "Smart transition for %s failed (%s); sending the values without transition", entity_id, err
+            )
+        # Fallback: send everything, no transition (safest)
+        return await self._async_call(
+            "light", "turn_on",
+            {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin},
+            blocking=True, parent=parent,
+        )
 
     def _is_group(self, entity_id: str, state_obj=None) -> bool:
         """Check if entity is a group."""

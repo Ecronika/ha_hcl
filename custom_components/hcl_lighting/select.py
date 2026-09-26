@@ -157,5 +157,6 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
             self._schedule_end(self._next_wake_time())
         self.async_write_ha_state()
 
-        # Apply the new mode immediately (the switch and the curve sensor listen)
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update")
+        # Apply the new mode immediately (the switch and the curve sensor listen);
+        # the context of the request is passed on to the light commands
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._context)

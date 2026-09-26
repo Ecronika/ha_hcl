@@ -101,6 +101,21 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["last_set"] = (brightness, kelvin)
 
+    def get_last_set_values(self, entity_id: str) -> tuple[int, int] | None:
+        """The last HCL values sent to the light (None if none)."""
+        data = self._override_state.get(entity_id)
+        return data.get("last_set") if data else None
+
+    def restore_last_set_values(self, entity_id: str, values: tuple[int, int] | None) -> None:
+        """Undo set_last_set_values after a command that was not sent or failed."""
+        data = self._override_state.get(entity_id)
+        if data is None:
+            return
+        if values is None:
+            data.pop("last_set", None)
+        else:
+            data["last_set"] = values
+
     def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None, old_state: State | None = None) -> bool:
         """Check if state change is a manual override."""
         if not state:

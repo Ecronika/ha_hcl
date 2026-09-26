@@ -118,7 +118,7 @@ class HCLLightingCurveSensor(SensorEntity):
             self.async_write_ha_state()
 
     @callback
-    def _handle_update(self):
+    def _handle_update(self, *_args):
         """Handle signal from switch/service."""
         # Retry finding Mode Entity if logic failed during startup (Race Condition)
         if not self._mode_entity_id:

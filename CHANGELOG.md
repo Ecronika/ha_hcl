@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b3] - 2026-09-26
+Third pre-release (beta) of 0.7.0: fixes RM-B01 to RM-B11 of the roadmap (phase 1). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Scenario change during an update** (RM-B01): an update requested while a previous one was still sending (scenario change, curve preview/revert, release of manual control, HCL switched on, targets changed) was dropped, so e.g. a new scenario only arrived with the next timer tick. Requests now wait for the running update and are then sent; several requests are combined into one update with the newest values. Only timer ticks are skipped while an update is running.
+- **`hcl_lighting.apply` during an update** (RM-B02): `apply` could send in parallel with a running update cycle. It now waits for the cycle, so the newer request is sent last.
+- **Colour temperature outside a light's range** (RM-B03): lights with native colour temperature received the unlimited target (e.g. 6500 K for a 2200–4000 K light). They now get the value they can reach (4000 K), also when switched on and with the compatibility mode (smart transition); lights with different ranges get separate commands.
+- **Failed light commands** (RM-B04): a light whose command failed was treated as updated: it got the transition protection of `apply`/scenario changes or of the smooth return after manual control, and its tracking values pointed to values it never received. Only successful commands count now; a failed light keeps its previous tracking values and a failed smooth return hands the light back to the normal updates.
+- **Compatibility mode errors** (RM-B05): when the two-step command and the fallback without transition both failed, the error was swallowed and the light counted as updated. The final error is now logged and reported (the first failure is logged as a warning).
+- **Target resolution** (RM-B06): areas, devices, floors and labels are resolved like Home Assistant resolves action targets: hidden lights and configuration/diagnostic lights (e.g. status LEDs of wall switches) reached through a device, area, floor or label are skipped, and a light with its own area is no longer included through the area of its device. Lights given directly are always used. The same rules apply when HCL recognises manual control from light actions.
+- **Permissions of the actions** (RM-B07): `apply`, `set_manual_control`, `set_scenario` and `update_curve` could be used by any user who could call actions. A user with restricted permissions now needs control of the given HCL entity, of the *HCL active* switch (for `set_scenario` also of the scenario select) and of the lights given in `lights`; `get_curve` needs read access. Automations, scripts and admins are not affected.
+- **Origin of light commands** (RM-B08): the light commands HCL sends for an action (`apply`, `set_scenario`, `set_manual_control`, `update_curve`, scenario select, *HCL active* and adapt switches) carry the action's context as parent, so logbook and traces show where they came from.
+- **Group listener while HCL is off** (RM-B09): the watch of light group members stayed active after switching HCL off; it is now released and set up again when HCL is switched on.
+- **Options dialog** (RM-B11): an error while preparing the first options page was logged and hidden behind a fallback form meant for old Home Assistant versions. The fallback is removed (not needed since 2024.7), errors are no longer hidden.
+
+### Changed
+- Removed unused code in the curve calculation (RM-B10); no functional change.
+- Tests: a test of the manual-control event could fail at random (the test listened with a plain function, which Home Assistant runs in a worker thread, so the order of two events was not fixed).
+
 ## [0.7.0b2] - 2026-09-26
 Second pre-release (beta) of 0.7.0.
 

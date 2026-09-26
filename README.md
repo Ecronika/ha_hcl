@@ -55,7 +55,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **"HCL Lighting"**.
-3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically.
+3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved like Home Assistant resolves action targets: hidden lights and configuration/diagnostic lights (e.g. status LEDs of wall switches) are skipped, and a light assigned to its own area belongs to that area, not to the area of its device. Lights given directly are always used.
 
 **Requirements**: Home Assistant **2024.7** or newer.
 
@@ -165,6 +165,8 @@ By default a light that is switched on receives the HCL values immediately, even
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `midday_time`, `sleep_time` |
 | `hcl_lighting.update_curve` | see [Technical Details](#-technical-details) | Used by the card |
 
+**Permissions**: for a user with restricted permissions, the writing actions (`apply`, `set_manual_control`, `set_scenario`, `update_curve`) need control of the given HCL entity, of the instance's *HCL active* switch (and of the scenario select for `set_scenario`) and of the lights given in `lights`; `get_curve` needs read access. Automations and scripts are not restricted. The light commands HCL sends for an action are linked to it (parent context), so logbook and traces show where they came from.
+
 Event `hcl_lighting_manual_control` (`entity_id`, `manual_control`, `instance`, `config_entry_id`) is fired when a light starts or stops being under manual control. If the same light is adapted by two instances for the same attribute, a repair issue names the light and the instances.
 
 ### Recipes
@@ -210,12 +212,14 @@ actions:
 
 ## 🔧 Technical Details
 
-*   **Update Loop**: every 27 seconds by default (configurable).
+*   **Update Loop**: every 27 seconds by default (configurable). Only one update runs at a time: a timer tick is skipped while an update is still sending, while updates requested by a scenario change, a curve preview/revert, the release of manual control or `apply` wait for it and are then sent (several requests are combined).
 *   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
 *   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State reports caused by HCL's own commands are ignored. State changes that are not caused by a Home Assistant command are compared with the thresholds above. Home Assistant assigns the context of the last command to state changes of a light within 5 seconds, so a change on the device itself within these 5 seconds after an HCL update is not detected.
 *   **Traffic Optimization**:
     *   Brightness: Updates only if delta > 1%
     *   Kelvin: Updates only if delta > 50K (compared with the temperature the light can reach; lights in XY mode are compared by colour)
+*   **Colour temperature range**: lights with native colour temperature get the value they can reach (limited to their min/max); colour lights get values outside their range through the XY simulation.
+*   **Failed commands**: a light whose command failed is not treated as updated (no transition protection, no false manual control on its next report); the next update tries again.
 *   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them, `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}` with different times, not needed for `revert`; 1440 counts as 00:00). Invalid input is rejected.
 *   **RGBW/RGBWW lights** get the colour temperature through the XY simulation. Home Assistant's own conversion to the white channels was checked for 0.7.0 and not used: the white-channel range of such lights is not available and values outside it produce invalid channel values.
 

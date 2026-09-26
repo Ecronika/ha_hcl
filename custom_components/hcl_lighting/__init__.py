@@ -39,7 +39,7 @@ from .const import (
 from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
-from .services import async_register_services
+from .services import async_check_write_permissions, async_register_services
 from .logic.light_controller import HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
@@ -216,6 +216,8 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
          raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
     
     logic_core = hass.data[DOMAIN][entry_id]
+    # Changing the curve needs control of the given entity and the HCL switch
+    await async_check_write_permissions(hass, call, logic_core)
     hcl_calc: HCLCalculator = logic_core["calculator"]
     
     # 1. Update In-Memory Calculator
@@ -246,12 +248,12 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
         _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
         # Notify frontend to refresh
         from homeassistant.helpers.dispatcher import async_dispatcher_send
-        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
         return
 
     # 3. Preview/Apply: lights follow the points until the next reload
     from homeassistant.helpers.dispatcher import async_dispatcher_send
-    async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update")
+    async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
 
 
 
