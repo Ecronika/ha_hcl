@@ -13,7 +13,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🎨 Interactive Dashboard Card
 - **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
-- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the values HCL sends now are shown (scenario, brightness limits and scaling included).
+- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the values HCL sends now are shown (scenario, brightness limits and scaling included; from the setpoint sensors, "not available" while they have no value).
 - **Scenario chips**: switch the scenario directly in the card. The curve can be edited in every scenario; it only applies in Auto.
 - **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards.
 - **Keyboard**: selected point: ↑/↓ value (PgUp/PgDn in larger steps), ←/→ time, Home/End minimum/maximum value, Shift = larger steps, Del delete.
@@ -159,7 +159,7 @@ By default a light that is switched on receives the HCL values immediately, even
 ### Services
 | Service | Fields | Effect |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. |
+| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, default all), `manual_control` (default `true`) | Pauses the lights or hands them back to HCL |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = until changed) | Sets the scenario; a duration overrides the configured end |
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `midday_time`, `sleep_time` |

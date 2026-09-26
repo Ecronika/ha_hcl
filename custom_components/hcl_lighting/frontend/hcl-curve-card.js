@@ -49,6 +49,7 @@ const HCL_STRINGS = {
         mode_sleep: "Sleep",
         mode_night_light: "Night light",
         guest_now: "HCL sends no values",
+        setpoint_unavailable: "target values not available",
         sleep_now: "lights off",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
@@ -121,6 +122,7 @@ const HCL_STRINGS = {
         mode_sleep: "Schlafen",
         mode_night_light: "Nachtlicht",
         guest_now: "HCL sendet keine Werte",
+        setpoint_unavailable: "Sollwerte nicht verfügbar",
         sleep_now: "Lichter aus",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
@@ -161,6 +163,9 @@ const HCL_STRINGS = {
 };
 
 // Fallback values of the scenarios (the curve sensor provides the configured ones)
+// Time a removed card waits before it releases its charts (ms)
+const HCL_RELEASE_DELAY = 1000;
+
 const HCL_SCENARIO_DEFAULTS = {
     focus: { b: 100, k: 5500 },
     relax: { b: 40, k: 2700 },
@@ -555,10 +560,10 @@ class HCLCurveCard extends HTMLElement {
         const stateObj = hass.states[this.config.entity];
         const dataState = this._dataStateOf(stateObj);
         if (dataState !== this._dataState) {
+            // The last server curve stays the comparison base while the sensor
+            // is missing or unavailable (e.g. during a reload): an unsaved draft
+            // is kept and a different curve on return is offered, not adopted.
             this._dataState = dataState;
-            if (dataState !== "ready") {
-                this._server = { points: null, key: null, ref: null };
-            }
             visualsChanged = true;
         }
 
@@ -584,10 +589,10 @@ class HCLCurveCard extends HTMLElement {
 
     _dataStateOf(stateObj) {
         if (!stateObj) return this._hass && Object.keys(this._hass.states || {}).length ? "missing" : "loading";
+        // Old attributes of an unavailable sensor are not current data
+        if (["unavailable", "unknown"].includes(stateObj.state)) return "unavailable";
         const attrs = stateObj.attributes || {};
-        if (!Array.isArray(attrs.control_points)) {
-            return ["unavailable", "unknown"].includes(stateObj.state) ? "unavailable" : "invalid";
-        }
+        if (!Array.isArray(attrs.control_points)) return "invalid";
         const points = hclNormalize(attrs.control_points);
         return points && points.length >= 2 ? "ready" : "invalid";
     }
@@ -633,7 +638,7 @@ class HCLCurveCard extends HTMLElement {
         if (this._savedKey === key) this._savedKey = null;
 
         const adoptAfterRevert = this._adoptRevision !== null && this._adoptRevision === this._revision;
-        const clean = previousKey === null || draftKey === previousKey || !this._points.length;
+        const clean = !this._points.length || (previousKey === null ? !this._undo.length : draftKey === previousKey);
         if (adoptAfterRevert || clean) {
             this._adoptRevision = null;
             this._adopt(points, adoptAfterRevert);
@@ -665,6 +670,7 @@ class HCLCurveCard extends HTMLElement {
     // when Chart.js has loaded; a detached card initialises on its next attach.
     async connectedCallback() {
         if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+        if (this._releaseTimer) { clearTimeout(this._releaseTimer); this._releaseTimer = null; }
         this.addEventListener("keydown", this._boundCardKey);
         if (this._initialized) {
             this._startTimers();
@@ -692,6 +698,7 @@ class HCLCurveCard extends HTMLElement {
             this._applyTexts();
             this._applyTheme();
             this._startTimers();
+            this._renderAll();
         })().finally(() => { this._initPromise = null; });
     }
 
@@ -701,6 +708,22 @@ class HCLCurveCard extends HTMLElement {
         if (this._resizeObserver) { this._resizeObserver.disconnect(); this._resizeObserver = null; }
         if (this._nowTimer) { clearInterval(this._nowTimer); this._nowTimer = null; }
         if (this._rafHandle) { cancelAnimationFrame(this._rafHandle); this._rafHandle = null; }
+        // A card that stays removed releases its charts (Chart.js keeps every
+        // instance registered until destroy()). Dashboards also detach cards
+        // for a moment when they move them; those keep their charts.
+        if (this._releaseTimer) clearTimeout(this._releaseTimer);
+        this._releaseTimer = setTimeout(() => {
+            this._releaseTimer = null;
+            if (!this.isConnected) this._releaseCharts();
+        }, HCL_RELEASE_DELAY);
+    }
+
+    // The draft, undo and server state stay; the next attach rebuilds the view
+    _releaseCharts() {
+        if (this._chartB) { this._chartB.destroy(); this._chartB = null; }
+        if (this._chartK) { this._chartK.destroy(); this._chartK = null; }
+        this._initialized = false;
+        this._lastValidationSig = null;
     }
 
     _startTimers() {
@@ -1211,19 +1234,30 @@ class HCLCurveCard extends HTMLElement {
         const parts = [`${this._t("now")} ${f.clock(now)}`];
         if (modeText) parts.push(modeText);
         const states = (this._hass && this._hass.states) || {};
-        const bState = this._targetIds.b && states[this._targetIds.b];
-        const kState = this._targetIds.k && states[this._targetIds.k];
+        const bState = this._targetIds.b ? states[this._targetIds.b] : undefined;
+        const kState = this._targetIds.k ? states[this._targetIds.k] : undefined;
+        const valid = (st) => !!st && st.state !== "" && Number.isFinite(Number(st.state));
         if (mode === "guest") {
             parts.push(this._t("guest_now"));
         } else if (mode === "sleep") {
             parts.push(this._t("sleep_now"));
-        } else if (bState && kState && Number.isFinite(Number(bState.state)) && Number.isFinite(Number(kState.state))) {
+        } else if (valid(bState) && valid(kState)) {
             parts.push(f.percent(Number(bState.state)), f.kelvin(Number(kState.state)));
+        } else if (bState || kState) {
+            // The setpoint sensors exist but have no current value: no substitute
+            parts.push(this._t("setpoint_unavailable"));
         } else {
-            // Older integration without setpoint sensors: value of the saved curve
-            const base = this._server.points || this._points;
-            const v = hclValueAt(base, now);
-            parts.push(f.percent(hclEffectiveB(v.b, this._limits)), f.kelvin(v.k));
+            // No setpoint sensors (disabled, or an older integration): computed
+            // from the active scenario or the saved curve, like the integration
+            const fixed = mode && mode !== "auto" ? this._scenarios[mode] : null;
+            if (fixed && Number.isFinite(Number(fixed.b)) && Number.isFinite(Number(fixed.k))) {
+                parts.push(f.percent(Number(fixed.b)), f.kelvin(Number(fixed.k)));
+            } else if (!mode || mode === "auto") {
+                const v = hclValueAt(this._server.points || this._points, now);
+                parts.push(f.percent(hclEffectiveB(v.b, this._limits)), f.kelvin(v.k));
+            } else {
+                parts.push(this._t("setpoint_unavailable"));
+            }
         }
         el.textContent = parts.join(" · ");
         if (draftEl) {

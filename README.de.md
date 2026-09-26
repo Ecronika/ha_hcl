@@ -47,7 +47,7 @@ HCL pausiert ein einzelnes Licht, wenn
 Das Licht kehrt zu HCL zurück, wenn es aus- und wieder eingeschaltet wird oder nach der eingestellten Zeit (Standard 4 Stunden) mit einem sanften Übergang über 3 Minuten, den die normalen Aktualisierungen nicht unterbrechen. HCL schaltet nie ein Licht ein. Einstellbar sind außerdem: ob Ausschalten die manuelle Steuerung beendet, ob sie Neustarts überdauert und ob Einschaltbefehle mit eigenen Werten (z. B. Szenen) respektiert werden.
 
 ## Aktionen (Services)
-- `hcl_lighting.apply`: aktuelle Werte sofort an eingeschaltete Lichter senden (optional Übergang; manuell gesteuerte nur mit `release_manual_control: true`; nicht im Gastmodus).
+- `hcl_lighting.apply`: aktuelle Werte sofort an eingeschaltete Lichter senden (optional Übergang, den die Aktualisierungen nicht abbrechen; manuell gesteuerte nur mit `release_manual_control: true`; nicht im Gastmodus).
 - `hcl_lighting.set_manual_control`: Lichter pausieren (`manual_control: true`) oder an HCL zurückgeben (`false`).
 - `hcl_lighting.set_scenario`: Szenario setzen, optional mit Dauer in Minuten.
 - `hcl_lighting.get_curve`: Kurve als Antwortdaten, z. B. um sie mit `update_curve` in eine andere Instanz zu kopieren.

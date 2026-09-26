@@ -421,10 +421,14 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         for eid in active:
             self.override_manager.end_reengaging(eid)
         if active:
-            await self.controller.apply_batch(
-                active, brightness, kelvin,
-                transition=self._transition if transition is None else transition,
-            )
+            transition = self._transition if transition is None else float(transition)
+            updated = await self.controller.apply_batch(active, brightness, kelvin, transition=transition)
+            # A transition longer than the update transition must not be cut
+            # short by the next update cycles (like a long scenario transition);
+            # a scenario change, a new apply or switching the light off ends it.
+            if transition > self._transition:
+                for eid in updated:
+                    self.override_manager.set_reengaging(eid, transition)
 
     async def async_set_manual_control(self, lights: list[str] | None, manual_control: bool) -> None:
         """Pause lights (manual control) or hand them back to HCL (service)."""
