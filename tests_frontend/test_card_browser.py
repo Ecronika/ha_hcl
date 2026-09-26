@@ -702,3 +702,136 @@ async def test_b53_card_moved_while_loading_initialises(browser_page_factory):
     await page.wait_for_timeout(1800)
     assert await page.evaluate("() => card._initialized && !!card._chartB") is True
     assert page.errors == []
+
+
+# ---------------------------------------------------------------- 0.7.0b2 (review of v0.7.0b1, R1–R4)
+def _curve_state(state: str = "x", attributes: dict | None = None) -> dict:
+    return {"state": state, "attributes": attributes if attributes is not None else {
+        "control_points": POINTS, "mode_entity_id": "select.mode", "min_brightness": 10, "max_brightness": 100}}
+
+
+async def _set_curve(page, curve: dict | None, mode: str = "auto") -> None:
+    h = _hass(mode)
+    if curve is None:
+        del h["states"]["sensor.hcl_curve_data"]
+    else:
+        h["states"]["sensor.hcl_curve_data"] = curve
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(100)
+
+
+@pytest.mark.parametrize("gap", ["missing", "unavailable", "unknown", "invalid"])
+@pytest.mark.parametrize("server_changed", [False, True])
+async def test_b54_draft_survives_a_temporarily_missing_sensor(page, gap, server_changed):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._pushUndo(); card._points[0].b = 55; card._markChanged(); }")
+    assert await page.evaluate("() => card._isDirty") is True
+    gaps = {
+        "missing": None,
+        "unavailable": _curve_state("unavailable", {}),
+        "unknown": _curve_state("unknown"),  # old attributes kept
+        "invalid": _curve_state("x", {"control_points": "garbage"}),
+    }
+    await _set_curve(page, gaps[gap])
+    assert await page.evaluate("() => card._dataState") != "ready"
+    points = [dict(p) for p in POINTS]
+    if server_changed:
+        points[5]["b"] = 44
+    await _set_points(page, points)
+    assert await page.evaluate("() => card._dataState") == "ready"
+    assert await page.evaluate("() => card._points[0].b") == 55
+    assert await page.evaluate("() => card._isDirty") is True
+    assert await page.evaluate("() => card._undo.length") == 1
+    # a different server curve is offered, not adopted
+    assert await page.evaluate("() => card._serverChanged") is server_changed
+    assert await page.evaluate("() => card._points[5].b") == 50
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown"])
+async def test_b56_unavailable_sensor_with_old_attributes_is_not_ready(page, state):
+    await _set_hass(page, "auto")
+    await _set_curve(page, _curve_state(state))
+    assert await page.evaluate("() => card._dataState") == "unavailable"
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('.handle').length") == 0
+    assert await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent") == ""
+    assert (await _status(page))["text"]
+    await _set_hass(page, "auto")
+    assert await page.evaluate("() => card._dataState") == "ready"
+
+
+def _setpoint_hass(mode: str, tb: str | None, tk: str | None) -> dict:
+    extra = {"scenarios": {"focus": {"b": 80, "k": 5000}, "night_light": {"b": 3, "k": 2200}},
+             "target_brightness_entity_id": "sensor.tb", "target_color_temp_entity_id": "sensor.tk"}
+    h = _hass(mode, extra=extra)
+    if tb is not None:
+        h["states"]["sensor.tb"] = {"state": tb, "attributes": {}}
+    if tk is not None:
+        h["states"]["sensor.tk"] = {"state": tk, "attributes": {}}
+    return h
+
+
+async def _now_info(page, h) -> str:
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
+    await page.wait_for_timeout(100)
+    return await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+
+
+@pytest.mark.parametrize("mode", ["focus", "night_light", "auto"])
+@pytest.mark.parametrize("value", ["unknown", "unavailable"])
+async def test_b57_unavailable_setpoint_sensors_show_no_substitute_values(page, mode, value):
+    info = await _now_info(page, _setpoint_hass(mode, value, value))
+    assert "%" not in info and " K" not in info
+    assert "not available" in info
+
+
+async def test_b57_one_unavailable_setpoint_sensor_is_enough(page):
+    info = await _now_info(page, _setpoint_hass("focus", "80", "unavailable"))
+    assert "%" not in info and "not available" in info
+
+
+@pytest.mark.parametrize("mode,expected", [("focus", ["80 %", "5,000 K"]), ("night_light", ["3 %", "2,200 K"])])
+async def test_b57_fallback_without_setpoint_sensors_uses_the_scenario(page, mode, expected):
+    # sensors disabled (not in the states) or older integration without references
+    for h in (_setpoint_hass(mode, None, None), _hass(mode, extra={"scenarios": {"focus": {"b": 80, "k": 5000},
+                                                                                  "night_light": {"b": 3, "k": 2200}}})):
+        info = await _now_info(page, h)
+        for text in expected:
+            assert text in info, info
+
+
+async def test_b57_fallback_in_auto_uses_the_curve(page):
+    info = await _now_info(page, _setpoint_hass("auto", None, None))
+    assert "%" in info and "K" in info and "not available" not in info
+
+
+async def test_b55_removed_cards_release_their_charts(page):
+    await _set_hass(page, "auto")
+    before = await page.evaluate("() => Object.keys(card._Chart.instances).length")
+    for _ in range(6):
+        await page.evaluate("""() => { window.tmp = document.createElement('hcl-curve-card');
+            tmp.setConfig({entity: 'sensor.hcl_curve_data'}); tmp.hass = card._hass; document.body.appendChild(tmp); }""")
+        await page.wait_for_function("() => tmp._initialized && !!tmp._chartB")
+        await page.evaluate("() => tmp.remove()")
+    await page.wait_for_timeout(1500)
+    assert await page.evaluate("() => Object.keys(card._Chart.instances).length") == before
+    assert page.errors == []
+
+
+async def test_b55_card_moved_in_the_dashboard_keeps_working(page):
+    await _set_hass(page, "auto")
+    await page.evaluate("() => { card._pushUndo(); card._points[0].b = 55; card._markChanged(); }")
+    # quick move (masonry): charts are kept
+    chart = await page.evaluate("() => { window.__c = card._chartB; card.remove(); document.body.appendChild(card); return 1; }")
+    await page.wait_for_timeout(1500)
+    assert chart == 1 and await page.evaluate("() => card._chartB === window.__c")
+    # long detach: charts are released and rebuilt on the next attach, the draft stays
+    await page.evaluate("() => card.remove()")
+    await page.wait_for_timeout(1500)
+    assert await page.evaluate("() => card._chartB === null") is True
+    await page.evaluate("() => document.body.appendChild(card)")
+    await page.wait_for_function("() => card._initialized && !!card._chartB")
+    assert await page.evaluate("() => card._points[0].b") == 55
+    assert await page.evaluate("() => card._isDirty") is True
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
+    assert page.errors == []

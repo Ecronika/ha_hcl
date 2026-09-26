@@ -268,6 +268,47 @@ async def test_f02_apply_sends_now_and_never_switches_on(hass, no_frontend_regis
     assert _calls_for(calls, "light.b") == []
 
 
+async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_registration, freezer):
+    """0.7.0b2 (B-58): the next update cycles leave a light alone during a long apply transition."""
+    calls, entry = await _light_on(hass)
+    om = core(hass, entry)["override_manager"]
+    calls.clear()
+    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
+    await hass.async_block_till_done()
+    assert _calls_for(calls, "light.a")[-1].data["transition"] == 120
+    calls.clear()
+    sw = switch_entity(hass)
+    for seconds, brightness, kelvin in ((30, 220, 5800), (60, 180, 4800), (90, 140, 3800)):
+        freezer.tick(timedelta(seconds=30))
+        # intermediate values reported by the light during the transition
+        set_light(hass, "light.a", "on", brightness=brightness, color_temp_kelvin=kelvin, **CT_ATTRS)
+        await hass.async_block_till_done()
+        await sw._update_hcl()
+        await hass.async_block_till_done()
+        assert _calls_for(calls, "light.a") == [], seconds
+    assert not om.is_overridden("light.a")
+    # after the transition the normal adaptation resumes
+    freezer.tick(timedelta(seconds=35))
+    await sw._update_hcl()
+    await hass.async_block_till_done()
+    assert _calls_for(calls, "light.a")[-1].data["transition"] == 20
+
+
+async def test_b58_short_apply_transition_sets_no_protection(hass, no_frontend_registration):
+    calls, entry = await _light_on(hass)
+    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 5}, blocking=True)
+    assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
+
+
+async def test_b58_scenario_change_ends_the_apply_protection(hass, no_frontend_registration):
+    calls, entry = await _light_on(hass)
+    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
+    assert core(hass, entry)["override_manager"].is_reengaging("light.a")
+    calls.clear()
+    await _select(hass, "focus")
+    assert _calls_for(calls, "light.a")
+
+
 async def test_f02_apply_skips_or_releases_manual_control(hass, no_frontend_registration):
     calls, entry = await _light_on(hass)
     om = core(hass, entry)["override_manager"]

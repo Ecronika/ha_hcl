@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b2] - 2026-09-26
+Second pre-release (beta) of 0.7.0.
+
+### Fixed
+- **Dashboard card, unsaved changes after a reload**: when the curve sensor was missing or unavailable for a moment (e.g. while the integration reloads), an unsaved draft was replaced by the saved curve when the sensor returned, and undo was cleared. The draft and undo are now kept; a different curve on return is offered with "Load that curve" as for other updates.
+- **Dashboard card, unavailable sensor**: an unavailable or unknown curve sensor that still carried its old attributes was shown as current data with the editor. The card now shows the sensor as unavailable.
+- **Dashboard card, "now" values**: when the setpoint sensors had no current value (unknown/unavailable), the card showed values of the Auto curve even in other scenarios. It now shows "target values not available". Without setpoint sensors (disabled, or an older integration) the card computes the values from the active scenario or, in Auto, from the curve.
+- **Dashboard card, removed cards**: a card removed from the page (e.g. when switching dashboard views) kept its two charts registered in Chart.js. A card that stays removed for a second now releases them and rebuilds them when it is shown again; the draft is kept. Cards moved by the dashboard keep their charts.
+- **`hcl_lighting.apply` with a long transition**: the next update cycle sent the values again with the update transition (20 s) and cut a longer transition short. Lights are now left alone until the requested transition has ended, as for a long scenario transition; a scenario change, a new `apply` or switching the light off ends this.
+
 ## [0.7.0b1] - 2026-09-25
 Pre-release (beta) of 0.7.0.
 
