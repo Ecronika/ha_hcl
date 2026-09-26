@@ -5,8 +5,9 @@ from typing import Any
 
 import voluptuous as vol
 
+from homeassistant.auth.permissions.const import POLICY_CONTROL, POLICY_READ
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError, Unauthorized, UnknownUser
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
@@ -63,27 +64,73 @@ def _core(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
     return hass.data[DOMAIN][resolve_entry_id(hass, call.data["entity_id"])]
 
 
+async def async_check_permissions(
+    hass: HomeAssistant, call: ServiceCall, entity_ids: list[str | None], policy: str = POLICY_CONTROL
+) -> None:
+    """Check that the user who called the action may use these entities.
+
+    Calls without a user (automations, scripts, Home Assistant itself) are
+    allowed, as for Home Assistant's own entity actions. Admins may do all.
+    """
+    user_id = call.context.user_id
+    if user_id is None:
+        return
+    user = await hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(context=call.context, permission=policy, user_id=user_id)
+    for entity_id in dict.fromkeys(e for e in entity_ids if e):
+        if not user.permissions.check_entity(entity_id, policy):
+            raise Unauthorized(context=call.context, entity_id=entity_id, permission=policy)
+
+
+def _entity_id_of(core: dict[str, Any], key: str) -> str | None:
+    entity = core.get(key)
+    return getattr(entity, "entity_id", None) if entity is not None else None
+
+
+async def async_check_write_permissions(
+    hass: HomeAssistant, call: ServiceCall, core: dict[str, Any], extra: list[str] | None = None
+) -> None:
+    """A writing action needs control of the given HCL entity, the HCL switch
+    of the instance (it controls the lights) and the lights given explicitly."""
+    await async_check_permissions(
+        hass, call, [call.data.get("entity_id"), _entity_id_of(core, "switch"), *(extra or [])]
+    )
+
+
 def async_register_services(hass: HomeAssistant) -> None:
     """Register apply, set_manual_control, set_scenario and get_curve."""
 
     async def _apply(call: ServiceCall) -> None:
-        switch = _core(hass, call)["switch"]
-        await switch.async_apply(
-            call.data.get(ATTR_LIGHTS), call.data.get("transition"), call.data["release_manual_control"]
+        core = _core(hass, call)
+        await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
+        await core["switch"].async_apply(
+            call.data.get(ATTR_LIGHTS),
+            call.data.get("transition"),
+            call.data["release_manual_control"],
+            context=call.context,
         )
 
     async def _set_manual_control(call: ServiceCall) -> None:
-        switch = _core(hass, call)["switch"]
-        await switch.async_set_manual_control(call.data.get(ATTR_LIGHTS), call.data["manual_control"])
+        core = _core(hass, call)
+        await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
+        await core["switch"].async_set_manual_control(
+            call.data.get(ATTR_LIGHTS), call.data["manual_control"], context=call.context
+        )
 
     async def _set_scenario(call: ServiceCall) -> None:
-        select = _core(hass, call).get("mode_select")
+        core = _core(hass, call)
+        select = core.get("mode_select")
         if select is None:
             raise ServiceValidationError("The scenario of this HCL instance is not available")
+        await async_check_write_permissions(hass, call, core, [select.entity_id])
+        # The scenario change and the light commands it causes belong to this call
+        select.async_set_context(call.context)
         await select.async_select_option(call.data["scenario"], duration=call.data.get("duration"))
 
     async def _get_curve(call: ServiceCall) -> ServiceResponse:
         entry_id = resolve_entry_id(hass, call.data["entity_id"])
+        await async_check_permissions(hass, call, [call.data["entity_id"]], POLICY_READ)
         core = hass.data[DOMAIN][entry_id]
         entry = hass.config_entries.async_get_entry(entry_id)
         saved = (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points")

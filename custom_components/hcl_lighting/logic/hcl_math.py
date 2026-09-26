@@ -256,27 +256,7 @@ class HCLCalculator:
         prev_pt = points[(idx - 1) % n_points]
         next_next_pt = points[(idx + 2) % n_points]
         
-        # Time Handling for Slopes
-        # We need to normalize times relative to the specific wrap-around context
-        
-        # Calculate slope at Current Point (idx) using (idx-1, idx, idx+1)
-        # Times relative to curr_pt
-        t_prev_rel = prev_pt['t'] - curr_pt['t']
-        if t_prev_rel >= 0: t_prev_rel -= 1440 # Previous is in past
-        
-        t_next_rel = next_pt['t'] - curr_pt['t']
-        if t_next_rel <= 0: t_next_rel += 1440 # Next is in future
-        
-        # Calculate slope pairs
-        # Secants d0, d1
-        # d0 = (y0 - y_prev) / (t0 - t_prev)
-        # d1 = (y1 - y0) / (t1 - t0)
-        
-        def safe_div(n, d): return n / d if d != 0 else 0
-        
-        # Kelvin Slopes
-        # Let's standardize input for _pchip_slope
-        
+        # Slopes (_pchip_slope handles the wrap-around of the times itself)
         # Slope at Current Point
         mk_curr = self._pchip_slope(
             prev_pt['t'], prev_pt['k'], 

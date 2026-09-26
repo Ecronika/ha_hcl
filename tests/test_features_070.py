@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import voluptuous as vol
+from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed, async_mock_service
@@ -384,7 +385,9 @@ async def test_f02_get_curve_returns_points(hass, no_frontend_registration):
 # ---------------------------------------------------------------- F-07 event, logbook, diagnostics
 async def test_f07_manual_control_fires_events(hass, no_frontend_registration):
     events = []
-    hass.bus.async_listen("hcl_lighting_manual_control", events.append)
+    # @callback: runs in the event loop in order (a plain function would run in
+    # the executor, where the order of two events is not guaranteed)
+    hass.bus.async_listen("hcl_lighting_manual_control", callback(lambda event: events.append(event)))
     _calls, entry = await _light_on(hass)
     om = core(hass, entry)["override_manager"]
     om.set_override("light.a")

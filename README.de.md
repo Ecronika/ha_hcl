@@ -5,7 +5,7 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 ## Installation
 1. HACS → Integrationen → Menü → Benutzerdefinierte Repositories → `https://github.com/Ecronika/ha_hcl` als **Integration** hinzufügen und installieren, Home Assistant neu starten.
 2. Einstellungen → Geräte & Dienste → Integration hinzufügen → **HCL Lighting**.
-3. Name vergeben (z. B. „Wohnzimmer“), Lichter wählen (Entitäten, Geräte, Bereiche, Etagen oder Labels) und Aufwach-, Mittags- und Schlafenszeit festlegen. Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.
+3. Name vergeben (z. B. „Wohnzimmer“), Lichter wählen (Entitäten, Geräte, Bereiche, Etagen oder Labels) und Aufwach-, Mittags- und Schlafenszeit festlegen. Bereiche, Geräte, Etagen und Labels werden wie bei Home-Assistant-Aktionen aufgelöst: ausgeblendete Lichter und Konfigurations-/Diagnose-Lichter (z. B. Status-LEDs von Tastern) zählen nicht mit, ein Licht mit eigenem Bereich gehört zu diesem und nicht zum Bereich seines Geräts. Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.
 4. Dashboard-Karte hinzufügen: Dashboard bearbeiten → **Karte hinzufügen** → **HCL Curve Card** (visueller Editor mit Instanz und Ansicht). Nach dem Anlegen einer Instanz zeigt eine einmalige Benachrichtigung das YAML, z. B.
    ```yaml
    type: custom:hcl-curve-card
@@ -51,6 +51,8 @@ Das Licht kehrt zu HCL zurück, wenn es aus- und wieder eingeschaltet wird oder 
 - `hcl_lighting.set_manual_control`: Lichter pausieren (`manual_control: true`) oder an HCL zurückgeben (`false`).
 - `hcl_lighting.set_scenario`: Szenario setzen, optional mit Dauer in Minuten.
 - `hcl_lighting.get_curve`: Kurve als Antwortdaten, z. B. um sie mit `update_curve` in eine andere Instanz zu kopieren.
+
+Benutzer mit eingeschränkten Rechten brauchen für die schreibenden Aktionen die Steuerberechtigung für die angegebene HCL-Entität, den Schalter „HCL aktiv“ (bei `set_scenario` auch die Szenario-Auswahl) und die unter `lights` genannten Lichter; `get_curve` braucht Leserechte. Automationen und Skripte sind nicht eingeschränkt.
 
 Beginnt oder endet die manuelle Steuerung eines Lichts, erscheint ein Logbuch-Eintrag und das Event `hcl_lighting_manual_control`. Steuern zwei Instanzen dasselbe Licht für dasselbe Attribut, meldet eine Reparatur das. Diagnosedaten lassen sich auf der Integrationsseite herunterladen. Beispiele: [README (englisch), Recipes](README.md#recipes).
 
