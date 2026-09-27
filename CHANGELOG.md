@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b5] - 2026-09-27
+Fifth pre-release (beta) of 0.7.0: fixes RM-B19 and RM-B20 of the roadmap (review of 0.7.0b4). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **No lights controlled on Home Assistant 2025.1 to 2025.7** (RM-B19, regression in 0.7.0b4): on these versions the target resolution built its internal service call with the argument order of Home Assistant 2024.x. Home Assistant 2025.1 added a new first parameter, so the target ended up in the wrong field and no light was found - HCL did not control any light. The call is now built with named parameters and works with both signatures.
+- **Scenario change blocked by an older long transition** (RM-B20): a scenario or curve change ended running transition protections immediately, even when an older `apply` or scenario update with a long transition was still waiting to be sent. That older update then set its protection afterwards, and the new scenario was not sent until the protection ran out (up to the length of the transition) and then only with the normal transition. The protection now ends when the new update actually runs, after the older one.
+
+### Changed
+- README: the target resolution follows the rules of the installed Home Assistant version; details (e.g. configuration lights that carry a selected label) are described as version dependent (RM-D01).
+- CI: the Home Assistant tests also run on 2025.7.0 and 2025.8.0, the two releases at the boundary of Home Assistant's target helpers (RM-T09).
+
 ## [0.7.0b4] - 2026-09-27
 Fourth pre-release (beta) of 0.7.0: fixes RM-B13 to RM-B18 of the roadmap (review of 0.7.0b3, there numbered RM-B12 to RM-B17). The minimum Home Assistant version stays 2024.7.
 

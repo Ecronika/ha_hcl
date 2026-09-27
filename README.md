@@ -55,7 +55,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **"HCL Lighting"**.
-3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant's own target resolution of the installed version (the same as for light actions): hidden lights and configuration/diagnostic lights (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Lights given directly are always used.
+3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant itself, with the rules of the installed version (the same as for light actions). Typically hidden lights and configuration/diagnostic lights reached through a device or area (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Details follow the installed version, e.g. whether a configuration/diagnostic light that carries a selected label itself is included. Lights given directly are always used.
 
 **Requirements**: Home Assistant **2024.7** or newer.
 
@@ -237,7 +237,7 @@ pytest tests            # Home Assistant / logic tests
 pytest tests_frontend   # card tests (skipped without Playwright/Chromium)
 ```
 
-GitHub Actions (`.github/workflows/tests.yml`) runs hassfest, the Home Assistant tests against the minimum supported release (2024.7.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium. When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
+GitHub Actions (`.github/workflows/tests.yml`) runs hassfest, the Home Assistant tests against the minimum supported release (2024.7.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium. When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
 
 ---
 

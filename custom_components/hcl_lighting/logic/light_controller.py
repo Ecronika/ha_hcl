@@ -69,7 +69,8 @@ def extract_referenced_entities(hass: HomeAssistant, target_config: dict[str, An
     floors, labels) for the running version.
 
     2026.1+: helpers.target with TargetSelection; 2025.8–2025.12: with
-    TargetSelectorData; up to 2025.7: helpers.service with a service call.
+    TargetSelectorData; up to 2025.7: helpers.service with a service call
+    (its constructor changed in 2025.1, see _service_call).
     Groups are not expanded here (HCL expands light groups itself).
     """
     config = {
@@ -84,12 +85,24 @@ def extract_referenced_entities(hass: HomeAssistant, target_config: dict[str, An
     if ha_target is not None and hasattr(ha_target, "async_extract_referenced_entity_ids"):
         selection = getattr(ha_target, "TargetSelection", None) or ha_target.TargetSelectorData
         return ha_target.async_extract_referenced_entity_ids(hass, selection(config), expand_group=False)
-    from homeassistant.core import ServiceCall
     from homeassistant.helpers.service import async_extract_referenced_entity_ids
 
-    return async_extract_referenced_entity_ids(
-        hass, ServiceCall("light", "turn_on", config), expand_group=False
-    )
+    return async_extract_referenced_entity_ids(hass, _service_call(hass, config), expand_group=False)
+
+
+def _service_call(hass: HomeAssistant, data: dict[str, Any]):
+    """ServiceCall for the target helper of Home Assistant up to 2025.7.
+
+    2025.1 added hass as first parameter; a positional call with the old
+    signature would silently put the target into the wrong field (no target
+    at all), so the parameters are passed by name.
+    """
+    from homeassistant.core import ServiceCall
+
+    try:
+        return ServiceCall(hass=hass, domain="light", service="turn_on", data=data)
+    except TypeError:  # up to 2024.12: no hass parameter
+        return ServiceCall(domain="light", service="turn_on", data=data)
 
 
 @dataclass(slots=True)

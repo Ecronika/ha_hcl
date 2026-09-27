@@ -125,6 +125,10 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._update_lock = asyncio.Lock()
         self._update_requested = False
         self._request_context: Context | None = None
+        # New target values (scenario, curve) end running transition
+        # protections - in request order, i.e. only when the requested update
+        # holds the lock (an older apply or cycle may still set a protection)
+        self._end_protection_requested = False
 
         options = entry.options
         self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
@@ -289,8 +293,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     @callback
     def _handle_global_update(self, context: Context | None = None):
         """Handle global update signal (scenario change, curve preview/apply/save)."""
-        # New target values take precedence over a smooth return still running
-        self.override_manager.end_reengaging()
+        # New target values take precedence over a smooth return or a long
+        # transition still running. The protection ends when this update runs
+        # (after older requests), not now: an older apply or scenario update
+        # that is still waiting would otherwise set its protection afterwards
+        # and block this update for the length of its transition.
+        self._end_protection_requested = True
         self.hass.async_create_task(self.async_request_update(context))
 
     @property
@@ -527,6 +535,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._update_requested = False
         parent = self._request_context
         self._request_context = None
+        if self._end_protection_requested:
+            self._end_protection_requested = False
+            self.override_manager.end_reengaging()
         if not self._is_on:
             return
         try:
