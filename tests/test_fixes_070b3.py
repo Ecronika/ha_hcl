@@ -178,7 +178,7 @@ async def test_rm_b03_ct_light_gets_the_kelvin_it_can_reach(hass, no_frontend_re
     await _select(hass, "focus")
     assert lights.for_light("light.warm")[-1].data["color_temp_kelvin"] == 4000
     assert lights.for_light("light.wide")[-1].data["color_temp_kelvin"] == 6500
-    assert all(len(c.data["entity_id"]) == 1 for c in lights.calls)  # one command per reachable value
+    assert all(len(c.data["entity_id"]) == 1 for c in lights.calls)  # 0.7.0b4: one command per light
 
 
 async def test_rm_b03_turn_on_and_smart_transition_are_limited_too(hass, no_frontend_registration):
@@ -210,7 +210,8 @@ async def test_rm_b04_failed_command_is_not_reported_as_updated(hass, no_fronten
     lights.fail = {"light.b"}
     set_light(hass, "light.b", "on", brightness=200, xy_color=(0.2, 0.2), **COLOR_ATTRS)
     om.reset_override("light.b")
-    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
+    with pytest.raises(HomeAssistantError):  # 0.7.0b4: apply reports failed lights
+        await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert om.is_reengaging("light.a")
     assert not om.is_reengaging("light.b")  # its command failed
     assert om._override_state.get("light.b", {}).get("last_set") == before  # tracking restored
@@ -242,7 +243,8 @@ async def test_rm_b05_final_smart_transition_failure_is_reported(hass, no_fronte
     set_light(hass, "light.a", "on", brightness=200, color_temp_kelvin=6000, **CT_ATTRS)
     om.reset_override("light.a")
     caplog.clear()
-    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
+    with pytest.raises(HomeAssistantError):  # 0.7.0b4: apply reports failed lights
+        await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert not om.is_reengaging("light.a")
     assert "Smart transition for light.a failed" in caplog.text  # primary: warning
     assert any(r.levelname == "ERROR" and "light.a" in r.getMessage() for r in caplog.records)  # final
@@ -328,6 +330,7 @@ async def test_rm_b06_device_skips_hidden_and_config_entities(hass, no_frontend_
 async def test_rm_b07_writing_actions_need_control_permission(
     hass, no_frontend_registration, hass_read_only_user, service, data
 ):
+    Lights(hass)  # light commands succeed (apply reports failed ones)
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await setup_entry(hass, ["light.a"])
     await _hcl_on(hass)
@@ -340,6 +343,7 @@ async def test_rm_b07_writing_actions_need_control_permission(
 
 
 async def test_rm_b07_explicit_lights_need_control_permission(hass, no_frontend_registration, hass_read_only_user):
+    Lights(hass)  # light commands succeed (apply reports failed ones)
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     set_light(hass, "light.b", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await setup_entry(hass, ["light.a", "light.b"])

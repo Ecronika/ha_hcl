@@ -55,7 +55,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **"HCL Lighting"**.
-3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved like Home Assistant resolves action targets: hidden lights and configuration/diagnostic lights (e.g. status LEDs of wall switches) are skipped, and a light assigned to its own area belongs to that area, not to the area of its device. Lights given directly are always used.
+3. Name your instance (e.g. "Living Room"), select the lights and set the wake, midday and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant's own target resolution of the installed version (the same as for light actions): hidden lights and configuration/diagnostic lights (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Lights given directly are always used.
 
 **Requirements**: Home Assistant **2024.7** or newer.
 
@@ -159,7 +159,7 @@ By default a light that is switched on receives the HCL values immediately, even
 ### Services
 | Service | Fields | Effect |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. |
+| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. Sends the values at the time of the call; ends with an error if a light command failed (the other lights are updated). |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, default all), `manual_control` (default `true`) | Pauses the lights or hands them back to HCL |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = until changed) | Sets the scenario; a duration overrides the configured end |
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `midday_time`, `sleep_time` |
@@ -219,7 +219,8 @@ actions:
     *   Brightness: Updates only if delta > 1%
     *   Kelvin: Updates only if delta > 50K (compared with the temperature the light can reach; lights in XY mode are compared by colour)
 *   **Colour temperature range**: lights with native colour temperature get the value they can reach (limited to their min/max); colour lights get values outside their range through the XY simulation.
-*   **Failed commands**: a light whose command failed is not treated as updated (no transition protection, no false manual control on its next report); the next update tries again.
+*   **One command per light**: HCL sends each light its own command, so a failing light does not hide the success of the others.
+*   **Failed commands**: a light whose command failed is not treated as updated (no transition protection, no false manual control on its next report; this also applies to the command right after a light is switched on); the next update tries again.
 *   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them, `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}` with different times, not needed for `revert`; 1440 counts as 00:00). Invalid input is rejected.
 *   **RGBW/RGBWW lights** get the colour temperature through the XY simulation. Home Assistant's own conversion to the white channels was checked for 0.7.0 and not used: the white-channel range of such lights is not available and values outside it produce invalid channel values.
 

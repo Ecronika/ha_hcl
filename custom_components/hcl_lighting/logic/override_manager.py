@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 from homeassistant.util import dt as dt_util
 from homeassistant.core import State
 from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
@@ -101,20 +102,25 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["last_set"] = (brightness, kelvin)
 
-    def get_last_set_values(self, entity_id: str) -> tuple[int, int] | None:
-        """The last HCL values sent to the light (None if none)."""
-        data = self._override_state.get(entity_id)
-        return data.get("last_set") if data else None
+    def tracking_snapshot(self, entity_id: str) -> tuple[Any, Any]:
+        """Tracking values a command changes (last values, ignore window)."""
+        data = self._override_state.get(entity_id) or {}
+        return data.get("last_set"), data.get("ignore_events_until")
 
-    def restore_last_set_values(self, entity_id: str, values: tuple[int, int] | None) -> None:
-        """Undo set_last_set_values after a command that was not sent or failed."""
+    def restore_tracking(self, entity_id: str, snapshot: tuple[Any, Any]) -> None:
+        """Undo the tracking of a command that was not sent or failed.
+
+        The light never got the values: neither the values nor the ignore
+        window of that command may be used by the manual-control detection.
+        """
         data = self._override_state.get(entity_id)
         if data is None:
             return
-        if values is None:
-            data.pop("last_set", None)
-        else:
-            data["last_set"] = values
+        for key, value in zip(("last_set", "ignore_events_until"), snapshot):
+            if value is None:
+                data.pop(key, None)
+            else:
+                data[key] = value
 
     def check_override(self, entity_id: str, state: State | None, last_set_values: tuple[int, int] | None, old_state: State | None = None) -> bool:
         """Check if state change is a manual override."""
