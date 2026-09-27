@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b5] - 2026-09-27
+Fifth pre-release (beta) of 0.7.0: fixes RM-B19 and RM-B20 of the roadmap (review of 0.7.0b4). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **No lights controlled on Home Assistant 2025.1 to 2025.7** (RM-B19, regression in 0.7.0b4): on these versions the target resolution built its internal service call with the argument order of Home Assistant 2024.x. Home Assistant 2025.1 added a new first parameter, so the target ended up in the wrong field and no light was found - HCL did not control any light. The call is now built with named parameters and works with both signatures.
+- **Scenario change blocked by an older long transition** (RM-B20): a scenario or curve change ended running transition protections immediately, even when an older `apply` or scenario update with a long transition was still waiting to be sent. That older update then set its protection afterwards, and the new scenario was not sent until the protection ran out (up to the length of the transition) and then only with the normal transition. The protection now ends when the new update actually runs, after the older one.
+
+### Changed
+- README: the target resolution follows the rules of the installed Home Assistant version; details (e.g. configuration lights that carry a selected label) are described as version dependent (RM-D01).
+- CI: the Home Assistant tests also run on 2025.7.0 and 2025.8.0, the two releases at the boundary of Home Assistant's target helpers (RM-T09).
+
+## [0.7.0b4] - 2026-09-27
+Fourth pre-release (beta) of 0.7.0: fixes RM-B13 to RM-B18 of the roadmap (review of 0.7.0b3, there numbered RM-B12 to RM-B17). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Partly failed commands** (RM-B13): HCL sent one command for several lights. Home Assistant runs such a command for all lights and reports the first error afterwards, so after a failure HCL treated all of them as not updated, although some had received the values (their tracking values were then outdated). Each light now gets its own command.
+- **Ignore window after a failed command** (RM-B14): after a failed command only the tracking values were restored; the window in which HCL ignores the light's reports (up to the length of the transition) stayed active, so a manual change right afterwards could be missed. Values and window are now restored together.
+- **Failed command after switching a light on** (RM-B15): when the command HCL sends right after a light is switched on failed, the tracking values and the ignore window stayed as if it had succeeded. They are now restored as for the other commands.
+- **`hcl_lighting.apply` hid failed lights** (RM-B16): the action ended successfully even if light commands failed. It now ends with an error naming the lights that failed (the other lights are updated), like Home Assistant's own light actions.
+- **Devices with child devices** (RM-B17): targets are now resolved by Home Assistant's own target resolution of the installed version (the one light actions use) instead of HCL's own copy. On versions with child devices (Home Assistant 2026) a device includes the lights of its child devices, and the details (e.g. labelled configuration lights) follow the installed version exactly.
+- **`apply` queued behind a running update** (RM-B18): an `apply` waiting for a running update calculated its values only when it could send, so it could already send the values of a scenario chosen after it, with the `apply` transition instead of the scenario transition. `apply` now sends the values of the time it was called; the later scenario change follows with its own transition.
+
+### Changed
+- One light command per light instead of one command per group of lights (more, smaller commands; needed to know which light failed).
+
 ## [0.7.0b3] - 2026-09-26
 Third pre-release (beta) of 0.7.0: fixes RM-B01 to RM-B11 of the roadmap (phase 1). The minimum Home Assistant version stays 2024.7.
 

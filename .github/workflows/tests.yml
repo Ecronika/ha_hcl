@@ -30,6 +30,17 @@ jobs:
             phcc: "0.13.144"
             # HA 2024.7 does not pin josepy; josepy 2.x breaks its acme import
             extra: "josepy<2"
+          # Last version with the target helper in helpers.service (ServiceCall
+          # with hass since 2025.1). The aiodns of 2025.7/2025.8 needs pycares 4.
+          - ha: "2025.7.0"
+            python: "3.13"
+            phcc: "0.13.260"
+            extra: "pycares<5"
+          # First version with helpers.target (TargetSelectorData)
+          - ha: "2025.8.0"
+            python: "3.13"
+            phcc: "0.13.269"
+            extra: "pycares<5"
           # Current release (update together with pytest-homeassistant-custom-component)
           - ha: "2026.9.3"
             python: "3.14"

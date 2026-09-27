@@ -12,7 +12,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, HomeAssistant, callback, Event
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.util.dt import utcnow
@@ -125,6 +125,10 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._update_lock = asyncio.Lock()
         self._update_requested = False
         self._request_context: Context | None = None
+        # New target values (scenario, curve) end running transition
+        # protections - in request order, i.e. only when the requested update
+        # holds the lock (an older apply or cycle may still set a protection)
+        self._end_protection_requested = False
 
         options = entry.options
         self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
@@ -289,8 +293,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     @callback
     def _handle_global_update(self, context: Context | None = None):
         """Handle global update signal (scenario change, curve preview/apply/save)."""
-        # New target values take precedence over a smooth return still running
-        self.override_manager.end_reengaging()
+        # New target values take precedence over a smooth return or a long
+        # transition still running. The protection ends when this update runs
+        # (after older requests), not now: an older apply or scenario update
+        # that is still waiting would otherwise set its protection afterwards
+        # and block this update for the length of its transition.
+        self._end_protection_requested = True
         self.hass.async_create_task(self.async_request_update(context))
 
     @property
@@ -407,18 +415,17 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
         Never switches a light on; lights under manual control are skipped
         unless release_manual_control is set. Runs after an update cycle that
-        is still sending, so the newer request is the one that is sent last.
+        is still sending. The values are those at the time of the request: a
+        scenario change requested later is sent after it, with its own values
+        and transition. Raises HomeAssistantError if a light command failed.
         """
-        if self.controller.calculate_target_values(dt_util.now())[0] is None:
+        brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
+        if brightness is None:
             raise ServiceValidationError("HCL sends no values in Guest mode")
         if not self._resolved_targets:
             await self._re_evaluate_targets_and_listeners()
         targets = self._checked_lights(lights)
         async with self._update_lock:
-            # Values at the time of sending (the wait may have taken a while)
-            brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
-            if brightness is None:
-                raise ServiceValidationError("HCL sends no values in Guest mode")
             if release_manual_control:
                 for eid in targets:
                     self.override_manager.reset_override(eid)
@@ -433,15 +440,22 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             if not active:
                 return
             transition = self._transition if transition is None else float(transition)
-            updated = await self.controller.apply_batch(
+            result = await self.controller.apply_batch(
                 active, brightness, kelvin, transition=transition, parent=context
             )
             # A transition longer than the update transition must not be cut
             # short by the next update cycles (like a long scenario transition);
             # a scenario change, a new apply or switching the light off ends it.
             if transition > self._transition:
-                for eid in updated:
+                for eid in result.updated:
                     self.override_manager.set_reengaging(eid, transition)
+        if result.failed:
+            # Like Home Assistant's own light actions: the caller learns about
+            # the failure (the other lights have been updated)
+            first = next(iter(result.failed.values()))
+            raise HomeAssistantError(
+                f"Light update failed for {', '.join(sorted(result.failed))}: {first}"
+            ) from first
 
     async def async_set_manual_control(
         self, lights: list[str] | None, manual_control: bool, context: Context | None = None
@@ -521,6 +535,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._update_requested = False
         parent = self._request_context
         self._request_context = None
+        if self._end_protection_requested:
+            self._end_protection_requested = False
+            self.override_manager.end_reengaging()
         if not self._is_on:
             return
         try:
@@ -589,7 +606,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             scenario_change = self.controller.consume_mode_change()
             transition = self._scenario_transition if scenario_change else self._transition
             if active_lights:
-                updated = await self.controller.apply_batch(
+                result = await self.controller.apply_batch(
                     active_lights, 
                     self._calculated_brightness, 
                     self._calculated_kelvin,
@@ -599,7 +616,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 # The scenario transition may be longer than the update
                 # interval: the following cycles must not cut it short
                 if scenario_change and transition > self._transition:
-                    for eid in updated:
+                    for eid in result.updated:
                         self.override_manager.set_reengaging(eid, transition)
         except Exception:
              _LOGGER.exception("Error in HCL update loop")
@@ -642,16 +659,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      self._calculated_brightness = fresh_b
                      self._calculated_kelvin = fresh_k
 
-                     # Synchronous Update to Override Manager (Fix Race Condition)
-                     self.override_manager.set_last_set_values(
-                         entity_id, fresh_b, self.controller.reachable_kelvin(entity_id, fresh_k, new_state)
-                     )
-                     
-                     # Set ignore window SYNCHRONOUSLY before task runs to prevent self-detection
-                     self.override_manager.set_ignore_window(
-                         entity_id, IGNORE_WINDOW_SECONDS + self._turn_on_transition
-                     )
-
+                     # apply_fast sets the tracking values and the ignore window
+                     # synchronously before sending (no self-detection of the
+                     # first state report) and restores them if the command fails.
                      # Await immediately to block handling of subsequent events until command is sent
                      await self.controller.apply_fast(
                          entity_id, 
@@ -659,6 +669,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                          fresh_k,
                          state_obj=new_state,
                          transition=self._turn_on_transition,
+                         ignore_seconds=IGNORE_WINDOW_SECONDS + self._turn_on_transition,
                      )
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return

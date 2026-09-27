@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import asyncio
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import time
@@ -13,11 +14,6 @@ from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_COLOR_TEMP_KELVIN,
     ColorMode
-)
-from homeassistant.helpers import (
-    area_registry as ar,
-    device_registry as dr,
-    entity_registry as er,
 )
 from homeassistant.util.color import (
     color_temperature_to_rgb,
@@ -66,6 +62,60 @@ from homeassistant.const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def extract_referenced_entities(hass: HomeAssistant, target_config: dict[str, Any]):
+    """Home Assistant's own resolution of a target (entities, devices, areas,
+    floors, labels) for the running version.
+
+    2026.1+: helpers.target with TargetSelection; 2025.8–2025.12: with
+    TargetSelectorData; up to 2025.7: helpers.service with a service call
+    (its constructor changed in 2025.1, see _service_call).
+    Groups are not expanded here (HCL expands light groups itself).
+    """
+    config = {
+        key: target_config[key]
+        for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id")
+        if target_config.get(key)
+    }
+    try:
+        from homeassistant.helpers import target as ha_target
+    except ImportError:
+        ha_target = None
+    if ha_target is not None and hasattr(ha_target, "async_extract_referenced_entity_ids"):
+        selection = getattr(ha_target, "TargetSelection", None) or ha_target.TargetSelectorData
+        return ha_target.async_extract_referenced_entity_ids(hass, selection(config), expand_group=False)
+    from homeassistant.helpers.service import async_extract_referenced_entity_ids
+
+    return async_extract_referenced_entity_ids(hass, _service_call(hass, config), expand_group=False)
+
+
+def _service_call(hass: HomeAssistant, data: dict[str, Any]):
+    """ServiceCall for the target helper of Home Assistant up to 2025.7.
+
+    2025.1 added hass as first parameter; a positional call with the old
+    signature would silently put the target into the wrong field (no target
+    at all), so the parameters are passed by name.
+    """
+    from homeassistant.core import ServiceCall
+
+    try:
+        return ServiceCall(hass=hass, domain="light", service="turn_on", data=data)
+    except TypeError:  # up to 2024.12: no hass parameter
+        return ServiceCall(domain="light", service="turn_on", data=data)
+
+
+@dataclass(slots=True)
+class BatchResult:
+    """Result of apply_batch.
+
+    updated: lights whose command succeeded (fast mode: whose command was sent).
+    failed: lights whose command raised an error, with the error.
+    Lights without a command (already at the values) are in neither.
+    """
+
+    updated: list[str] = field(default_factory=list)
+    failed: dict[str, BaseException] = field(default_factory=dict)
 
 # Colour modes HCL drives through the XY simulation (Home Assistant converts
 # xy_color to the light's own mode, including RGBW and RGBWW)
@@ -280,127 +330,95 @@ class HCLLightController:
         fast_mode: bool = False,
         parent: Context | None = None,
         on_failure: Callable[[list[str]], None] | None = None,
-    ) -> list[str]:
-        """Apply settings to a batch of lights (parallel commands).
+    ) -> BatchResult:
+        """Apply settings to a batch of lights (one command per light, in parallel).
 
-        Returns the lights whose command succeeded. Lights whose command failed
-        get their previous tracking values back, so the next state report is
-        not taken for manual control.
+        Each light gets its own command: Home Assistant runs a command for
+        several lights for all of them and raises the first error afterwards,
+        so the lights of a shared command could not be told apart.
+
+        A light whose command failed (or was not sent) gets its previous
+        tracking values and ignore window back, so the manual-control
+        detection does not use values the light never received.
 
         fast_mode: the commands run in the background (the caller does not
-        wait); the lights a command was sent to are returned, and on_failure
-        is called with the lights of a command that failed later.
+        wait); result.updated holds the lights a command was sent to, and
+        on_failure is called with the lights whose command failed later.
         """
+        result = BatchResult()
         if not lights:
-            return []
+            return result
 
         transition_val = 0 if transition is None else transition
+        smart_transition = self.config_entry.options.get(CONF_SMART_TRANSITION, False)
+        bulk = transition_val == 0 or not smart_transition
+        xy = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
 
-        lights_ct: list[str] = []
-        lights_dim: list[str] = []
-        lights_xy_sim: list[str] = []
-        previous: dict[str, tuple[int, int] | None] = {}
+        previous: dict[str, tuple[Any, Any]] = {}
+        # (light, command)
+        jobs: list[tuple[str, Awaitable[bool]]] = []
 
-        # -- Capability resolution & threshold check --
         for entity_id in lights:
             # Check thresholds to avoid redundant traffic
             if not self._needs_update(entity_id, brightness, kelvin):
                 continue
             cap_type = self._get_capability(entity_id, kelvin)
+            data: dict[str, Any] = {"entity_id": [entity_id], "brightness_pct": brightness, "transition": transition_val}
             if cap_type == "ct":
-                lights_ct.append(entity_id)
+                # Native colour temperature: the value the light can reach
                 tracked_kelvin = self.reachable_kelvin(entity_id, kelvin)
+                data["color_temp_kelvin"] = tracked_kelvin
+                job = (
+                    self._async_call("light", "turn_on", data, blocking=True, parent=parent)
+                    if bulk else self._apply_smart_ct_single(entity_id, tracked_kelvin, brightness, transition_val, parent)
+                )
             elif cap_type == "xy_sim":
-                lights_xy_sim.append(entity_id)
                 tracked_kelvin = kelvin
+                data["xy_color"] = xy
+                job = (
+                    self._async_call("light", "turn_on", data, blocking=True, parent=parent)
+                    if bulk else self._apply_smart_xy_single(entity_id, xy[0], xy[1], brightness, transition_val, parent)
+                )
             elif cap_type == "dim":
-                lights_dim.append(entity_id)
                 tracked_kelvin = kelvin
+                job = self._async_call("light", "turn_on", data, blocking=True, parent=parent)
             else:
                 continue
             # Tracking is set before sending (state reports may arrive at once);
-            # a failed command restores the previous values.
-            previous[entity_id] = self.override_manager.get_last_set_values(entity_id)
+            # a failed command restores it.
+            previous[entity_id] = self.override_manager.tracking_snapshot(entity_id)
             self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
             self.override_manager.set_ignore_window(entity_id, transition_val)
-
-        smart_transition = self.config_entry.options.get(CONF_SMART_TRANSITION, False)
-        bulk = transition_val == 0 or not smart_transition
-        # (lights of the command, command)
-        jobs: list[tuple[list[str], Awaitable[bool]]] = []
-
-        # Group 1: XY simulation
-        if lights_xy_sim:
-            x, y = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
-            if bulk:
-                jobs.append((lights_xy_sim, self._async_call(
-                    "light", "turn_on",
-                    {"entity_id": lights_xy_sim, "brightness_pct": brightness, "xy_color": (x, y), "transition": transition_val},
-                    blocking=True, parent=parent,
-                )))
-            else:
-                for eid in lights_xy_sim:
-                    jobs.append(([eid], self._apply_smart_xy_single(eid, x, y, brightness, transition_val, parent)))
-
-        # Group 2: native colour temperature, each light gets the value it can
-        # reach (lights with different ranges get separate commands)
-        if lights_ct:
-            by_kelvin: dict[int, list[str]] = {}
-            for eid in lights_ct:
-                by_kelvin.setdefault(self.reachable_kelvin(eid, kelvin), []).append(eid)
-            for ct_kelvin, eids in by_kelvin.items():
-                if bulk:
-                    jobs.append((eids, self._async_call(
-                        "light", "turn_on",
-                        {"entity_id": eids, "brightness_pct": brightness, "color_temp_kelvin": ct_kelvin, "transition": transition_val},
-                        blocking=True, parent=parent,
-                    )))
-                else:
-                    for eid in eids:
-                        jobs.append(([eid], self._apply_smart_ct_single(eid, ct_kelvin, brightness, transition_val, parent)))
-
-        # Group 3: dimmer only
-        if lights_dim:
-            jobs.append((lights_dim, self._async_call(
-                "light", "turn_on",
-                {"entity_id": lights_dim, "brightness_pct": brightness, "transition": transition_val},
-                blocking=True, parent=parent,
-            )))
+            jobs.append((entity_id, job))
 
         if not jobs:
-            return []
+            return result
 
         if fast_mode:
-            attempted: list[str] = []
-            for eids, job in jobs:
+            for entity_id, job in jobs:
                 task = self.hass.async_create_task(job)
                 task.add_done_callback(
-                    lambda t, eids=eids: self._background_result(t, eids, previous, on_failure)
+                    lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
                 )
-                attempted.extend(eids)
-            return attempted
+                result.updated.append(entity_id)
+            return result
 
-        results = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
-        updated: list[str] = []
-        for (eids, _job), result in zip(jobs, results):
-            if result is True:
-                updated.extend(eids)
+        outcomes = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
+        for (entity_id, _job), outcome in zip(jobs, outcomes):
+            if outcome is True:
+                result.updated.append(entity_id)
                 continue
-            if isinstance(result, BaseException):
-                _LOGGER.error("Light update for %s failed: %s", ", ".join(eids), result, exc_info=result)
-            self._restore_tracking(eids, previous)
-        return updated
-
-    def _restore_tracking(self, eids: list[str], previous: dict[str, tuple[int, int] | None]) -> None:
-        """A command was not sent or failed: the light keeps its previous values."""
-        for eid in eids:
-            self.override_manager.restore_last_set_values(eid, previous.get(eid))
+            if isinstance(outcome, BaseException):
+                _LOGGER.error("Light update for %s failed: %s", entity_id, outcome, exc_info=outcome)
+                result.failed[entity_id] = outcome
+            self.override_manager.restore_tracking(entity_id, previous[entity_id])
+        return result
 
     def _background_result(
         self,
         task: asyncio.Task,
-        eids: list[str],
-        previous: dict[str, tuple[int, int] | None],
+        entity_id: str,
+        previous: tuple[Any, Any],
         on_failure: Callable[[list[str]], None] | None,
     ) -> None:
         """Result of a command sent in fast mode."""
@@ -411,53 +429,62 @@ class HCLLightController:
         if error is None and task.result() is True:
             return
         if error is not None:
-            _LOGGER.error("Light update for %s failed: %s", ", ".join(eids), error, exc_info=error)
-        self._restore_tracking(eids, previous)
+            _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
+        self.override_manager.restore_tracking(entity_id, previous)
         if on_failure is not None:
-            on_failure(eids)
+            on_failure([entity_id])
 
-    async def apply_fast(self, entity_id: str, brightness: int, kelvin: int, state_obj=None, transition: float = 0) -> bool:
-        """Ultra-fast HCL application for turn-on events (True if a command was sent)."""
+    async def apply_fast(
+        self,
+        entity_id: str,
+        brightness: int,
+        kelvin: int,
+        state_obj=None,
+        transition: float = 0,
+        ignore_seconds: float | None = None,
+    ) -> bool:
+        """Ultra-fast HCL application for turn-on events (True if the command succeeded).
+
+        The tracking values and the ignore window are set before the command
+        (synchronously, before the first await, so the first state report of
+        the light is not taken for manual control) and restored if the
+        command is not sent or fails.
+        """
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
-        
+
         # Use passed state object or fallback to lookup (performance optimization)
         state = state_obj or self.hass.states.get(entity_id)
-        
         if state is None:
             return False
-
         if self._is_group(entity_id, state):
-             _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
-             return False
+            _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
+            return False
 
-        # Redundant tracking removed (handled in switch.py synchronously)
-        
         cap_type = self._get_capability(entity_id, kelvin, state)
-        
-        service_data = {
-            "entity_id": entity_id,
-            "brightness_pct": brightness,
-            "transition": transition
-        }
-        
+        service_data = {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}
+        tracked_kelvin = kelvin
         if cap_type == "ct":
-             service_data["color_temp_kelvin"] = self.reachable_kelvin(entity_id, kelvin, state)
+            tracked_kelvin = self.reachable_kelvin(entity_id, kelvin, state)
+            service_data["color_temp_kelvin"] = tracked_kelvin
         elif cap_type == "xy_sim":
-            rgb = color_temperature_to_rgb(kelvin)
-            x, y = color_RGB_to_xy(*rgb)
-            service_data["xy_color"] = (x, y)
-        elif cap_type == "dim":
-            pass
-        else:
+            service_data["xy_color"] = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+        elif cap_type != "dim":
             return False  # onoff or unknown
 
-        # Execute immediately in current task context (no double-scheduling)
-        return await self._async_call(
-            "light", 
-            "turn_on",
-            service_data,
-            blocking=True
+        previous = self.override_manager.tracking_snapshot(entity_id)
+        self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
+        self.override_manager.set_ignore_window(
+            entity_id, transition if ignore_seconds is None else ignore_seconds
         )
+        try:
+            sent = await self._async_call("light", "turn_on", service_data, blocking=True)
+        except Exception as err:  # the light keeps its previous tracking
+            _LOGGER.error("Light update for %s after switching on failed: %s", entity_id, err, exc_info=err)
+            self.override_manager.restore_tracking(entity_id, previous)
+            return False
+        if not sent:
+            self.override_manager.restore_tracking(entity_id, previous)
+        return sent
 
     async def reengage_light(
         self, entity_id: str, target_brightness: int, target_kelvin: int, parent: Context | None = None
@@ -484,7 +511,7 @@ class HCLLightController:
             for eid in eids:
                 self.override_manager.end_reengaging(eid)
 
-        sent = await self.apply_batch(
+        result = await self.apply_batch(
             [entity_id], 
             target_brightness, 
             target_kelvin, 
@@ -494,7 +521,7 @@ class HCLLightController:
             on_failure=_failed,
         )
         # Normal update cycles must not cut the smooth transition short
-        if entity_id in sent:
+        if entity_id in result.updated:
             self.override_manager.set_reengaging(entity_id, duration)
 
     def capability_for(self, entity_id: str, kelvin: int) -> str:
@@ -746,65 +773,22 @@ class HCLLightController:
     def resolve_targets(self, target_config: dict[str, Any], groups: set[str] | None = None) -> set[str]:
         """Resolve target config to a set of light entity IDs.
 
-        Follows Home Assistant's own target resolution (service calls):
-        - entities given directly are always used;
-        - entities reached through a device, area, floor or label are skipped
-          when they are hidden or a config/diagnostic entity (entity_category),
-          e.g. the status LED of a wall switch;
-        - an area includes the entities of its devices only if the entity has
-          no area of its own (an entity assigned to another area is not part
-          of the device's area);
-        - disabled entities are not included.
-        Light groups are expanded to their members afterwards.
+        Entities, devices, areas, floors and labels are resolved by Home
+        Assistant's own target resolution of the running version (the same
+        one light actions use): hidden and configuration/diagnostic lights
+        reached indirectly are skipped, a light with its own area belongs to
+        that area, disabled lights are not included, and on versions with
+        child/composite devices a device includes them. Lights given
+        directly are always used. Light groups are expanded afterwards.
 
         groups (optional) collects the light groups that were expanded, so the
         caller can watch their member lists.
         """
-        er_registry = er.async_get(self.hass)
-        dr_registry = dr.async_get(self.hass)
-        ar_registry = ar.async_get(self.hass)
-
-        def as_list(key: str) -> list[str]:
-            value = target_config.get(key) or []
-            return [value] if isinstance(value, str) else list(value)
-
-        def is_primary_light(entry: er.RegistryEntry) -> bool:
-            return entry.domain == "light" and entry.hidden_by is None and entry.entity_category is None
-
-        # 1. Entities given directly
-        entity_ids: set[str] = set(as_list("entity_id"))
-
-        device_ids: set[str] = set(as_list("device_id"))
-        area_ids: set[str] = set(as_list("area_id"))
-
-        # 2. Labels: labelled entities (not hidden), devices and areas
-        for label_id in as_list("label_id"):
-            for entry in er.async_entries_for_label(er_registry, label_id):
-                if entry.domain == "light" and entry.hidden_by is None:
-                    entity_ids.add(entry.entity_id)
-            device_ids.update(d.id for d in dr.async_entries_for_label(dr_registry, label_id))
-            area_ids.update(a.id for a in ar.async_entries_for_label(ar_registry, label_id))
-
-        # 3. Floors expand to their areas
-        for floor_id in as_list("floor_id"):
-            area_ids.update(a.id for a in ar.async_entries_for_floor(ar_registry, floor_id))
-
-        # 4. Devices (targeted or labelled): their primary lights
-        for device_id in device_ids:
-            for entry in er.async_entries_for_device(er_registry, device_id):
-                if is_primary_light(entry):
-                    entity_ids.add(entry.entity_id)
-
-        # 5. Areas: lights assigned to the area, and lights of the area's
-        #    devices that have no area of their own
-        for area_id in area_ids:
-            for entry in er.async_entries_for_area(er_registry, area_id):
-                if is_primary_light(entry):
-                    entity_ids.add(entry.entity_id)
-            for device in dr.async_entries_for_area(dr_registry, area_id):
-                for entry in er.async_entries_for_device(er_registry, device.id):
-                    if is_primary_light(entry) and not entry.area_id:
-                        entity_ids.add(entry.entity_id)
+        selected = extract_referenced_entities(self.hass, target_config)
+        entity_ids = {
+            eid for eid in selected.referenced | selected.indirectly_referenced
+            if eid.startswith("light.")
+        }
 
         # Expand Groups
         final_entities = set()
