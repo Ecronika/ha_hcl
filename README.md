@@ -106,7 +106,7 @@ The three anchors must leave room for the curve sectors (wake ramp 3 h, midday s
 |---|---|---|
 | Update interval | 27 s | Time between two update cycles (10–600 s) |
 | Transition of updates | 20 s | Must be shorter than the update interval; lights without transition support ignore it |
-| Transition when switched on | 0 s | Transition of the values sent right after a light is switched on |
+| Transition when switched on | 0 s | Transition of the values sent right after a light is switched on (0–30 s; the update cycles do not interrupt it) |
 | Return to HCL after manual control | 240 min | 0 = HCL never takes a paused light back automatically |
 | Switching a light off ends manual control | on | Off: a paused light stays paused when it is switched off and on again |
 | Keep manual control across restarts | off | On: paused lights stay paused after a Home Assistant restart |

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b6] - 2026-09-27
+Sixth pre-release (beta) of 0.7.0: fixes RM-B21 and RM-B22 of the roadmap. The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Turn-on transition cut short** (RM-B21): the transition of the values sent right after a light is switched on (option "Transition when switched on", up to 30 s) was not protected against the normal update cycles. A cycle during the transition (e.g. update interval 10 s, turn-on transition 30 s) sent the values again with the update transition and replaced the fade. The light is now left alone until the turn-on transition has ended, as for long `apply` and scenario transitions; if the command fails, no protection is set.
+- **HCL off and on (or reload) left lights waiting** (RM-B22): a light still protected by an earlier long transition (`apply`, scenario, smooth return) was skipped by the update right after switching *HCL active* on again, and after a reload of the integration (e.g. options or curve saved), until the old protection ran out (up to minutes). Switching HCL on and setting it up again now end these protections, so HCL takes its lights back at once. Switching HCL on while it is already on changes nothing.
+
 ## [0.7.0b5] - 2026-09-27
 Fifth pre-release (beta) of 0.7.0: fixes RM-B19 and RM-B20 of the roadmap (review of 0.7.0b4). The minimum Home Assistant version stays 2024.7.
 

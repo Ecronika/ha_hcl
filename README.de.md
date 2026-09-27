@@ -58,7 +58,7 @@ Beginnt oder endet die manuelle Steuerung eines Lichts, erscheint ein Logbuch-Ei
 
 ## Optionen (Integration → Konfigurieren)
 1. **Kurve und Lichter**: Lichter, Ankerzeiten, minimale/maximale Helligkeit, „Auf Min/Max skalieren statt abschneiden“ (Standard aus), Kompatibilitätsmodus. Eine in der Karte gespeicherte Kurve hat Vorrang; wer eine Ankerzeit ändert, verwirft sie.
-2. **Aktualisierung und manuelle Steuerung**: Intervall (Standard 27 s), Übergangszeit (20 s), Übergang beim Einschalten (0 s), Rückkehr zu HCL (240 min, 0 = nie), Ausschalten beendet manuelle Steuerung, über Neustarts behalten, Werte von Einschaltbefehlen behalten, Übergang bei Szenario-Wechsel (Standard wie Übergangszeit).
+2. **Aktualisierung und manuelle Steuerung**: Intervall (Standard 27 s), Übergangszeit (20 s), Übergang beim Einschalten (0 s, wird von den Aktualisierungen nicht unterbrochen), Rückkehr zu HCL (240 min, 0 = nie), Ausschalten beendet manuelle Steuerung, über Neustarts behalten, Werte von Einschaltbefehlen behalten, Übergang bei Szenario-Wechsel (Standard wie Übergangszeit).
 3. **Szenarien**: Werte von Fokus, Entspannen, Putzen und Nachtlicht, Dauer von Fokus/Entspannen/Putzen, Fokus/Entspannen/Putzen auf Min/Max begrenzen (aus), Schlafen und Nachtlicht enden zur Aufwachzeit (aus).
 
 ## Dashboard-Karte

@@ -151,7 +151,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         # Restore State
         if last_state := await self.async_get_last_state():
             if last_state.state == STATE_ON:
-                self._is_on = True
                 await self.async_turn_on()
 
         # Target groups (and other light platforms) may still be loading during
@@ -339,7 +338,13 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on."""
+        """Turn the switch on (also when restored at startup or after a reload)."""
+        if not self._is_on:
+            # Switched on (or set up again): HCL takes its lights back at
+            # once. Transition protections from before (a long apply, scenario
+            # or turn-on transition) end - in request order, like a scenario
+            # change - instead of blocking the lights until they run out.
+            self._end_protection_requested = True
         self._is_on = True
         self.async_write_ha_state() # Ensure UI updates immediately
         
@@ -659,11 +664,18 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      self._calculated_brightness = fresh_b
                      self._calculated_kelvin = fresh_k
 
+                     # The turn-on transition must not be cut short by the next
+                     # update cycles (like a long apply or scenario transition);
+                     # set before sending, ended if the command is not sent.
+                     protect = self._turn_on_transition > 0
+                     if protect:
+                         self.override_manager.set_reengaging(entity_id, self._turn_on_transition)
+
                      # apply_fast sets the tracking values and the ignore window
                      # synchronously before sending (no self-detection of the
                      # first state report) and restores them if the command fails.
                      # Await immediately to block handling of subsequent events until command is sent
-                     await self.controller.apply_fast(
+                     sent = await self.controller.apply_fast(
                          entity_id, 
                          fresh_b, 
                          fresh_k,
@@ -671,6 +683,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                          transition=self._turn_on_transition,
                          ignore_seconds=IGNORE_WINDOW_SECONDS + self._turn_on_transition,
                      )
+                     if protect and not sent:
+                         self.override_manager.end_reengaging(entity_id)
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return
 
