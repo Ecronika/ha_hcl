@@ -835,3 +835,110 @@ async def test_b55_card_moved_in_the_dashboard_keeps_working(page):
     assert await page.evaluate("() => card._isDirty") is True
     assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
     assert page.errors == []
+
+
+# ---------------------------------------------------------------- RM-F03 (0.7.0b7)
+# Home Assistant sets hass on every state change of any entity: a new hass and
+# a new states map, unchanged state objects keep their identity.
+async def _ha_like(page, h: dict) -> None:
+    await page.evaluate(
+        """(h) => {
+            h.callService = () => 0;
+            window.h = h;
+            card.hass = h;
+            // next hass: only 'sensor.power' changed (or the given states)
+            window.next = (states = {}) => {
+                const n = {...window.h, states: {...window.h.states,
+                    'sensor.power': {state: String(Math.random()), attributes: {}}, ...states}};
+                window.h = n;
+                card.hass = n;
+            };
+            window.record = () => {
+                window.__mutations = 0;
+                window.__formats = 0;
+                window.__mo = new MutationObserver(list => { window.__mutations += list.length; });
+                window.__mo.observe(card.shadowRoot, {subtree: true, childList: true, attributes: true, characterData: true});
+                const Real = Intl.NumberFormat;
+                if (!window.__RealNumberFormat) window.__RealNumberFormat = Real;
+                Intl.NumberFormat = function (...a) { window.__formats += 1; return new window.__RealNumberFormat(...a); };
+            };
+            window.stop = async () => {
+                await new Promise(r => setTimeout(r, 50));
+                window.__mo.disconnect();
+                Intl.NumberFormat = window.__RealNumberFormat;
+                return {mutations: window.__mutations, formats: window.__formats};
+            };
+        }""",
+        h,
+    )
+    await page.wait_for_timeout(150)
+
+
+async def test_rm_f03_foreign_state_changes_cost_no_dom_work(page):
+    await _ha_like(page, _setpoint_hass("auto", "40", "3000"))
+    await page.evaluate("() => record()")
+    await page.evaluate("() => { for (let i = 0; i < 200; i++) next(); }")
+    result = await page.evaluate("() => stop()")
+    assert result == {"mutations": 0, "formats": 0}
+    # the card still works with the latest hass (service calls)
+    assert await page.evaluate("() => card._hass === window.h") is True
+    assert page.errors == []
+
+
+async def test_rm_f03_relevant_changes_still_arrive(page):
+    await _ha_like(page, _setpoint_hass("auto", "40", "3000"))
+    now = lambda: page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")  # noqa: E731
+    assert "40 %" in await now()
+    # setpoint sensor
+    await page.evaluate("() => next({'sensor.tb': {state: '55', attributes: {}}})")
+    assert "55 %" in await now()
+    # mode select
+    await page.evaluate("() => next({'select.mode': {state: 'focus', attributes: {}}})")
+    assert await _active_chips(page) == ["focus"]
+    # curve from the sensor
+    await page.evaluate("""() => {
+        const s = window.h.states['sensor.hcl_curve_data'];
+        const pts = s.attributes.control_points.map(p => ({...p, b: 20}));
+        next({'sensor.hcl_curve_data': {...s, attributes: {...s.attributes, control_points: pts}}});
+    }""")
+    assert await page.evaluate("() => card._points.every(p => p.b === 20)") is True
+    # language and number format (new locale object)
+    await page.evaluate("() => { const n = {...window.h, language: 'de', locale: {language: 'de', time_format: '24'}}; window.h = n; card.hass = n; }")
+    assert await page.evaluate("() => card._lang") == "de"
+    assert "Jetzt" in await now()
+    # theme
+    await page.evaluate("() => { const n = {...window.h, themes: {darkMode: true}}; window.h = n; card.hass = n; }")
+    assert "true" in await page.evaluate("() => card._themeKey")
+    # time zone
+    await page.evaluate("() => { const n = {...window.h, config: {time_zone: 'Asia/Tokyo'}}; window.h = n; card.hass = n; }")
+    assert await page.evaluate("() => card._timeZone") == "Asia/Tokyo"
+    assert page.errors == []
+
+
+async def test_rm_f03_sensor_appearing_later_is_picked_up(page):
+    h = _hass("auto")
+    sensor = h["states"].pop("sensor.hcl_curve_data")
+    h["states"] = {}
+    await _ha_like(page, h)
+    assert await page.evaluate("() => card._dataState") == "loading"
+    await page.evaluate("() => next()")  # states loaded, sensor still missing
+    assert await page.evaluate("() => card._dataState") == "missing"
+    await page.evaluate("(s) => next({'sensor.hcl_curve_data': s, 'select.mode': {state: 'auto', attributes: {}}})", sensor)
+    assert await page.evaluate("() => card._dataState") == "ready"
+    assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
+    assert page.errors == []
+
+
+async def test_rm_f03_curve_held_back_during_a_drag_arrives_afterwards(page):
+    await _ha_like(page, _hass("auto"))
+    await page.evaluate("""() => {
+        card._drag = {fake: true};  // a point is under the finger
+        const s = window.h.states['sensor.hcl_curve_data'];
+        const pts = s.attributes.control_points.map(p => ({...p, b: 25}));
+        next({'sensor.hcl_curve_data': {...s, attributes: {...s.attributes, control_points: pts}}});
+    }""")
+    assert await page.evaluate("() => card._points.every(p => p.b === 25)") is False
+    # after the drag the next hass (only a foreign entity changed) delivers it
+    await page.evaluate("() => { card._drag = null; next(); }")
+    assert await page.evaluate("() => card._points.every(p => p.b === 25)") is True
+    assert page.errors == []

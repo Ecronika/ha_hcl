@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,6 +43,7 @@ from ..const import (
     XY_COLOR_DISTANCE_THRESHOLD,
     CONFIGURABLE_SCENARIOS,
     LIMITABLE_SCENARIOS,
+    OWN_CONTEXT_SECONDS,
     CONF_SCENARIO_LIMITS,
     DEFAULT_SCENARIO_LIMITS,
     CONF_BRIGHTNESS_SCALING,
@@ -142,7 +144,10 @@ class HCLLightController:
         self._adapt_color = True
 
         # Contexts of the service calls HCL sends itself ({context_id: monotonic time})
+        # and the same contexts oldest first, so expired ones are removed from
+        # the front instead of searching all of them for every command
         self._own_contexts: dict[str, float] = {}
+        self._own_context_order: deque[tuple[float, str]] = deque()
 
     @property
     def adapt_brightness(self) -> bool:
@@ -182,10 +187,12 @@ class HCLLightController:
         """
         now = time.monotonic()
         # Contexts are only needed while the resulting state changes arrive
-        for ctx_id in [c for c, t in self._own_contexts.items() if now - t > 300]:
-            del self._own_contexts[ctx_id]
+        order = self._own_context_order
+        while order and now - order[0][0] > OWN_CONTEXT_SECONDS:
+            del self._own_contexts[order.popleft()[1]]
         context = Context(parent_id=parent.id if parent is not None else None)
         self._own_contexts[context.id] = now
+        order.append((now, context.id))
         return context
 
     _BRIGHTNESS_KEYS = ("brightness_pct",)

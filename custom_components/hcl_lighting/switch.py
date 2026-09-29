@@ -94,6 +94,13 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "hcl_switch"
+    # Live state only: the calculated values change with every curve step
+    # (history: target value sensors), the light list is large and manual
+    # control has its own event and logbook entries. Recording them would
+    # store a new attribute row with the full light list many times a day.
+    _unrecorded_attributes = frozenset({
+        "calculated_brightness", "calculated_color_temp", "target_entities", "manual_control",
+    })
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller: HCLLightController, hcl_calc: HCLCalculator, override_manager: OverrideManager) -> None:
         """Initialize the switch."""
@@ -329,11 +336,11 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
-        targets = self._resolved_targets or []
         return {
             "calculated_brightness": self._calculated_brightness,
             "calculated_color_temp": self._calculated_kelvin,
-            "target_entities": list(targets),
+            # sorted: resolving the same lights again changes nothing
+            "target_entities": sorted(self._resolved_targets or ()),
             "manual_control": self.override_manager.overridden_entities(),
         }
 

@@ -50,6 +50,7 @@ ATTR_SAMPLES = "samples"
 # Release Hardening Constants
 XY_COLOR_DISTANCE_THRESHOLD = 0.05 # Euclidean distance in CIE 1931 space
 IGNORE_WINDOW_SECONDS = 2.0        # Seconds to ignore events after setting a value
+OWN_CONTEXT_SECONDS = 300          # Seconds HCL remembers the contexts of its own commands
  
 # v0.5.0 Scenario Engine
 CONF_SCENARIOS = "scenarios"

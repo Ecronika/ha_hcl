@@ -21,7 +21,7 @@ Die Karten-Ressource wird im UI-Modus automatisch als `/hcl_lighting_static/hcl-
 ## Entitäten je Instanz
 | Entität | Zweck |
 |---|---|
-| **HCL aktiv** (Schalter) | HCL ein/aus. Attribut `manual_control`: manuell gesteuerte Lichter |
+| **HCL aktiv** (Schalter) | HCL ein/aus. Attribut `manual_control`: manuell gesteuerte Lichter. Die Attribute des Schalters (`manual_control`, `target_entities`, `calculated_*`) sind Live-Werte und stehen nicht im Verlauf; den Verlauf der Werte zeigen die Sollwert-Sensoren, die manuelle Steuerung das Logbuch |
 | **Helligkeit anpassen** (Schalter) | Aus: HCL lässt die Helligkeit unverändert |
 | **Farbtemperatur anpassen** (Schalter) | Aus: HCL lässt die Farbtemperatur unverändert |
 | **Szenario** (Auswahl) | Auto, Schlafen, Nachtlicht, Fokus, Entspannen, Putzen, Gast. Attribut `until`: Ende eines zeitlich begrenzten Szenarios |
@@ -62,7 +62,7 @@ Beginnt oder endet die manuelle Steuerung eines Lichts, erscheint ein Logbuch-Ei
 3. **Szenarien**: Werte von Fokus, Entspannen, Putzen und Nachtlicht, Dauer von Fokus/Entspannen/Putzen, Fokus/Entspannen/Putzen auf Min/Max begrenzen (aus), Schlafen und Nachtlicht enden zur Aufwachzeit (aus).
 
 ## Dashboard-Karte
-Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖ oder Entf löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen. **Vorschau** sendet die ungespeicherte Kurve bis zum nächsten Neuladen an die Lichter (die Karte zeigt dann „Vorschau aktiv – nicht gespeichert“), **Speichern** übernimmt sie dauerhaft, **Verwerfen** lädt die gespeicherte Kurve. Schlägt Speichern fehl, zeigt die Karte den Fehler und die Änderungen bleiben als ungespeichert markiert. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit (Zeitzone von Home Assistant), darunter stehen die Werte, die HCL jetzt sendet. Die Nacht-Hinweise gelten von der Schlafens- bis zur Aufwachzeit.
+Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖ oder Entf löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen. **Vorschau** sendet die ungespeicherte Kurve bis zum nächsten Neuladen an die Lichter (die Karte zeigt dann „Vorschau aktiv – nicht gespeichert“), **Speichern** übernimmt sie dauerhaft (ohne die Integration neu zu laden), **Verwerfen** lädt die gespeicherte Kurve. Schlägt Speichern fehl, zeigt die Karte den Fehler und die Änderungen bleiben als ungespeichert markiert. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit (Zeitzone von Home Assistant), darunter stehen die Werte, die HCL jetzt sendet. Die Nacht-Hinweise gelten von der Schlafens- bis zur Aufwachzeit.
 
 Die Szenario-Chips wechseln das Szenario; die Kurve lässt sich in jedem Szenario bearbeiten, wirkt aber nur in Auto. Wird die Kurve woanders geändert, während du bearbeitest, bleibt dein Entwurf erhalten und die Karte bietet „Diese Kurve laden“ an. Presets: Standard, Standard mit Nachtruhe, Standard ohne Mittagstief, Fokus, Entspannung, Frühaufsteher, Nachteule. Tastatur am gewählten Punkt: ↑/↓ Wert (Bild↑/Bild↓ in größeren Schritten), ←/→ Uhrzeit, Pos1/Ende Minimum/Maximum, Umschalt = größere Schritte, Entf löschen. Uhrzeit und Zahlen folgen dem Format im Home-Assistant-Profil. Mit `view: compact` zeigt die Karte nur Status und Szenario-Chips, der Editor klappt bei Bedarf auf.
 
