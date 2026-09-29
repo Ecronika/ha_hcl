@@ -322,6 +322,15 @@ function hclSamples(points) {
 }
 
 // ---------------------------------------------------------------- 3. formatting
+// DOM writes only on a change (a write of the same value is still a DOM mutation)
+function hclSetText(el, text) {
+    if (el.textContent !== text) el.textContent = text;
+}
+
+function hclSetDisabled(el, disabled) {
+    if (el.disabled !== disabled) el.disabled = disabled;
+}
+
 class HclFormat {
     constructor(hass) {
         const locale = (hass && hass.locale) || {};
@@ -539,9 +548,24 @@ class HCLCurveCard extends HTMLElement {
     // ------------------------------------------------------------ Home Assistant state
     set hass(hass) {
         this._hass = hass;
+        // Home Assistant sets hass on every state change of any entity. Only
+        // the objects read below matter; HA replaces them when they change
+        // (unchanged state objects keep their identity).
+        const deps = this._hassDepsOf(hass);
+        const last = this._hassDeps;
+        if (last && last.length === deps.length && deps.every((dep, i) => dep === last[i])) return;
+        this._hassDeps = deps;
+
         const lang = ((hass.locale && hass.locale.language) || hass.language || "en").split("-")[0];
         const newLang = HCL_STRINGS[lang] ? lang : "en";
-        const fmt = new HclFormat(hass);
+        let fmt = this._fmt;
+        if (!this._fmtFromHass || hass.locale !== this._fmtLocale || hass.language !== this._fmtLanguage) {
+            // Intl formatters are expensive: only when the locale settings change
+            fmt = new HclFormat(hass);
+            this._fmtFromHass = true;
+            this._fmtLocale = hass.locale;
+            this._fmtLanguage = hass.language;
+        }
         const langChanged = newLang !== this._lang || fmt.key() !== this._fmt.key();
         this._lang = newLang;
         this._fmt = fmt;
@@ -587,6 +611,20 @@ class HCLCurveCard extends HTMLElement {
         else this._renderStatus();
     }
 
+    // Everything set hass reads from hass (see there); compared by identity
+    _hassDepsOf(hass) {
+        const states = hass.states || {};
+        const entity = this.config && this.config.entity;
+        const stateObj = entity ? states[entity] : undefined;
+        const attrs = (stateObj && stateObj.attributes) || {};
+        const related = [attrs.mode_entity_id, attrs.target_brightness_entity_id, attrs.target_color_temp_entity_id]
+            .map(id => (id ? states[id] : undefined));
+        let loaded = false;
+        if (!stateObj) for (const _ in states) { loaded = true; break; } // loading → missing
+        return [this.config, hass.locale, hass.language, hass.themes, hass.selectedTheme, hass.config,
+            stateObj, ...related, loaded];
+    }
+
     _dataStateOf(stateObj) {
         if (!stateObj) return this._hass && Object.keys(this._hass.states || {}).length ? "missing" : "loading";
         // Old attributes of an unavailable sensor are not current data
@@ -626,7 +664,9 @@ class HCLCurveCard extends HTMLElement {
     // A new curve from the sensor. Returns true if the draft was replaced.
     _onServerPoints(raw) {
         // Never replace points under the finger; the next update is processed
-        if (this._drag || raw === this._server.ref) return false;
+        // (even if nothing else changes until then)
+        if (this._drag) { this._hassDeps = null; return false; }
+        if (raw === this._server.ref) return false;
         const points = hclNormalize(raw);
         const key = hclKey(points);
         this._server.ref = raw;
@@ -1223,8 +1263,8 @@ class HCLCurveCard extends HTMLElement {
         const draftEl = $("draft-info");
         if (!el) return;
         if (this._dataState !== "ready" || !this._points.length) {
-            el.textContent = "";
-            if (draftEl) draftEl.textContent = "";
+            hclSetText(el, "");
+            if (draftEl) hclSetText(draftEl, "");
             return;
         }
         const now = this._nowMinutes();
@@ -1259,13 +1299,13 @@ class HCLCurveCard extends HTMLElement {
                 parts.push(this._t("setpoint_unavailable"));
             }
         }
-        el.textContent = parts.join(" · ");
+        hclSetText(el, parts.join(" · "));
         if (draftEl) {
             if (this._isDirty) {
                 const v = hclValueAt(this._points, now);
-                draftEl.textContent = `${this._t("draft")} ${f.clock(now)}: ${f.percent(hclEffectiveB(v.b, this._limits))} · ${f.kelvin(v.k)}`;
+                hclSetText(draftEl, `${this._t("draft")} ${f.clock(now)}: ${f.percent(hclEffectiveB(v.b, this._limits))} · ${f.kelvin(v.k)}`);
             } else {
-                draftEl.textContent = "";
+                hclSetText(draftEl, "");
             }
         }
     }
@@ -1369,19 +1409,19 @@ class HCLCurveCard extends HTMLElement {
         const btnTest = $("btn-test");
         if (btnTest) {
             btnTest.classList.toggle("dirty", this._isDirty);
-            btnTest.textContent = this._t("preview") + (this._isDirty ? " *" : "");
-            btnTest.disabled = busy;
+            hclSetText(btnTest, this._t("preview") + (this._isDirty ? " *" : ""));
+            hclSetDisabled(btnTest, busy);
         }
         const btnSave = $("btn-save");
         if (btnSave) {
             // Save stays highlighted while the lights follow an unsaved preview
             btnSave.classList.toggle("dirty", this._isDirty || this._previewActive);
-            btnSave.disabled = busy || this._validationResult.errors.length > 0;
+            hclSetDisabled(btnSave, busy || this._validationResult.errors.length > 0);
         }
         const btnRevert = $("btn-revert");
-        if (btnRevert) btnRevert.disabled = busy;
+        if (btnRevert) hclSetDisabled(btnRevert, busy);
         const btnUndo = $("btn-undo");
-        if (btnUndo) btnUndo.disabled = this._undo.length === 0;
+        if (btnUndo) hclSetDisabled(btnUndo, this._undo.length === 0);
         this._renderNowInfo();
     }
 

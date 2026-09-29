@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b7] - 2026-09-29
+Seventh pre-release (beta) of 0.7.0: performance items RM-F03, RM-T10, RM-T11 and RM-T13 of the roadmap (performance review of 0.7.0b6). The minimum Home Assistant version stays 2024.7.
+
+### Changed
+- **Dashboard card: less work on every Home Assistant state change** (RM-F03): Home Assistant hands the card a new state after every change of any entity, often several times a second. The card processed each of them completely (number and time formats, curve comparison, status line). It now stops at once unless something it shows has changed (curve sensor, scenario, target value sensors, language, number/time format, theme, time zone). Measured in headless Chromium with 2000 other entities: about 40–65 µs per change before, about 2 µs now, and no DOM changes. The "now" line still moves every minute.
+- **History database: attributes of the *HCL active* switch are no longer recorded** (RM-T10): `calculated_brightness`, `calculated_color_temp`, `target_entities` and `manual_control` are live values (automations, templates and the card see them as before). Recording them stored a new attribute row with the complete light list with every new value, many times a day. The history of the values is kept by the target value sensors, manual control by its event and logbook entries. `target_entities` is now sorted, so resolving the same lights again changes nothing.
+- **Own commands recognised with less effort** (RM-T11): HCL remembers the contexts of its own light commands for 5 minutes. Expired ones were searched among all remembered contexts before every command (effort grew with the square of the commands per cycle); they are now removed oldest first.
+- **Saving the curve no longer reloads the integration** (RM-T13): the saved points were already active, but saving reloaded the whole instance, so all HCL entities (and the card) were unavailable for a moment and every listener was set up again. The saved curve now takes effect in place, like revert: the lights get it at once (a running long transition ends, as after the reload before) and the action is linked to the command. Any other change of the configuration (options, also when saved right before the curve) reloads as before.
+
 ## [0.7.0b6] - 2026-09-27
 Sixth pre-release (beta) of 0.7.0: fixes RM-B21 and RM-B22 of the roadmap. The minimum Home Assistant version stays 2024.7.
 

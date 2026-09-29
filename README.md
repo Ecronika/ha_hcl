@@ -126,7 +126,7 @@ Each instance is a device with these entities (IDs of new installations; existin
 
 | Entity | Example ID | Purpose |
 |---|---|---|
-| HCL active | `switch.living_room_hcl_active` | HCL on/off. Attribute `manual_control` lists the paused lights. |
+| HCL active | `switch.living_room_hcl_active` | HCL on/off. Attribute `manual_control` lists the paused lights. Its attributes (`manual_control`, `target_entities`, `calculated_*`) are live values and not stored in the history; the history of the values is in the target sensors, manual control in the logbook. |
 | Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone |
 | Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
 | Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning, Guest (also the chips of the card). Attribute `until`: end of a timed scenario. |
@@ -221,7 +221,7 @@ actions:
 *   **Colour temperature range**: lights with native colour temperature get the value they can reach (limited to their min/max); colour lights get values outside their range through the XY simulation.
 *   **One command per light**: HCL sends each light its own command, so a failing light does not hide the success of the others.
 *   **Failed commands**: a light whose command failed is not treated as updated (no transition protection, no false manual control on its next report; this also applies to the command right after a light is switched on); the next update tries again.
-*   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them, `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}` with different times, not needed for `revert`; 1440 counts as 00:00). Invalid input is rejected.
+*   **Service `hcl_lighting.update_curve`** (used by the card): `entity_id` (HCL sensor or switch), `mode` (`preview`/`apply`: use the points until the next reload, `save`: store them (without reloading the integration), `revert`: reload the saved curve) and `points` (at least 2 × `{t: 0–1440 min, b: 0–100 %, k: 2000–7000 K}` with different times, not needed for `revert`; 1440 counts as 00:00). Invalid input is rejected.
 *   **RGBW/RGBWW lights** get the colour temperature through the XY simulation. Home Assistant's own conversion to the white channels was checked for 0.7.0 and not used: the white-channel range of such lights is not available and values outside it produce invalid channel values.
 
 ---

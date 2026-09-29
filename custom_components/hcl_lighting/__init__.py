@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from datetime import timedelta
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -46,6 +48,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
 DATA_FRONTEND_REGISTERED = f"{DOMAIN}_frontend_registered"
+DATA_APPLIED_CONFIG = "applied_config"
 OVERRIDE_STORE_VERSION = 1
 
 
@@ -226,12 +229,21 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
     # Preview/apply: unsaved points; save/revert: the stored curve applies again
     hcl_calc.preview_active = mode in ("preview", "apply")
         
-    # 2. Handle Save
+    # 2. Handle Save: the points are already active (step 1). Only the curve
+    # changes, so the entry is not reloaded (the update listener sees the
+    # stored configuration); lights and card get the saved curve via the
+    # update signal like after revert.
     if mode == "save":
         config_entry = hass.config_entries.async_get_entry(entry_id)
         new_options = {**config_entry.options}
         new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+        # Only the curve part: another change still waiting for the update
+        # listener (e.g. options just saved) must reload as before
+        logic_core[DATA_APPLIED_CONFIG] = (
+            logic_core[DATA_APPLIED_CONFIG][:3] + (new_options[CONF_CURVE_CONFIG],)
+        )
         hass.config_entries.async_update_entry(config_entry, options=new_options)
+        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
         return
     # 2b. Handle Revert
     if mode == "revert":
@@ -247,12 +259,10 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
              hcl_calc.generate_curve(wake, midday, sleep)
         _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
         # Notify frontend to refresh
-        from homeassistant.helpers.dispatcher import async_dispatcher_send
         async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
         return
 
     # 3. Preview/Apply: lights follow the points until the next reload
-    from homeassistant.helpers.dispatcher import async_dispatcher_send
     async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
 
 
@@ -305,7 +315,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = {
         "calculator": hcl_calc,
         "controller": controller,
-        "override_manager": override_manager
+        "override_manager": override_manager,
+        # Configuration this setup runs with (see update_listener)
+        DATA_APPLIED_CONFIG: _applied_config(entry, entry.options),
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -480,6 +492,26 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await store.async_save({"shown": shown})
 
 
+def _applied_config(entry: ConfigEntry, options: Mapping[str, Any]) -> tuple:
+    """What a setup reads from the entry: title, data, options; the curve last."""
+    return (
+        entry.title,
+        dict(entry.data),
+        {k: v for k, v in options.items() if k != CONF_CURVE_CONFIG},
+        options.get(CONF_CURVE_CONFIG),
+    )
+
+
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update."""
+    """Reload after a configuration change - except for a curve saved in place.
+
+    update_curve (mode save) activates the curve itself and records it in the
+    applied configuration: a reload would make all HCL entities unavailable
+    for a moment and rebuild every listener although the curve is active.
+    Any other change (options, data, title, a curve changed another way)
+    reloads as before.
+    """
+    core = (hass.data.get(DOMAIN) or {}).get(entry.entry_id)
+    if core is not None and core.get(DATA_APPLIED_CONFIG) == _applied_config(entry, entry.options):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
