@@ -44,6 +44,8 @@ from ..const import (
     CONFIGURABLE_SCENARIOS,
     LIMITABLE_SCENARIOS,
     OWN_CONTEXT_SECONDS,
+    COMMAND_TIMEOUT_SECONDS,
+    DOMAIN,
     CONF_SCENARIO_LIMITS,
     DEFAULT_SCENARIO_LIMITS,
     CONF_BRIGHTNESS_SCALING,
@@ -113,11 +115,15 @@ class BatchResult:
 
     updated: lights whose command succeeded (fast mode: whose command was sent).
     failed: lights whose command raised an error, with the error.
-    Lights without a command (already at the values) are in neither.
+    pending: lights without an answer - the command did not finish within
+    COMMAND_TIMEOUT_SECONDS (it keeps running) or an earlier one is still
+    running (no second command is sent).
+    Lights without a command (already at the values) are in none of them.
     """
 
     updated: list[str] = field(default_factory=list)
     failed: dict[str, BaseException] = field(default_factory=dict)
+    pending: list[str] = field(default_factory=list)
 
 # Colour modes HCL drives through the XY simulation (Home Assistant converts
 # xy_color to the light's own mode, including RGBW and RGBWW)
@@ -148,6 +154,10 @@ class HCLLightController:
         # the front instead of searching all of them for every command
         self._own_contexts: dict[str, float] = {}
         self._own_context_order: deque[tuple[float, str]] = deque()
+
+        # Lights with a command still running (a light that does not answer
+        # gets no second command until the first one has finished)
+        self._in_flight: set[str] = set()
 
     @property
     def adapt_brightness(self) -> bool:
@@ -366,6 +376,9 @@ class HCLLightController:
         jobs: list[tuple[str, Awaitable[bool]]] = []
 
         for entity_id in lights:
+            if entity_id in self._in_flight:
+                result.pending.append(entity_id)
+                continue
             # Check thresholds to avoid redundant traffic
             if not self._needs_update(entity_id, brightness, kelvin):
                 continue
@@ -404,22 +417,65 @@ class HCLLightController:
         if fast_mode:
             for entity_id, job in jobs:
                 task = self.hass.async_create_task(job)
+                self._track_in_flight(task, entity_id)
                 task.add_done_callback(
                     lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
                 )
                 result.updated.append(entity_id)
             return result
 
-        outcomes = await asyncio.gather(*(job for _, job in jobs), return_exceptions=True)
-        for (entity_id, _job), outcome in zip(jobs, outcomes):
-            if outcome is True:
+        # The caller holds the update lock: wait at most COMMAND_TIMEOUT_SECONDS.
+        # Commands are not cancelled (an interrupted turn_on of an integration
+        # is worse than a late one); a late one is handled like a fast-mode
+        # command. Background tasks: a light that hangs does not block
+        # Home Assistant's own waiting for tasks (e.g. at startup).
+        tasks: dict[asyncio.Task, str] = {}
+        for entity_id, job in jobs:
+            # Not started eagerly: all commands start together, as before
+            task = self.hass.async_create_background_task(
+                job, f"{DOMAIN} light command {entity_id}", eager_start=False
+            )
+            self._track_in_flight(task, entity_id)
+            tasks[task] = entity_id
+        try:
+            done, late = await asyncio.wait(tasks, timeout=COMMAND_TIMEOUT_SECONDS)
+        except asyncio.CancelledError:
+            # The update itself is cancelled (unload, shutdown): the commands
+            # finish on their own, their results are handled like fast mode
+            for task, entity_id in tasks.items():
+                task.add_done_callback(
+                    lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
+                )
+            raise
+        for task in done:
+            entity_id = tasks[task]
+            error = task.exception() if not task.cancelled() else asyncio.CancelledError()
+            if error is None and task.result() is True:
                 result.updated.append(entity_id)
                 continue
-            if isinstance(outcome, BaseException):
-                _LOGGER.error("Light update for %s failed: %s", entity_id, outcome, exc_info=outcome)
-                result.failed[entity_id] = outcome
+            if error is not None:
+                _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
+                result.failed[entity_id] = error
             self.override_manager.restore_tracking(entity_id, previous[entity_id])
+        for task in late:
+            entity_id = tasks[task]
+            _LOGGER.warning(
+                "Light %s did not answer within %s s; HCL goes on without waiting "
+                "(no further command to it until this one has finished)",
+                entity_id, COMMAND_TIMEOUT_SECONDS,
+            )
+            # The values may still arrive: tracking and context stay. A late
+            # error restores the tracking like a failed fast-mode command.
+            task.add_done_callback(
+                lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
+            )
+            result.pending.append(entity_id)
         return result
+
+    def _track_in_flight(self, task: asyncio.Task, entity_id: str) -> None:
+        """Remember a running command until it has finished."""
+        self._in_flight.add(entity_id)
+        task.add_done_callback(lambda _t, eid=entity_id: self._in_flight.discard(eid))
 
     def _background_result(
         self,
@@ -430,11 +486,12 @@ class HCLLightController:
     ) -> None:
         """Result of a command sent in fast mode."""
         if task.cancelled():
-            error: BaseException | None = asyncio.CancelledError()
+            # Home Assistant stops: no error message
+            error: BaseException | None = None
         else:
             error = task.exception()
-        if error is None and task.result() is True:
-            return
+            if error is None and task.result() is True:
+                return
         if error is not None:
             _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
         self.override_manager.restore_tracking(entity_id, previous)

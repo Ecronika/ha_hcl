@@ -43,6 +43,7 @@ from .const import (
     SERVICE_UPDATE_CURVE,
     CONF_CURVE_CONFIG,
     IGNORE_WINDOW_SECONDS,
+    COMMAND_TIMEOUT_SECONDS,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
     CONF_TURN_ON_TRANSITION,
@@ -429,7 +430,8 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         unless release_manual_control is set. Runs after an update cycle that
         is still sending. The values are those at the time of the request: a
         scenario change requested later is sent after it, with its own values
-        and transition. Raises HomeAssistantError if a light command failed.
+        and transition. Raises HomeAssistantError if a light command failed or
+        a light did not answer in time.
         """
         brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
         if brightness is None:
@@ -461,13 +463,19 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             if transition > self._transition:
                 for eid in result.updated:
                     self.override_manager.set_reengaging(eid, transition)
-        if result.failed:
+        if result.failed or result.pending:
             # Like Home Assistant's own light actions: the caller learns about
             # the failure (the other lights have been updated)
-            first = next(iter(result.failed.values()))
-            raise HomeAssistantError(
-                f"Light update failed for {', '.join(sorted(result.failed))}: {first}"
-            ) from first
+            parts = []
+            first = next(iter(result.failed.values()), None)
+            if result.failed:
+                parts.append(f"Light update failed for {', '.join(sorted(result.failed))}: {first}")
+            if result.pending:
+                parts.append(
+                    f"No answer from {', '.join(sorted(result.pending))} "
+                    f"within {COMMAND_TIMEOUT_SECONDS} s (command still running)"
+                )
+            raise HomeAssistantError("; ".join(parts)) from first
 
     async def async_set_manual_control(
         self, lights: list[str] | None, manual_control: bool, context: Context | None = None

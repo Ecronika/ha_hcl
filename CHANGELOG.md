@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b8] - 2026-09-30
+Eighth pre-release (beta) of 0.7.0: fixes RM-B23 of the roadmap (external analysis of 0.7.0b6). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **A light that does not answer held up HCL** (RM-B23): an update waited for all light commands without a time limit (Home Assistant sets none for these commands). A light that counts as available but answers late or not at all (Zigbee device about to drop out, overloaded bridge, integrations with their own retries) delayed the other lights, scenario changes, curve preview/save, the return from manual control and `hcl_lighting.apply`, and periodic updates were skipped. An update now waits at most 10 seconds and then goes on. The command to the slow light is not cancelled: if it succeeds later, nothing changes; if it fails later, HCL treats it like any failed command. Until it has finished, that light gets no further command, so commands do not pile up. `hcl_lighting.apply` ends with an error naming lights that did not answer in time (the other lights are updated).
+
 ## [0.7.0b7] - 2026-09-29
 Seventh pre-release (beta) of 0.7.0: performance items RM-F03, RM-T10, RM-T11 and RM-T13 of the roadmap (performance review of 0.7.0b6). The minimum Home Assistant version stays 2024.7.
 
