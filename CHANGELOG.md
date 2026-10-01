@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b9] - 2026-10-01
+Ninth pre-release (beta) of 0.7.0: three options added in the 0.7.0 betas become fixed behaviour, and the simulator is removed (RM-R01 to RM-R04 of the roadmap; keep the integration lean). The minimum Home Assistant version stays 2024.7. Compared with 0.6.1, two behaviours change (marked below); compared with the earlier 0.7.0 betas, the three options are gone.
+
+### Changed
+- **Focus, Relax and Cleaning always stay within the minimum and maximum brightness** (RM-R01; option "Limit scenarios to minimum/maximum" removed). Sleep and Night light are not limited. With the default limits (10–100 %) nothing changes. *Change from 0.6.1*: a scenario value outside your limits is now limited to them.
+- **Minimum and maximum brightness only clip** (RM-R02; option "Scale brightness to minimum/maximum" removed, as in 0.6.1): curve values outside the limits are set to the limit; card, target value sensors and lights show the same values. The curve sensor no longer has the attribute `brightness_scaling`.
+- **Sleep and Night light always end at the next wake time** (RM-R03; option "Scenarios end at wake time" removed): they return to Auto at the wake time. `hcl_lighting.set_scenario` with `duration: 0` keeps them until changed, a duration in minutes ends them earlier or later. *Change from 0.6.1*: Sleep no longer stays until it is changed. A Sleep or Night light restored from an earlier version without an end time stays until it is changed once.
+- The removed options are deleted from the stored options the next time the options are saved; until then they have no effect.
+
+### Removed
+- **Simulator** `docs/hcl_simulator.html` (RM-R04): a third copy of the curve calculation without a test against the integration; the dashboard card has a preview. The GitHub Pages page of the simulator is no longer available.
+
 ## [0.7.0b8] - 2026-09-30
 Eighth pre-release (beta) of 0.7.0: fixes RM-B23 of the roadmap (external analysis of 0.7.0b6). The minimum Home Assistant version stays 2024.7.
 

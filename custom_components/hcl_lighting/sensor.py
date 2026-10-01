@@ -23,8 +23,6 @@ from .const import (
     CONF_SLEEP_TIME,
     DEFAULT_WAKE_TIME,
     DEFAULT_SLEEP_TIME,
-    CONF_BRIGHTNESS_SCALING,
-    DEFAULT_BRIGHTNESS_SCALING,
 )
 from .logic.hcl_math import HCLCalculator
 
@@ -147,7 +145,6 @@ class HCLLightingCurveSensor(SensorEntity):
         base_date = dt_util.now()
         
         min_b, max_b = self._controller.brightness_limits()
-        scale = bool(self._entry.options.get(CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING))
         
         for i in range(97): # 0 to 96
             minutes = i * 15
@@ -160,7 +157,7 @@ class HCLLightingCurveSensor(SensorEntity):
             
             t_obj = base_date.replace(hour=h, minute=m, second=0, microsecond=0)
             
-            b, k = self._hcl_calc.get_hcl_values(t_obj, min_b, max_b, scale=scale)
+            b, k = self._hcl_calc.get_hcl_values(t_obj, min_b, max_b)
             samples.append([minutes, int(k), int(b)])
 
         self._attr_extra_state_attributes = {
@@ -174,8 +171,6 @@ class HCLLightingCurveSensor(SensorEntity):
             "max_brightness": max_b,
             # Fixed values of the scenarios (drawn as lines in the card)
             "scenarios": self._controller.scenario_values(),
-            # Min/max maps the curve range 10–100 % instead of clipping it
-            "brightness_scaling": scale,
             # Setpoint sensors (the card shows the active values from them)
             "target_brightness_entity_id": self._related_entity_id("target_brightness"),
             "target_color_temp_entity_id": self._related_entity_id("target_color_temp"),

@@ -112,23 +112,18 @@ TIMED_MODES = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
 CONFIGURABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING, MODE_NIGHT_LIGHT)
 # Scenarios that the option "limit scenarios to min/max brightness" applies to
 LIMITABLE_SCENARIOS = (MODE_FOCUS, MODE_RELAX, MODE_CLEANING)
-# Scenarios that can end automatically at the wake time
+# Scenarios that end at the next wake time (back to Auto)
 NIGHT_MODES = (MODE_SLEEP, MODE_NIGHT_LIGHT)
 
 # v0.7.0 Event fired when manual control of a light starts or ends
 EVENT_MANUAL_CONTROL = f"{DOMAIN}_manual_control"
 
 # v0.7.0 Options
-CONF_BRIGHTNESS_SCALING = "brightness_scaling"      # map the curve range 10–100 % onto min–max instead of clipping
-CONF_SCENARIO_LIMITS = "scenario_limits"            # Focus/Relax/Cleaning stay within min/max brightness
 CONF_SCENARIO_TRANSITION = "scenario_transition"    # seconds, transition when the scenario changes
-CONF_NIGHT_END_AT_WAKE = "night_end_at_wake"        # Sleep/Night light return to Auto at the wake time
-DEFAULT_BRIGHTNESS_SCALING = False
-DEFAULT_SCENARIO_LIMITS = False
-DEFAULT_NIGHT_END_AT_WAKE = False
-# Curve brightness range that scaling maps onto min–max (range of the default curve)
-CURVE_SCALE_LOW = 10
-CURVE_SCALE_HIGH = 100
+# Options of 0.7.0 betas that are fixed behaviour now (removed when options are saved):
+# brightness scaling (min/max always clip), scenario limits (always on),
+# night modes ending at the wake time (always)
+OBSOLETE_OPTIONS = ("brightness_scaling", "scenario_limits", "night_end_at_wake")
 
 
 def scenario_option_keys(mode: str) -> tuple[str, str]:

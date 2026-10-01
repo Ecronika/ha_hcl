@@ -33,11 +33,7 @@
                     "max_brightness": "Maximale Helligkeit (%)",
                     "wake_time": "Aufwachzeit (Start der Aktivierung)",
                     "midday_time": "Sozialer Mittag (Höhepunkt & Dip)",
-                    "sleep_time": "Schlafenszeit (Entspannung)",
-                    "brightness_scaling": "Min/Max skalieren statt begrenzen"
-                },
-                "data_description": {
-                    "brightness_scaling": "Aus (Standard): Kurvenwerte außerhalb von Min/Max werden abgeschnitten. An: der Kurvenbereich 10–100 % wird auf Min–Max abgebildet, die Form der Kurve bleibt erhalten."
+                    "sleep_time": "Schlafenszeit (Entspannung)"
                 }
             },
             "behavior": {
@@ -62,6 +58,7 @@
             },
             "scenarios": {
                 "title": "Szenarien",
+                "description": "Fokus, Entspannen und Putzen bleiben innerhalb der minimalen und maximalen Helligkeit. Schlafen und Nachtlicht enden zur nächsten Aufwachzeit.",
                 "data": {
                     "focus_brightness": "Fokus: Helligkeit",
                     "focus_kelvin": "Fokus: Farbtemperatur",
@@ -71,13 +68,7 @@
                     "cleaning_kelvin": "Putzen: Farbtemperatur",
                     "scenario_duration": "Dauer von Fokus/Entspannen/Putzen (min, 0 = bis zur Änderung)",
                     "night_light_brightness": "Nachtlicht: Helligkeit",
-                    "night_light_kelvin": "Nachtlicht: Farbtemperatur",
-                    "scenario_limits": "Fokus/Entspannen/Putzen auf Min/Max begrenzen",
-                    "night_end_at_wake": "Schlafen und Nachtlicht enden zur Aufwachzeit"
-                },
-                "data_description": {
-                    "scenario_limits": "Aus (Standard): Szenarien nutzen ihre eigenen Werte. An: ihre Helligkeit bleibt innerhalb von Min/Max. Das Nachtlicht ist ausgenommen.",
-                    "night_end_at_wake": "An: Schlafen und Nachtlicht wechseln zur Aufwachzeit automatisch zu Auto."
+                    "night_light_kelvin": "Nachtlicht: Farbtemperatur"
                 }
             }
         },
@@ -196,7 +187,7 @@
                 },
                 "duration": {
                     "name": "Dauer",
-                    "description": "Minuten bis zur Rückkehr zu Auto (0 = bis zur Änderung). Leer = wie eingestellt."
+                    "description": "Minuten bis zur Rückkehr zu Auto (0 = bis zur Änderung). Leer: Fokus/Entspannen/Putzen nutzen die eingestellte Dauer, Schlafen/Nachtlicht enden zur nächsten Aufwachzeit."
                 }
             }
         },

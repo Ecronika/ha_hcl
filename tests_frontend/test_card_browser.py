@@ -637,11 +637,14 @@ async def test_k3_compact_view_hides_the_editor_until_opened(page):
     assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
 
 
-async def test_k7_night_light_chip_and_scaled_effective_curve(page):
+async def test_k7_night_light_chip_and_clipped_effective_curve(page):
+    # 0.7.0b9 (RM-R02): min/max only clip; an old scaling attribute is ignored
     await _set_hass(page, "night_light", extra={"min_brightness": 20, "max_brightness": 60, "brightness_scaling": True})
     assert await _active_chips(page) == ["night_light"]
     effective = await page.evaluate("() => card._chartB.data.datasets[1].data.find(p => p.x === 750).y")
-    assert round(effective) == 38  # 20 + (50 - 10) * 40/90, same as the integration
+    assert round(effective) == 50  # within min/max: the curve value, same as the integration
+    clipped = await page.evaluate("() => card._chartB.data.datasets[1].data.find(p => p.x === 1320).y")
+    assert round(clipped) == 20  # 10 % at 22:00 clipped to the minimum
     assert page.errors == []
 
 

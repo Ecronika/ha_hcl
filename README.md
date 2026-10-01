@@ -13,7 +13,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🎨 Interactive Dashboard Card
 - **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
-- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the values HCL sends now are shown (scenario, brightness limits and scaling included; from the setpoint sensors, "not available" while they have no value).
+- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "not available" while they have no value).
 - **Scenario chips**: switch the scenario directly in the card. The curve can be edited in every scenario; it only applies in Auto.
 - **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards.
 - **Keyboard**: selected point: ↑/↓ value (PgUp/PgDn in larger steps), ←/→ time, Home/End minimum/maximum value, Shift = larger steps, Del delete.
@@ -93,8 +93,7 @@ Open **Configure** on the integration entry. The options have three pages.
 *   **Wake Time**: Start of the active day (Default: 07:00).
 *   **Midday Time**: The lowest point of the midday dip (Default: 12:30).
 *   **Sleep Time**: End of the day (Default: 22:00). Wake and sleep time must be more than 6 hours apart.
-*   **Min/Max Brightness**: Global limits for the curve (e.g., 10% - 100%). Curve values outside the limits are clipped to them; the dashboard card shades the clipped ranges and shows the effective brightness as a dashed line. Fixed scenarios (Focus, Relax, Cleaning) use their own values unless *Limit scenarios* is on (page 3).
-*   **Scale to min/max instead of clipping** (default off): the curve range 10–100 % is mapped onto min–max (b' = min + (b − 10) · (max − min) / 90), so the shape of the curve is kept; values below 10 % end at min.
+*   **Min/Max Brightness**: Global limits for the curve (e.g., 10% - 100%). Curve values outside the limits are clipped to them; the dashboard card shades the clipped ranges and shows the effective brightness as a dashed line. Focus, Relax and Cleaning also stay within the limits; Sleep and Night light do not (they are meant to be darker than a daytime minimum).
 *   **Smart Transition Mode**: Enable this if your lights flash or stutter during updates. It separates brightness and colour commands.
 
 The three anchors must leave room for the curve sectors (wake ramp 3 h, midday sector 30 min before to 3.5 h after midday, 4 h wind-down before sleep). If the midday time does not fit, it is moved to the nearest possible time; if the day is shorter than about 11 hours, the default profile is scaled to the wake–sleep span. A warning is logged in both cases.
@@ -114,9 +113,7 @@ The three anchors must leave room for the curve sectors (wake ramp 3 h, midday s
 | Transition when the scenario changes | = transition of updates | Also used when a timed scenario ends; may be longer than the update interval (the lights are left alone until it has finished) |
 
 ### 3. Scenarios
-Brightness and colour temperature of **Focus** (100 % / 5500 K), **Relax** (40 % / 2700 K), **Cleaning** (100 % / 4000 K) and **Night light** (3 % / 2200 K), plus a **duration** in minutes after which Focus, Relax and Cleaning return to **Auto** (0 = until changed).
-*   **Limit Focus/Relax/Cleaning to min/max brightness** (default off).
-*   **Sleep and Night light end at the wake time** (default off): they switch back to Auto at the next wake time.
+Brightness and colour temperature of **Focus** (100 % / 5500 K), **Relax** (40 % / 2700 K), **Cleaning** (100 % / 4000 K) and **Night light** (3 % / 2200 K), plus a **duration** in minutes after which Focus, Relax and Cleaning return to **Auto** (0 = until changed). Sleep and Night light always return to Auto at the next wake time; `hcl_lighting.set_scenario` with `duration: 0` keeps them until changed.
 
 ---
 
@@ -138,12 +135,12 @@ The name part of the IDs follows the language Home Assistant used when the entit
 
 ### Scenarios
 *   **Auto**: follow the curve.
-*   **Focus / Relax / Cleaning**: fixed values (configurable, optionally with a duration).
+*   **Focus / Relax / Cleaning**: fixed values (configurable, optionally with a duration), within the min/max brightness.
 *   **Guest**: HCL sends no updates.
 *   **Sleep**: lights that are on when Sleep is selected are faded off. A light switched on manually during Sleep counts as manual control and stays on until it is switched off (or the timeout expires).
 *   **Night light**: dim, warm light (default 3 % / 2200 K). Lights that are on, or are switched on during the night, get these values; HCL never switches a light on or off.
 
-The setpoint sensors show the values independently of the adapt switches and of manual control. A scenario change is sent with the *transition when the scenario changes*.
+Sleep and Night light end at the next wake time (back to Auto). The setpoint sensors show the values independently of the adapt switches and of manual control. A scenario change is sent with the *transition when the scenario changes*.
 
 ### Manual control
 HCL pauses a light (only this light; the HCL switch stays on) when

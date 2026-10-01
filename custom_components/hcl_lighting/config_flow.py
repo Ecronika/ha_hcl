@@ -26,10 +26,7 @@ from .const import (
     DEFAULT_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_RESET_ON_OFF, DEFAULT_PERSIST_OVERRIDES,
     DEFAULT_RESPECT_TURN_ON_VALUES, DEFAULT_SCENARIO_DURATION,
     SCENARIO_DEFAULTS, CONFIGURABLE_SCENARIOS, scenario_option_keys,
-    CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING,
-    CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS,
-    CONF_SCENARIO_TRANSITION,
-    CONF_NIGHT_END_AT_WAKE, DEFAULT_NIGHT_END_AT_WAKE,
+    CONF_SCENARIO_TRANSITION, OBSOLETE_OPTIONS,
 )
 
 from homeassistant.const import CONF_NAME
@@ -138,6 +135,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             CONF_SLEEP_TIME: DEFAULT_SLEEP_TIME,
         }
         new_options = {**entry.options, **user_input}
+        for key in OBSOLETE_OPTIONS:  # fixed behaviour since 0.7.0b9
+            new_options.pop(key, None)
         for key, default in defaults.items():
             old = entry.options.get(key) or entry.data.get(key) or default
             new = user_input.get(key) or default
@@ -176,7 +175,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),
                 vol.Optional(CONF_MIN_BRIGHTNESS, default=schema_defaults.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(CONF_MAX_BRIGHTNESS, default=schema_defaults.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
-                vol.Optional(CONF_BRIGHTNESS_SCALING, default=schema_defaults.get(CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING)): selector.BooleanSelector(),
             }
         )
 
@@ -233,6 +231,4 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             fields[vol.Required(key_b, default=current.get(key_b, SCENARIO_DEFAULTS[mode]["brightness"]))] = _number(1, 100, unit="%")
             fields[vol.Required(key_k, default=current.get(key_k, SCENARIO_DEFAULTS[mode]["kelvin"]))] = _number(2000, 7000, step=50, unit="K")
         fields[vol.Required(CONF_SCENARIO_DURATION, default=current.get(CONF_SCENARIO_DURATION, DEFAULT_SCENARIO_DURATION))] = _number(0, 1440, unit="min")
-        fields[vol.Required(CONF_SCENARIO_LIMITS, default=current.get(CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS))] = selector.BooleanSelector()
-        fields[vol.Required(CONF_NIGHT_END_AT_WAKE, default=current.get(CONF_NIGHT_END_AT_WAKE, DEFAULT_NIGHT_END_AT_WAKE))] = selector.BooleanSelector()
         return self.async_show_form(step_id="scenarios", data_schema=vol.Schema(fields))

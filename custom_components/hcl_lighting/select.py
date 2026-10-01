@@ -22,8 +22,6 @@ from .const import (
     CONF_SCENARIO_DURATION,
     DEFAULT_SCENARIO_DURATION,
     NIGHT_MODES,
-    CONF_NIGHT_END_AT_WAKE,
-    DEFAULT_NIGHT_END_AT_WAKE,
     CONF_WAKE_TIME,
     DEFAULT_WAKE_TIME,
 )
@@ -140,7 +138,9 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
         """Change the selected option.
 
         duration (minutes, service hcl_lighting.set_scenario): end the scenario
-        after this time (0 = until changed) instead of the configured behaviour.
+        after this time (0 = until changed) instead of the default end
+        (configured duration for Focus/Relax/Cleaning, the next wake time for
+        Sleep and Night light).
         """
         self._cancel()
         self._set_mode(option)
@@ -153,7 +153,8 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
         elif option in TIMED_MODES and int(options.get(CONF_SCENARIO_DURATION, DEFAULT_SCENARIO_DURATION)) > 0:
             minutes = int(options.get(CONF_SCENARIO_DURATION, DEFAULT_SCENARIO_DURATION))
             self._schedule_end(dt_util.utcnow() + timedelta(minutes=minutes))
-        elif option in NIGHT_MODES and options.get(CONF_NIGHT_END_AT_WAKE, DEFAULT_NIGHT_END_AT_WAKE):
+        elif option in NIGHT_MODES:
+            # Sleep and Night light end at the next wake time (back to the curve)
             self._schedule_end(self._next_wake_time())
         self.async_write_ha_state()
 

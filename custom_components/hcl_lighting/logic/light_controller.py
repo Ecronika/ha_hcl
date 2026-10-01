@@ -46,10 +46,6 @@ from ..const import (
     OWN_CONTEXT_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
     DOMAIN,
-    CONF_SCENARIO_LIMITS,
-    DEFAULT_SCENARIO_LIMITS,
-    CONF_BRIGHTNESS_SCALING,
-    DEFAULT_BRIGHTNESS_SCALING,
     scenario_option_keys,
 )
 
@@ -284,8 +280,7 @@ class HCLLightController:
         # 3. AUTO MODE (Curve)
         if self.active_mode == MODE_AUTO:
             min_b, max_b = self.brightness_limits()
-            scale = self.config_entry.options.get(CONF_BRIGHTNESS_SCALING, DEFAULT_BRIGHTNESS_SCALING)
-            return self.hcl_calc.get_hcl_values(now, min_b, max_b, scale=bool(scale))
+            return self.hcl_calc.get_hcl_values(now, min_b, max_b)
             
         # Fallback
         return None, None
@@ -305,8 +300,9 @@ class HCLLightController:
             key_b, key_k = scenario_option_keys(mode)
             brightness = int(options.get(key_b, brightness))
             kelvin = int(options.get(key_k, kelvin))
-        # Option: Focus/Relax/Cleaning stay within the min/max brightness
-        if mode in LIMITABLE_SCENARIOS and options.get(CONF_SCENARIO_LIMITS, DEFAULT_SCENARIO_LIMITS):
+        # Focus/Relax/Cleaning stay within the min/max brightness (the night
+        # modes are meant to be darker than any daytime minimum)
+        if mode in LIMITABLE_SCENARIOS:
             min_b, max_b = self.brightness_limits()
             brightness = max(min_b, min(max_b, brightness))
         return brightness, kelvin

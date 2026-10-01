@@ -303,12 +303,9 @@ function hclValueAt(points, minute) {
     return { b: value('b'), k: value('k') };
 }
 
-// Brightness the lights get: clipped to min/max, or the curve range 10–100 %
-// mapped onto min–max (option "scale")
+// Brightness the lights get: the curve clipped to min/max
 function hclEffectiveB(b, limits) {
-    let v = b;
-    if (limits.scale) v = limits.minB + (b - 10) * (limits.maxB - limits.minB) / 90;
-    return Math.max(limits.minB, Math.min(limits.maxB, v));
+    return Math.max(limits.minB, Math.min(limits.maxB, b));
 }
 
 function hclSamples(points) {
@@ -468,7 +465,7 @@ class HCLCurveCard extends HTMLElement {
         this._currentMode = null;         // confirmed mode (select entity)
         this._pendingMode = null;
         this._scenarios = JSON.parse(JSON.stringify(HCL_SCENARIO_DEFAULTS));
-        this._limits = { minB: 0, maxB: 100, scale: false };
+        this._limits = { minB: 0, maxB: 100 };
         this._targetIds = { b: null, k: null };
         this._editorOpen = false;
 
@@ -600,7 +597,6 @@ class HCLCurveCard extends HTMLElement {
             const limits = {
                 minB: attrs.min_brightness !== undefined ? Number(attrs.min_brightness) : 0,
                 maxB: attrs.max_brightness !== undefined ? Number(attrs.max_brightness) : 100,
-                scale: attrs.brightness_scaling === true,
             };
             if (JSON.stringify(limits) !== JSON.stringify(this._limits)) { this._limits = limits; visualsChanged = true; }
             this._targetIds = { b: attrs.target_brightness_entity_id || null, k: attrs.target_color_temp_entity_id || null };

@@ -12,8 +12,6 @@ from ..const import (
     DEFAULT_WAKE_TIME,
     DEFAULT_MIDDAY_TIME,
     DEFAULT_SLEEP_TIME,
-    CURVE_SCALE_LOW,
-    CURVE_SCALE_HIGH,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -181,7 +179,7 @@ class HCLCalculator:
     MINUTES_PER_DAY = 1440
     
     def get_hcl_values(
-        self, now, min_brightness: int, max_brightness: int, scale: bool = False
+        self, now, min_brightness: int, max_brightness: int
     ) -> tuple[int, int]:
         """Calculate target Brightness and Color Temp using PCHIP Interpolation (Monotone).
         
@@ -305,13 +303,7 @@ class HCLCalculator:
         # 4. Clamp Results
         # Clamping (WYSIWYG)
         
-        # Apply user min/max to brightness: clip (default) or map the curve
-        # range 10–100 % onto min–max (option "scale", as up to 0.3.0)
-        if scale:
-            span = CURVE_SCALE_HIGH - CURVE_SCALE_LOW
-            brightness = min_brightness + (brightness - CURVE_SCALE_LOW) * (
-                max_brightness - min_brightness
-            ) / span
+        # User min/max are limits: curve values outside are clipped
         brightness = max(min_brightness, min(max_brightness, brightness))
         
         # Global bounds

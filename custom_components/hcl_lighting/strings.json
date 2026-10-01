@@ -33,11 +33,7 @@
                     "max_brightness": "Maximum brightness (%)",
                     "wake_time": "Wake time (activation start)",
                     "midday_time": "Social midday (peak & dip)",
-                    "sleep_time": "Sleep time (wind down)",
-                    "brightness_scaling": "Scale to min/max instead of clipping"
-                },
-                "data_description": {
-                    "brightness_scaling": "Off (default): curve values outside min/max are clipped. On: the curve range 10–100 % is mapped onto min–max, the shape of the curve is kept."
+                    "sleep_time": "Sleep time (wind down)"
                 }
             },
             "behavior": {
@@ -62,6 +58,7 @@
             },
             "scenarios": {
                 "title": "Scenarios",
+                "description": "Focus, Relax and Cleaning stay within the minimum and maximum brightness. Sleep and Night light end at the next wake time.",
                 "data": {
                     "focus_brightness": "Focus: brightness",
                     "focus_kelvin": "Focus: colour temperature",
@@ -71,13 +68,7 @@
                     "cleaning_kelvin": "Cleaning: colour temperature",
                     "scenario_duration": "Duration of Focus/Relax/Cleaning (min, 0 = until changed)",
                     "night_light_brightness": "Night light: brightness",
-                    "night_light_kelvin": "Night light: colour temperature",
-                    "scenario_limits": "Limit Focus/Relax/Cleaning to min/max brightness",
-                    "night_end_at_wake": "Sleep and Night light end at the wake time"
-                },
-                "data_description": {
-                    "scenario_limits": "Off (default): scenarios use their own values. On: their brightness stays within min/max. The night light is not limited.",
-                    "night_end_at_wake": "On: Sleep and Night light switch back to Auto at the wake time."
+                    "night_light_kelvin": "Night light: colour temperature"
                 }
             }
         },
@@ -196,7 +187,7 @@
                 },
                 "duration": {
                     "name": "Duration",
-                    "description": "Minutes until the return to Auto (0 = until changed). Empty = as configured."
+                    "description": "Minutes until the return to Auto (0 = until changed). Empty: Focus/Relax/Cleaning use the configured duration, Sleep/Night light end at the next wake time."
                 }
             }
         },
