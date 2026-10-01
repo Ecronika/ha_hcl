@@ -25,19 +25,19 @@ Die Karten-Ressource wird im UI-Modus automatisch als `/hcl_lighting_static/hcl-
 | **Helligkeit anpassen** (Schalter) | Aus: HCL lässt die Helligkeit unverändert |
 | **Farbtemperatur anpassen** (Schalter) | Aus: HCL lässt die Farbtemperatur unverändert |
 | **Szenario** (Auswahl) | Auto, Schlafen, Nachtlicht, Fokus, Entspannen, Putzen, Gast. Attribut `until`: Ende eines zeitlich begrenzten Szenarios |
-| **Sollhelligkeit** / **Sollfarbtemperatur** (Sensoren) | Werte, die HCL jetzt sendet (Szenario, Min/Max, Skalierung berücksichtigt; Schlafen 0 %, Gast `unknown`), z. B. um ein Licht mit HCL-Werten einzuschalten |
+| **Sollhelligkeit** / **Sollfarbtemperatur** (Sensoren) | Werte, die HCL jetzt sendet (Szenario und Min/Max berücksichtigt; Schlafen 0 %, Gast `unknown`), z. B. um ein Licht mit HCL-Werten einzuschalten |
 | **Curve Data** (Sensor) | Daten für die Karte. Attribute u. a. `preview_active` (Lichter folgen einer ungespeicherten Vorschau), `wake_time`, `sleep_time` |
 
 Bestehende Installationen behalten ihre Entity-IDs; nur die Anzeigenamen ändern sich.
 
 ## Szenarien
 - **Auto**: Lichter folgen der Kurve.
-- **Fokus / Entspannen / Putzen**: feste Werte (in den Optionen einstellbar, optional mit Dauer in Minuten, danach zurück zu Auto).
+- **Fokus / Entspannen / Putzen**: feste Werte (in den Optionen einstellbar, optional mit Dauer in Minuten, danach zurück zu Auto), innerhalb der minimalen/maximalen Helligkeit.
 - **Gast**: HCL sendet keine Befehle.
 - **Schlafen**: Eingeschaltete Lichter werden ausgeblendet. Wer nachts ein Licht einschaltet, steuert es manuell; es bleibt an, bis es ausgeschaltet wird.
 - **Nachtlicht**: gedimmtes, warmes Licht (Standard 3 % / 2200 K). Eingeschaltete und nachts eingeschaltete Lichter bekommen diese Werte; HCL schaltet nichts ein oder aus.
 
-Schlafen und Nachtlicht können optional zur Aufwachzeit enden. Ein Szenario-Wechsel wird mit dem „Übergang bei Szenario-Wechsel“ gesendet.
+Schlafen und Nachtlicht enden zur nächsten Aufwachzeit (zurück zu Auto); mit `hcl_lighting.set_scenario` und `duration: 0` bleiben sie bis zur Änderung. Ein Szenario-Wechsel wird mit dem „Übergang bei Szenario-Wechsel“ gesendet.
 
 ## Manuelle Steuerung
 HCL pausiert ein einzelnes Licht, wenn
@@ -57,9 +57,9 @@ Benutzer mit eingeschränkten Rechten brauchen für die schreibenden Aktionen di
 Beginnt oder endet die manuelle Steuerung eines Lichts, erscheint ein Logbuch-Eintrag und das Event `hcl_lighting_manual_control`. Steuern zwei Instanzen dasselbe Licht für dasselbe Attribut, meldet eine Reparatur das. Diagnosedaten lassen sich auf der Integrationsseite herunterladen. Beispiele: [README (englisch), Recipes](README.md#recipes).
 
 ## Optionen (Integration → Konfigurieren)
-1. **Kurve und Lichter**: Lichter, Ankerzeiten, minimale/maximale Helligkeit, „Auf Min/Max skalieren statt abschneiden“ (Standard aus), Kompatibilitätsmodus. Eine in der Karte gespeicherte Kurve hat Vorrang; wer eine Ankerzeit ändert, verwirft sie.
+1. **Kurve und Lichter**: Lichter, Ankerzeiten, minimale/maximale Helligkeit (Grenzen: Kurvenwerte außerhalb werden abgeschnitten), Kompatibilitätsmodus. Eine in der Karte gespeicherte Kurve hat Vorrang; wer eine Ankerzeit ändert, verwirft sie.
 2. **Aktualisierung und manuelle Steuerung**: Intervall (Standard 27 s), Übergangszeit (20 s), Übergang beim Einschalten (0 s, wird von den Aktualisierungen nicht unterbrochen), Rückkehr zu HCL (240 min, 0 = nie), Ausschalten beendet manuelle Steuerung, über Neustarts behalten, Werte von Einschaltbefehlen behalten, Übergang bei Szenario-Wechsel (Standard wie Übergangszeit).
-3. **Szenarien**: Werte von Fokus, Entspannen, Putzen und Nachtlicht, Dauer von Fokus/Entspannen/Putzen, Fokus/Entspannen/Putzen auf Min/Max begrenzen (aus), Schlafen und Nachtlicht enden zur Aufwachzeit (aus).
+3. **Szenarien**: Werte von Fokus, Entspannen, Putzen und Nachtlicht, Dauer von Fokus/Entspannen/Putzen.
 
 ## Dashboard-Karte
 Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖ oder Entf löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen. **Vorschau** sendet die ungespeicherte Kurve bis zum nächsten Neuladen an die Lichter (die Karte zeigt dann „Vorschau aktiv – nicht gespeichert“), **Speichern** übernimmt sie dauerhaft (ohne die Integration neu zu laden), **Verwerfen** lädt die gespeicherte Kurve. Schlägt Speichern fehl, zeigt die Karte den Fehler und die Änderungen bleiben als ungespeichert markiert. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit (Zeitzone von Home Assistant), darunter stehen die Werte, die HCL jetzt sendet. Die Nacht-Hinweise gelten von der Schlafens- bis zur Aufwachzeit.

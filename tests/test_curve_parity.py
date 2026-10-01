@@ -58,9 +58,9 @@ def test_card_and_integration_compute_the_same_curve():
     default = HCLCalculator().active_curve
     curves["default"] = [dict(p) for p in default]
     limits = [
-        {"minB": 10, "maxB": 100, "scale": False},
-        {"minB": 20, "maxB": 60, "scale": False},
-        {"minB": 20, "maxB": 60, "scale": True},
+        {"minB": 10, "maxB": 100},
+        {"minB": 20, "maxB": 60},
+        {"minB": 3, "maxB": 80},
     ]
     js = _js(curves, limits)
     for name, points in curves.items():
@@ -73,6 +73,6 @@ def test_card_and_integration_compute_the_same_curve():
             _b, k_py = calc.get_hcl_values(now, 0, 100)
             assert abs(k - k_py) <= 0.5 + 1e-6, (name, minute, k, k_py)
             for index, limit in enumerate(limits):
-                b_py, _k = calc.get_hcl_values(now, limit["minB"], limit["maxB"], scale=limit["scale"])
+                b_py, _k = calc.get_hcl_values(now, limit["minB"], limit["maxB"])
                 b_js = max(1, row[2 + index])  # the integration never sends less than 1 %
                 assert abs(b_js - b_py) <= 0.5 + 1e-6, (name, minute, limit, b_js, b_py, b_raw)

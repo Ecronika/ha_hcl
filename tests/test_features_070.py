@@ -87,53 +87,9 @@ async def test_f01_setpoint_sensors_update_over_time(hass, no_frontend_registrat
     assert hass.states.get(TARGET_B).state != before
 
 
-# ---------------------------------------------------------------- Ä-05
-def _calc_at(hour, minute, min_b, max_b, scale):
-    calc = HCLCalculator()
-    return calc.get_hcl_values(datetime(2026, 1, 1, hour, minute), min_b, max_b, scale=scale)[0]
-
-
-def test_a05_scaling_maps_curve_range_onto_min_max():
-    # default curve: 20:00 = 17 %, 11:00 = 100 %, 12:30 = 50 %
-    assert _calc_at(20, 0, 20, 60, scale=False) == 20      # clipped
-    assert _calc_at(20, 0, 20, 60, scale=True) == 23       # 20 + 7 * 40/90
-    assert _calc_at(12, 30, 20, 60, scale=False) == 50
-    assert _calc_at(12, 30, 20, 60, scale=True) == 38      # 20 + 40 * 40/90, dip is kept
-    assert _calc_at(11, 0, 20, 60, scale=True) == 60
-
-
-def test_a05_scaling_with_default_limits_changes_nothing():
-    for hour in range(24):
-        assert _calc_at(hour, 0, 10, 100, scale=True) == _calc_at(hour, 0, 10, 100, scale=False)
-
-
-async def test_a05_option_reaches_the_lights(hass, no_frontend_registration):
-    calls, _entry = await _light_on(
-        hass, options={"min_brightness": 20, "max_brightness": 60, "brightness_scaling": True}
-    )
-    assert _calls_for(calls, "light.a")[-1].data["brightness_pct"] == 23
-    attrs = hass.states.get("sensor.hcl_curve_data").attributes
-    assert attrs["brightness_scaling"] is True
-    assert max(s[2] for s in attrs["samples"]) == 60
-
-
-# ---------------------------------------------------------------- Ä-07 / B-15
-async def test_a07_scenarios_within_limits_when_enabled(hass, no_frontend_registration):
-    calls, _entry = await _light_on(
-        hass, options={"min_brightness": 50, "max_brightness": 60, "scenario_limits": True}
-    )
-    await _select(hass, "focus")
-    assert _calls_for(calls, "light.a")[-1].data["brightness_pct"] == 60
-    await _select(hass, "relax")
-    assert _calls_for(calls, "light.a")[-1].data["brightness_pct"] == 50
-    scenarios = hass.states.get("sensor.hcl_curve_data").attributes["scenarios"]
-    assert scenarios["focus"]["b"] == 60 and scenarios["night_light"]["b"] == 3
-
-
-async def test_a07_scenarios_unlimited_by_default(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass, options={"min_brightness": 50, "max_brightness": 60})
-    await _select(hass, "focus")
-    assert _calls_for(calls, "light.a")[-1].data["brightness_pct"] == 100
+# ---------------------------------------------------------------- Ä-05 / Ä-07 / B-15
+# Options "scale to min/max" and "limit scenarios" removed in 0.7.0b9 (RM-R01,
+# RM-R02): see test_fixes_070b9.py
 
 
 # ---------------------------------------------------------------- Ä-18
@@ -203,21 +159,8 @@ async def test_a04_night_light_values_are_configurable(hass, no_frontend_registr
     assert (data["brightness_pct"], data["color_temp_kelvin"]) == (8, 2000)
 
 
-async def test_a04_night_modes_end_at_wake_time_when_enabled(hass, no_frontend_registration, freezer):
-    await _light_on(hass, options={"night_end_at_wake": True})
-    await _select(hass, "sleep")
-    until = dt_util.parse_datetime(hass.states.get(SELECT).attributes["until"])
-    assert dt_util.as_local(until).hour == 7 and until > dt_util.utcnow()
-    freezer.move_to(until + timedelta(seconds=1))
-    async_fire_time_changed(hass, until + timedelta(seconds=1))
-    await hass.async_block_till_done()
-    assert hass.states.get(SELECT).state == "auto"
-
-
-async def test_a04_night_modes_stay_by_default(hass, no_frontend_registration):
-    await _light_on(hass)
-    await _select(hass, "night_light")
-    assert hass.states.get(SELECT).attributes["until"] is None
+# Sleep/Night light end at the wake time without an option since 0.7.0b9 (RM-R03):
+# see test_fixes_070b9.py
 
 
 # ---------------------------------------------------------------- B-41
