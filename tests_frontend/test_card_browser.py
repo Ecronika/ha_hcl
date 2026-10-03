@@ -69,7 +69,8 @@ async def page():
         pg = await browser.new_page(viewport={"width": 900, "height": 900})
         errors: list[str] = []
         pg.on("pageerror", lambda e: errors.append(str(e)))
-        await pg.set_content("<html><body></body></html>")
+        # Standards mode like Home Assistant (quirks mode resolves percentage heights differently)
+        await pg.set_content("<!DOCTYPE html><html><body></body></html>")
         await pg.add_script_tag(content=(FRONTEND / "chart.js").read_text(encoding="utf-8"))
         # The card is a JavaScript module (Lovelace resource type "module")
         await pg.add_script_tag(content=(FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8"), type="module")
@@ -221,13 +222,13 @@ async def test_a08_keyboard_keeps_order_and_minimum_points(page):
     await _set_hass(page, "auto")
     # point 1 (09:00) cannot pass point 2 (09:30)
     for _ in range(5):
-        await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle[data-idx="1"]')
+        await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle-input[data-idx="1"]')
             .dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowRight', bubbles: true}))""")
     pts = await _points(page)
     assert pts[1][0] == 555 and pts[1][0] < pts[2][0]
     # delete down to two points; the last two cannot be deleted
     for _ in range(20):
-        await page.evaluate("""() => { const h = card.shadowRoot.querySelector('#handles-b .handle[data-idx="0"]');
+        await page.evaluate("""() => { const h = card.shadowRoot.querySelector('#handles-b .handle-input[data-idx="0"]');
             h && h.dispatchEvent(new KeyboardEvent('keydown', {key: 'Delete', bubbles: true})); }""")
     assert len(await _points(page)) == 2
     assert page.errors == []
@@ -490,7 +491,7 @@ async def test_b44_entity_change_resets_the_card(page):
 
 async def test_b45_curve_editable_in_every_mode_with_hint(page):
     await _set_hass(page, "guest")
-    await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle[data-idx="1"]')
+    await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle-input[data-idx="1"]')
         .dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowUp', bubbles: true}))""")
     assert (await _points(page))[1][1] == 51
     assert await page.evaluate("() => card.shadowRoot.querySelector('.charts.disabled')") is None
@@ -595,7 +596,7 @@ async def test_k5_semantics_keyboard_and_formats(page):
     pressed = await page.evaluate("() => [...card.shadowRoot.querySelectorAll('.chip')].map(c => [c.dataset.mode, c.getAttribute('aria-pressed')])")
     assert ["relax", "true"] in pressed and ["auto", "false"] in pressed
     assert "Brightness over the day" in await page.evaluate("() => card.shadowRoot.getElementById('chartB').getAttribute('aria-label')")
-    handle = "card.shadowRoot.querySelector('#handles-k .handle[data-idx=\"1\"]')"
+    handle = "card.shadowRoot.querySelector('#handles-k .handle-input[data-idx=\"1\"]')"
     assert await page.evaluate(f"() => {handle}.getAttribute('aria-describedby')") == "handle-help"
     await page.evaluate(f"() => {handle}.dispatchEvent(new KeyboardEvent('keydown', {{key: 'End', bubbles: true}}))")
     assert (await _points(page))[1][2] == 7000
@@ -623,7 +624,7 @@ async def test_k6_stub_config_and_editor(page):
         sel.value = 'sensor.b_curve_data'; sel.dispatchEvent(new Event('change'));
     })""")
     assert changed == {"type": "custom:hcl-curve-card", "entity": "sensor.b_curve_data", "view": "full"}
-    assert await page.evaluate("() => card.getGridOptions()") == {"columns": 12, "min_columns": 6}
+    assert await page.evaluate("() => card.getGridOptions()") == {"columns": 12, "rows": "auto", "min_columns": 6}
 
 
 async def test_k3_compact_view_hides_the_editor_until_opened(page):
@@ -1018,3 +1019,198 @@ async def test_rm_f04_new_end_with_the_same_scenario_arrives(page):
     await page.evaluate("() => { for (let i = 0; i < 100; i++) next(); }")
     assert await page.evaluate("() => stop()") == {"mutations": 0, "formats": 0}
     assert page.errors == []
+
+
+# ---------------------------------------------------------------- 0.7.0b11
+async def test_rm_b25_end_a_full_day_ahead_shows_the_date(page):
+    await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", _until_hass("night_light", None, language="de"))
+    now = await page.evaluate("() => Date.parse('2026-10-03T18:27:00Z')")
+    # duration 1440: the end is set on the server a moment before the card renders
+    day = await page.evaluate(f"() => card._untilText({now} + 1440 * 60000 - 2000, {now})")
+    assert day.startswith("bis ") and "." in day.split(" ")[1]  # with the date
+    before = await page.evaluate(f"() => card._untilText({now} + 1440 * 60000 - 61000, {now})")
+    assert before.count(":") == 1 and "." not in before  # time only (reads as tomorrow)
+
+
+async def _in_cell(page, height: str) -> None:
+    """Put the card into a grid cell like a Sections view (fixed or auto height) with a card below."""
+    await page.evaluate(
+        """(height) => {
+            const cell = document.createElement('div');
+            cell.id = 'cell';
+            cell.style.height = height;
+            cell.style.width = '420px';
+            const below = document.createElement('div');
+            below.id = 'below';
+            below.style.height = '50px';
+            document.body.append(cell, below);
+            cell.appendChild(card);
+        }""",
+        height,
+    )
+    await page.wait_for_timeout(300)
+
+
+@pytest.mark.parametrize("height", ["300px", "auto"])
+async def test_rm_b26_card_fills_a_fixed_height_and_scrolls(page, height):
+    await _in_cell(page, height)
+    await _set_hass(page, "auto")
+    m = await page.evaluate("""() => {
+        const hc = card.shadowRoot.querySelector('ha-card');
+        return {card: card.getBoundingClientRect().bottom, cell: document.getElementById('cell').getBoundingClientRect().bottom,
+                below: document.getElementById('below').getBoundingClientRect().top,
+                scrollH: hc.scrollHeight, clientH: hc.clientHeight};
+    }""")
+    assert m["card"] <= m["cell"] + 0.5 and m["card"] <= m["below"] + 0.5  # nothing below is covered
+    if height == "auto":
+        assert m["scrollH"] <= m["clientH"] + 1  # as tall as the content, no scrolling
+    else:
+        assert m["scrollH"] > m["clientH"]  # the content scrolls inside the card
+    assert page.errors == []
+
+
+async def _drag_rows(page, idx: int, steps: int, dy: int, insert_at: int | None = None) -> list[dict]:
+    return await page.evaluate(
+        """async ([idx, steps, dy, insertAt]) => {
+            const sr = card.shadowRoot; const W = ms => new Promise(r => setTimeout(r, ms));
+            const handle = () => sr.querySelector(`#handles-b .handle[data-idx="${idx}"]`);
+            const layer = () => sr.getElementById('handles-b');
+            handle().setPointerCapture = () => {};
+            let r = handle().getBoundingClientRect();
+            const x = r.x + r.width / 2; let y = r.y + r.height / 2;
+            const top0 = layer().getBoundingClientRect().top;
+            handle().dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, composed: true, pointerId: 3, clientX: x, clientY: y}));
+            const rows = [];
+            for (let i = 0; i < steps; i++) {
+                if (i === insertAt) {  // something above the charts changes its height
+                    const block = document.createElement('div'); block.style.height = '50px'; block.id = 'shift';
+                    sr.querySelector('.charts').before(block);
+                }
+                y += dy;
+                window.dispatchEvent(new PointerEvent('pointermove', {pointerId: 3, clientX: x, clientY: y}));
+                await W(40);
+                const hr = handle().getBoundingClientRect();
+                rows.push({off: Math.abs(hr.y + hr.height / 2 - y), top: layer().getBoundingClientRect().top - top0,
+                           msgs: sr.getElementById('validation-area').textContent,
+                           draft: sr.getElementById('draft-info').textContent.length});
+            }
+            window.dispatchEvent(new PointerEvent('pointerup', {pointerId: 3, clientX: x, clientY: y}));
+            await W(50);
+            rows.push({after: true, msgs: sr.getElementById('validation-area').textContent,
+                       draft: sr.getElementById('draft-info').textContent.length});
+            return rows;
+        }""",
+        [idx, steps, dy, insert_at],
+    )
+
+
+async def test_rm_b27_charts_do_not_move_while_dragging(page):
+    await _set_hass(page, "auto")
+    msgs_before = await page.evaluate("() => card.shadowRoot.getElementById('validation-area').textContent")
+    # point 1 (09:00, 50 %) down to about 10 %: the curve to 09:30 (75 %) gets steep
+    rows = await _drag_rows(page, 1, 6, 14)
+    during, after = rows[:-1], rows[-1]
+    assert all(r["off"] <= 1 for r in during)  # the point stays under the pointer
+    assert all(r["top"] == 0 for r in during)  # the charts do not move
+    assert all(r["msgs"] == msgs_before and r["draft"] == 0 for r in during)
+    assert after["draft"] > 0  # draft line and messages follow on release
+    assert after["msgs"] != msgs_before  # the slope warning appears after release
+    assert page.errors == []
+
+
+async def test_rm_b27_point_follows_the_pointer_after_a_shift(page):
+    await _set_hass(page, "auto")
+    rows = await _drag_rows(page, 5, 6, 6, insert_at=2)  # 12:30, 50 %: no limit reached
+    assert all(r["off"] <= 1 for r in rows[:-1])
+    assert page.errors == []
+
+
+async def test_rm_b27_larger_touch_target(page):
+    css = await page.evaluate("() => card.shadowRoot.querySelector('style').textContent")
+    assert "@media (pointer: coarse) { .handle::after { inset: -16px; } }" in css  # 12 + 2 × 16 = 44 px
+
+
+async def test_rm_b28_points_are_native_sliders(page):
+    await _set_hass(page, "auto", language="de")
+    snap = await page.locator("hcl-curve-card").aria_snapshot()
+    assert 'slider "Helligkeitspunkt 1"' in snap and 'slider "Farbtemperaturpunkt 12"' in snap
+    info = await page.evaluate("""() => {
+        const i = card.shadowRoot.querySelector('#handles-b .handle-input[data-idx="0"]');
+        const d = card.shadowRoot.querySelector('#handles-b .handle[data-idx="0"]');
+        return {type: i.type, value: i.value, min: i.min, max: i.max, text: i.getAttribute('aria-valuetext'),
+                pointHidden: d.getAttribute('aria-hidden'), same: i.style.transform === d.style.transform};
+    }""")
+    assert info == {"type": "range", "value": "30", "min": "0", "max": "100", "text": "07:00, 30 %",
+                    "pointHidden": "true", "same": True}
+
+
+async def test_rm_b28_screen_reader_adjustment_keeps_the_focus(page):
+    await _set_hass(page, "auto")
+    result = await page.evaluate("""async () => {
+        const sr = card.shadowRoot; const W = ms => new Promise(r => setTimeout(r, ms));
+        const input = sr.querySelector('#handles-k .handle-input[data-idx="2"]');
+        input.focus();
+        // what TalkBack/VoiceOver do: the browser changes the value and fires "input"
+        input.value = String(Number(input.value) - 500);
+        input.dispatchEvent(new Event('input', {bubbles: true}));
+        await W(50);
+        card.hass = {...card._hass, states: {...card._hass.states}};  // a hass update
+        card._refreshCharts();                                         // and a resize
+        await W(50);
+        return {k: card._points[2].k, same: sr.activeElement === input, connected: input.isConnected,
+                selected: card._selected, dirty: card._isDirty, text: input.getAttribute('aria-valuetext')};
+    }""")
+    # point 2 (09:30, 5500 K) is now 5000 K; the focused slider was not replaced
+    assert result == {"k": 5000, "same": True, "connected": True, "selected": 2, "dirty": True, "text": "09:30, 5,000 K"}
+    assert page.errors == []
+
+
+async def test_rm_b29_status_line_reads_without_dots(page):
+    await _show(page, _until_hass("night_light", 3, language="de"))
+    parts = await page.evaluate("""() => {
+        const el = card.shadowRoot.getElementById('now-info');
+        return {shown: el.querySelector('[aria-hidden=true]').textContent, read: el.querySelector('.sr-only').textContent};
+    }""")
+    assert " · " in parts["shown"] and "·" not in parts["read"]
+    assert parts["read"] == parts["shown"].replace(" · ", ", ")
+    snap = await page.locator("hcl-curve-card").aria_snapshot()
+    assert "Nachtlicht, bis" in snap and "· Nachtlicht" not in snap
+    # draft line too
+    await page.evaluate("() => { card._points.forEach(p => p.b = 5); card._markChanged(); }")
+    draft = await page.evaluate("() => card.shadowRoot.querySelector('#draft-info .sr-only').textContent")
+    assert draft.startswith("Entwurf") and "·" not in draft and ", " in draft
+
+
+async def test_rm_f05_title_from_the_instance_or_the_option(page):
+    title = lambda: page.evaluate("() => card.shadowRoot.getElementById('card-title').textContent")  # noqa: E731
+    await _set_hass(page, "auto", language="de")
+    assert await title() == "HCL-Konfigurator"  # older integration: no attribute
+    await _set_hass(page, "auto", language="de", extra={"instance": "Küche"})
+    assert await title() == "Küche"
+    await page.evaluate("() => card.setConfig({entity: 'sensor.hcl_curve_data', title: 'Kochen'})")
+    assert await title() == "Kochen"
+    await page.evaluate("() => card.setConfig({entity: 'sensor.hcl_curve_data', title: '  '})")
+    assert await title() == "Küche"
+    assert page.errors == []
+
+
+async def test_rm_f05_editor_title_field(page):
+    configs = await page.evaluate("""() => new Promise(resolve => {
+        const out = [];
+        const ed = customElements.get('hcl-curve-card').getConfigElement();
+        document.body.appendChild(ed);
+        ed.hass = {language: 'de', states: {
+            'sensor.a_curve_data': {attributes: {control_points: [], mode_entity_id: 'select.a', friendly_name: 'HCL Curve', instance: 'Küche'}}}};
+        ed.setConfig({type: 'custom:hcl-curve-card', entity: 'sensor.a_curve_data'});
+        ed.addEventListener('config-changed', (e) => { out.push(e.detail.config); ed.setConfig(e.detail.config); });
+        const option = ed.shadowRoot.querySelector('#entity option').textContent;
+        const label = ed.shadowRoot.getElementById('l-title').textContent;
+        let t = ed.shadowRoot.getElementById('title');
+        t.value = ' Kochen '; t.dispatchEvent(new Event('change'));
+        t = ed.shadowRoot.getElementById('title');
+        t.value = ''; t.dispatchEvent(new Event('change'));
+        resolve({option, label, out});
+    })""")
+    assert configs["option"] == "Küche (sensor.a_curve_data)"
+    assert configs["label"] == "Titel (leer: Name der Instanz)"
+    assert configs["out"][0]["title"] == "Kochen" and "title" not in configs["out"][1]

@@ -58,7 +58,7 @@ class HCLLightingCurveSensor(SensorEntity):
     # State: time of the last curve/mode update
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     # The curve data is only needed live by the card, not in the history database
-    _unrecorded_attributes = frozenset({ATTR_SAMPLES, "control_points", "scenarios"})
+    _unrecorded_attributes = frozenset({ATTR_SAMPLES, "control_points", "scenarios", "instance"})
     
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, hcl_calc: HCLCalculator, controller) -> None:
         """Initialize the sensor."""
@@ -166,6 +166,8 @@ class HCLLightingCurveSensor(SensorEntity):
             ATTR_SAMPLES: samples,    # The interpolated curve
             ATTR_CURVE_VERSION: 2,
             "mode_entity_id": getattr(self, "_mode_entity_id", None),
+            # Name of the instance (title of the entry), shown as the card title
+            "instance": self._entry.title,
             # Brightness limits, shaded in the dashboard card
             "min_brightness": min_b,
             "max_brightness": max_b,
