@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b10] - 2026-10-03
+Tenth pre-release (beta) of 0.7.0: fixes RM-B24 and RM-D03 and adds RM-F04 of the roadmap (field test of 0.7.0b9). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Manual control ended when a light was briefly unavailable** (RM-B24): a light that reported `unavailable` or `unknown` was treated like a light that was switched off, so (with "Switching a light off ends manual control", the default) its manual control ended and HCL overwrote the user's values as soon as the light reported `on` again. This happened after every Home Assistant restart with lights that report `unavailable`/`unknown` for a moment while starting (e.g. Zigbee2MQTT/MQTT lights), so "Keep manual control across restarts" had no effect for them, and after radio dropouts or bridge/broker restarts. A light that is unreachable for up to 5 minutes now keeps its manual control. A longer gap still counts like switching off (e.g. a lamp without power at the wall switch comes back with its power-on values), if switching off ends manual control.
+- **Misleading debug message** (RM-D03): switching a light off shortly after an HCL command logged "Override detected inside Ignore Window!" although no manual control was set. Switching off now skips this check (it ends manual control as before, also within the ignore window), and the message for a real change reads "Change away from the HCL value inside the ignore window for … checking for manual control".
+
+### Added
+- **Dashboard card shows when a scenario ends** (RM-F04): the line below the charts shows the end of a timed scenario, e.g. "Now 23:10 · Night light · until 07:00 · 3 % · 2200 K" (with the date if the end is more than a day ahead). No end (`duration: 0`) shows nothing. The end comes from the attribute `until` of the scenario select.
+
 ## [0.7.0b9] - 2026-10-01
 Ninth pre-release (beta) of 0.7.0: three options added in the 0.7.0 betas become fixed behaviour, and the simulator is removed (RM-R01 to RM-R04 of the roadmap; keep the integration lean). The minimum Home Assistant version stays 2024.7. Compared with 0.6.1, two behaviours change (marked below); compared with the earlier 0.7.0 betas, the three options are gone.
 

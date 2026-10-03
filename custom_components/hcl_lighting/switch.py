@@ -17,7 +17,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
 from homeassistant.util.dt import utcnow
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
-from homeassistant.const import STATE_OFF, STATE_ON
+from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.service import async_call_from_config
 from homeassistant.helpers.start import async_at_started
@@ -657,6 +657,16 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             if new_state.state != STATE_ON:
                 # A light that is off is no longer returning to HCL
                 self.override_manager.end_reengaging(entity_id)
+
+            # Back after unavailable/unknown: the length of the gap decides
+            # whether its manual control ends (RM-B24)
+            unreachable = (STATE_UNAVAILABLE, STATE_UNKNOWN)
+            if (
+                old_state is not None
+                and old_state.state in unreachable
+                and new_state.state not in unreachable
+            ):
+                self.override_manager.light_returned(entity_id, old_state)
 
             # 1. Fast Path (Turn On Event)
             if old_state and old_state.state != STATE_ON and new_state.state == STATE_ON:

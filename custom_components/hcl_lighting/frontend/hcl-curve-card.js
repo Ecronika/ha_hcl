@@ -39,6 +39,7 @@ const HCL_STRINGS = {
         color_temp: "Colour temperature",
         time: "Time",
         now: "Now",
+        until: "until {time}",
         draft: "Draft",
         no_selection: "Select a point to edit it",
         mode_auto: "Auto",
@@ -112,6 +113,7 @@ const HCL_STRINGS = {
         color_temp: "Farbtemperatur",
         time: "Uhrzeit",
         now: "Jetzt",
+        until: "bis {time}",
         draft: "Entwurf",
         no_selection: "Punkt auswählen, um ihn zu bearbeiten",
         mode_auto: "Auto",
@@ -463,6 +465,7 @@ class HCLCurveCard extends HTMLElement {
         this._dataState = "loading";      // loading | missing | unavailable | invalid | ready
 
         this._currentMode = null;         // confirmed mode (select entity)
+        this._modeUntil = null;           // end of the scenario (ms) or null
         this._pendingMode = null;
         this._scenarios = JSON.parse(JSON.stringify(HCL_SCENARIO_DEFAULTS));
         this._limits = { minB: 0, maxB: 100 };
@@ -538,6 +541,7 @@ class HCLCurveCard extends HTMLElement {
         this._serviceError = null;
         this._inputError = null;
         this._currentMode = null;
+        this._modeUntil = null;
         this._dataState = "loading";
         this._targetIds = { b: null, k: null };
     }
@@ -636,6 +640,10 @@ class HCLCurveCard extends HTMLElement {
         const modeId = attrs.mode_entity_id;
         const modeState = modeId ? hass.states[modeId] : null;
         const mode = modeState ? modeState.state : null;
+        // End of the scenario (attribute "until" of the select, ISO time or null):
+        // only the status line uses it, so a new end alone needs no redraw
+        const until = modeState && modeState.attributes ? Date.parse(modeState.attributes.until) : NaN;
+        this._modeUntil = Number.isFinite(until) ? until : null;
         if (mode === this._currentMode) return false;
         this._currentMode = mode;
         return true;
@@ -1269,6 +1277,8 @@ class HCLCurveCard extends HTMLElement {
         const modeText = mode ? this._t(`mode_${mode}`) : null;
         const parts = [`${this._t("now")} ${f.clock(now)}`];
         if (modeText) parts.push(modeText);
+        const untilText = mode && mode !== "auto" ? this._untilText(this._modeUntil) : null;
+        if (untilText) parts.push(untilText);
         const states = (this._hass && this._hass.states) || {};
         const bState = this._targetIds.b ? states[this._targetIds.b] : undefined;
         const kState = this._targetIds.k ? states[this._targetIds.k] : undefined;
@@ -1304,6 +1314,23 @@ class HCLCurveCard extends HTMLElement {
                 hclSetText(draftEl, "");
             }
         }
+    }
+
+    // "until 07:00" (within 24 h) or "until 5.10. 07:00", in the Home Assistant time zone
+    _untilText(ms, nowMs = Date.now()) {
+        if (ms === null || ms === undefined || ms <= nowMs) return null;
+        const f = this._fmt;
+        const time = f.clock(this._nowMinutes(new Date(ms)));
+        if (ms - nowMs < 24 * 3600 * 1000) return this._t("until", { time });
+        let date;
+        try {
+            date = new Intl.DateTimeFormat(f.language, {
+                timeZone: this._timeZone || undefined, day: "numeric", month: "numeric",
+            }).format(new Date(ms));
+        } catch (err) {
+            date = new Date(ms).toLocaleDateString();
+        }
+        return this._t("until", { time: `${date} ${time}` });
     }
 
     _describeCharts(data) {

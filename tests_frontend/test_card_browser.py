@@ -945,3 +945,76 @@ async def test_rm_f03_curve_held_back_during_a_drag_arrives_afterwards(page):
     await page.evaluate("() => { card._drag = null; next(); }")
     assert await page.evaluate("() => card._points.every(p => p.b === 25)") is True
     assert page.errors == []
+
+
+# ---------------------------------------------------------------- RM-F04
+def _until_hass(mode: str, hours: float | None, language: str = "en") -> dict:
+    h = _setpoint_hass(mode, "3", "2200")
+    h["config"] = {"time_zone": "Europe/Berlin"}
+    h["language"] = language
+    h["locale"] = {"language": language, "time_format": "24"}
+    h["states"]["select.mode"]["attributes"] = {"__hours": hours}
+    return h
+
+
+async def _show(page, h: dict) -> str:
+    """Set hass; the select gets until = now + __hours (ISO, like the integration)."""
+    await page.evaluate(
+        """(h) => {
+            const sel = h.states['select.mode'];
+            const hours = sel.attributes.__hours;
+            sel.attributes = {until: hours === null ? null : new Date(Date.now() + hours * 3600e3).toISOString()};
+            h.callService = () => 0;
+            window.h = h;
+            card.hass = h;
+        }""",
+        h,
+    )
+    return await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+
+
+async def _expected_clock(page) -> str:
+    return await page.evaluate("() => card._fmt.clock(card._nowMinutes(new Date(card._modeUntil)))")
+
+
+async def test_rm_f04_end_of_the_scenario_within_a_day(page):
+    info = await _show(page, _until_hass("night_light", 3))
+    assert f"Night light · until {await _expected_clock(page)} · 3 %" in info
+    info = await _show(page, _until_hass("night_light", 3, language="de"))
+    assert f"Nachtlicht · bis {await _expected_clock(page)} · 3 %" in info
+    assert page.errors == []
+
+
+async def test_rm_f04_end_more_than_a_day_ahead_shows_the_date(page):
+    info = await _show(page, _until_hass("focus", 30, language="de"))
+    clock = await _expected_clock(page)
+    date = await page.evaluate(
+        "() => new Intl.DateTimeFormat('de', {timeZone: 'Europe/Berlin', day: 'numeric', month: 'numeric'})"
+        ".format(new Date(card._modeUntil))"
+    )
+    assert f"Fokus · bis {date} {clock} · " in info
+
+
+@pytest.mark.parametrize("mode,hours", [("night_light", None), ("auto", 3), ("night_light", -1)])
+async def test_rm_f04_no_end_shown(page, mode, hours):
+    """No end (duration 0), Auto, or an end that has just passed."""
+    info = await _show(page, _until_hass(mode, hours))
+    assert "until" not in info
+
+
+async def test_rm_f04_new_end_with_the_same_scenario_arrives(page):
+    await _show(page, _until_hass("night_light", None))
+    await _ha_like(page, await page.evaluate("() => window.h"))
+    now = lambda: page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")  # noqa: E731
+    assert "until" not in await now()
+    await page.evaluate(
+        "() => next({'select.mode': {state: 'night_light', attributes: {until: new Date(Date.now() + 2 * 3600e3).toISOString()}}})"
+    )
+    assert f"until {await _expected_clock(page)}" in await now()
+    await page.evaluate("() => next({'select.mode': {state: 'night_light', attributes: {until: null}}})")
+    assert "until" not in await now()
+    # foreign changes still cost no DOM work (RM-F03)
+    await page.evaluate("() => record()")
+    await page.evaluate("() => { for (let i = 0; i < 100; i++) next(); }")
+    assert await page.evaluate("() => stop()") == {"mutations": 0, "formats": 0}
+    assert page.errors == []
