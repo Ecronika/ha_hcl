@@ -69,7 +69,7 @@ const HCL_STRINGS = {
         invalid_number: "Enter a number.",
         point_b: "Brightness point {n}",
         point_k: "Colour temperature point {n}",
-        handle_help: "Up/Down: value, Page Up/Down: large steps, Home/End: minimum/maximum, Left/Right: time, Delete: remove point.",
+        handle_help: "Up/Down: value, Page Up/Down: large steps, Home/End: minimum/maximum, Left/Right: time, Delete: remove point. With a screen reader: adjust the value of the point, or enter time and values in the fields below the charts.",
         chart_b_desc: "Brightness over the day: lowest {min} at {tmin}, highest {max} at {tmax}.",
         chart_k_desc: "Colour temperature over the day: lowest {min} at {tmin}, highest {max} at {tmax}.",
         color_bar: "Colour over the day",
@@ -84,6 +84,7 @@ const HCL_STRINGS = {
         chart_error: "Error loading Chart.js: {msg}. Check the integration installation.",
         editor_entity: "HCL curve sensor",
         editor_view: "View",
+        editor_title: "Title (empty: name of the instance)",
         view_full: "Full (editor always visible)",
         view_compact: "Compact (status; editor on demand)",
         editor_none: "No HCL instance found",
@@ -143,7 +144,7 @@ const HCL_STRINGS = {
         invalid_number: "Zahl eingeben.",
         point_b: "Helligkeitspunkt {n}",
         point_k: "Farbtemperaturpunkt {n}",
-        handle_help: "Hoch/Runter: Wert, Bild auf/ab: große Schritte, Pos1/Ende: Minimum/Maximum, Links/Rechts: Uhrzeit, Entf: Punkt löschen.",
+        handle_help: "Hoch/Runter: Wert, Bild auf/ab: große Schritte, Pos1/Ende: Minimum/Maximum, Links/Rechts: Uhrzeit, Entf: Punkt löschen. Mit Screenreader: Wert des Punkts anpassen oder Uhrzeit und Werte in den Feldern unter den Diagrammen eingeben.",
         chart_b_desc: "Helligkeit über den Tag: niedrigster Wert {min} um {tmin}, höchster {max} um {tmax}.",
         chart_k_desc: "Farbtemperatur über den Tag: niedrigster Wert {min} um {tmin}, höchster {max} um {tmax}.",
         color_bar: "Farbverlauf des Tages",
@@ -158,6 +159,7 @@ const HCL_STRINGS = {
         chart_error: "Chart.js konnte nicht geladen werden: {msg}. Installation der Integration prüfen.",
         editor_entity: "HCL-Kurvensensor",
         editor_view: "Ansicht",
+        editor_title: "Titel (leer: Name der Instanz)",
         view_full: "Voll (Editor immer sichtbar)",
         view_compact: "Kompakt (Status; Editor bei Bedarf)",
         editor_none: "Keine HCL-Instanz gefunden",
@@ -326,6 +328,23 @@ function hclSetText(el, text) {
     if (el.textContent !== text) el.textContent = text;
 }
 
+// Text with " · " separators: shown as is, read by screen readers with pauses
+// instead of "dot" (RM-B29). Writes the DOM only when the text changes (RM-F03).
+function hclSetSpoken(el, visible, spoken) {
+    if (el._hclText === visible && el._hclSpoken === spoken) return;
+    el._hclText = visible;
+    el._hclSpoken = spoken;
+    el.textContent = "";
+    if (!visible) return;
+    const shown = document.createElement("span");
+    shown.setAttribute("aria-hidden", "true");
+    shown.textContent = visible;
+    const read = document.createElement("span");
+    read.className = "sr-only";
+    read.textContent = spoken;
+    el.append(shown, read);
+}
+
 function hclSetDisabled(el, disabled) {
     if (el.disabled !== disabled) el.disabled = disabled;
 }
@@ -426,7 +445,8 @@ class HCLCurveCard extends HTMLElement {
 
     getGridOptions() {
         // Height follows the content (no fixed rows); at least half width
-        return { columns: 12, min_columns: this.config && this.config.view === "compact" ? 4 : 6 };
+        // Height follows the content ("auto"); a fixed height is filled and scrolls (RM-B26)
+        return { columns: 12, rows: "auto", min_columns: this.config && this.config.view === "compact" ? 4 : 6 };
     }
 
     getCardSize() {
@@ -803,6 +823,8 @@ class HCLCurveCard extends HTMLElement {
       <style>
           :host {
               display: block;
+              /* fills a fixed height in a Sections view (RM-B26); auto otherwise */
+              height: 100%;
               container-type: inline-size;
               /* Colours come from the Home Assistant theme */
               --hcl-b-color: var(--amber-color, #ffb300);
@@ -815,7 +837,10 @@ class HCLCurveCard extends HTMLElement {
               --hcl-warning: var(--warning-color, #ffa600);
               --hcl-error: var(--error-color, #db4437);
           }
-          ha-card { overflow: hidden; color: var(--hcl-text); padding-bottom: 12px; position: relative; }
+          ha-card {
+              display: block; height: 100%; box-sizing: border-box; overflow-x: hidden; overflow-y: auto;
+              color: var(--hcl-text); padding-bottom: 12px; position: relative;
+          }
           .card-header {
               padding: 16px 16px 8px 16px;
               display: flex; justify-content: space-between; align-items: center;
@@ -889,6 +914,17 @@ class HCLCurveCard extends HTMLElement {
               border: 2px solid var(--card-background-color, #fff); box-sizing: border-box;
           }
           .handle::after { content: ''; position: absolute; inset: -10px; }
+          /* larger touch target, same visible point (RM-B27) */
+          @media (pointer: coarse) { .handle::after { inset: -16px; } }
+          /* Native slider per point for keyboard and screen readers (RM-B28);
+             invisible, on top of the point, the point itself takes the pointer */
+          .handle-input {
+              position: absolute; left: 0; top: 0; width: 12px; height: 12px;
+              margin: -6px 0 0 -6px; padding: 0; border: 0; opacity: 0;
+              pointer-events: none; -webkit-appearance: none; appearance: none; background: transparent;
+          }
+          .handle-input:focus-visible + .handle { outline: 2px solid var(--hcl-text); outline-offset: 2px; }
+          .handle-input:focus + .handle .handle-info { opacity: 1; }
           .handle:active { cursor: grabbing; }
           .handle.type-b { background: var(--hcl-b-color); }
           .handle.type-k { background: var(--hcl-k-color); }
@@ -926,7 +962,7 @@ class HCLCurveCard extends HTMLElement {
       </style>
       <ha-card>
           <div class="card-header">
-              <span class="title" data-i18n="title"></span>
+              <span class="title" id="card-title"></span>
           </div>
           <div id="status" class="messages" role="status" aria-live="polite"></div>
           <div class="mode-selector" id="mode-chips" role="group">${chips}</div>
@@ -1267,8 +1303,8 @@ class HCLCurveCard extends HTMLElement {
         const draftEl = $("draft-info");
         if (!el) return;
         if (this._dataState !== "ready" || !this._points.length) {
-            hclSetText(el, "");
-            if (draftEl) hclSetText(draftEl, "");
+            hclSetSpoken(el, "", "");
+            if (draftEl && !this._drag) hclSetSpoken(draftEl, "", "");
             return;
         }
         const now = this._nowMinutes();
@@ -1305,13 +1341,16 @@ class HCLCurveCard extends HTMLElement {
                 parts.push(this._t("setpoint_unavailable"));
             }
         }
-        hclSetText(el, parts.join(" · "));
-        if (draftEl) {
+        hclSetSpoken(el, parts.join(" · "), parts.join(", "));
+        // The draft line appears with the first change: not while a point is
+        // dragged (it would move the charts under the pointer, RM-B27)
+        if (draftEl && !this._drag) {
             if (this._isDirty) {
                 const v = hclValueAt(this._points, now);
-                hclSetText(draftEl, `${this._t("draft")} ${f.clock(now)}: ${f.percent(hclEffectiveB(v.b, this._limits))} · ${f.kelvin(v.k)}`);
+                const head = `${this._t("draft")} ${f.clock(now)}: ${f.percent(hclEffectiveB(v.b, this._limits))}`;
+                hclSetSpoken(draftEl, `${head} · ${f.kelvin(v.k)}`, `${head}, ${f.kelvin(v.k)}`);
             } else {
-                hclSetText(draftEl, "");
+                hclSetSpoken(draftEl, "", "");
             }
         }
     }
@@ -1321,7 +1360,9 @@ class HCLCurveCard extends HTMLElement {
         if (ms === null || ms === undefined || ms <= nowMs) return null;
         const f = this._fmt;
         const time = f.clock(this._nowMinutes(new Date(ms)));
-        if (ms - nowMs < 24 * 3600 * 1000) return this._t("until", { time });
+        // The time alone is unambiguous up to one minute short of a day; an end
+        // a full day ahead (duration 1440) would read like now (RM-B25)
+        if (ms - nowMs < 24 * 3600 * 1000 - 60 * 1000) return this._t("until", { time });
         let date;
         try {
             date = new Intl.DateTimeFormat(f.language, {
@@ -1384,8 +1425,21 @@ class HCLCurveCard extends HTMLElement {
     }
 
     // ------------------------------------------------------------ status messages
+    // Title: option "title", else the name of the instance, else the default (RM-F05)
+    _renderTitle() {
+        const el = this.shadowRoot.getElementById("card-title");
+        if (!el) return;
+        const configured = this.config && typeof this.config.title === "string" ? this.config.title.trim() : "";
+        const entity = this.config && this.config.entity;
+        const stateObj = this._hass && entity ? (this._hass.states || {})[entity] : null;
+        const instance = stateObj && stateObj.attributes && typeof stateObj.attributes.instance === "string"
+            ? stateObj.attributes.instance.trim() : "";
+        hclSetText(el, configured || instance || this._t("title"));
+    }
+
     _renderStatus() {
         if (!this.shadowRoot) return;
+        this._renderTitle();
         const status = this.shadowRoot.getElementById("status");
         if (!status) return;
         const entity = this.config ? this.config.entity : "";
@@ -1450,49 +1504,81 @@ class HCLCurveCard extends HTMLElement {
 
     // ------------------------------------------------------------ handles
     _rebuildHandles() {
-        // Keep keyboard focus across the rebuild
+        // Each point: a native range input (keyboard, screen readers; RM-B28)
+        // and the visible point (pointer). Rebuilt only when the number of
+        // points changes, so a focused point keeps its focus (screen readers).
         let focusedType = null;
         let focusedIdx = -1;
         const activeEl = this.shadowRoot.activeElement;
-        if (activeEl && activeEl.classList && activeEl.classList.contains("handle")) {
+        if (activeEl && activeEl.classList && activeEl.classList.contains("handle-input")) {
             focusedType = activeEl.classList.contains("type-b") ? "b" : "k";
             focusedIdx = parseInt(activeEl.dataset.idx, 10);
         }
+        let rebuilt = false;
+        const count = this._dataState === "ready" ? this._points.length : 0;
         ["b", "k"].forEach(type => {
             const container = this.shadowRoot.getElementById(`handles-${type}`);
             if (!container) return;
-            container.innerHTML = "";
-            if (this._dataState !== "ready") return;
-            this._points.forEach((pt, idx) => {
-                const el = document.createElement("div");
-                el.className = `handle type-${type}` + (idx === this._selected ? " selected" : "");
-                el.dataset.idx = idx;
-                const tooltip = document.createElement("div");
-                tooltip.className = "handle-info";
-                tooltip.setAttribute("aria-hidden", "true");
-                el.appendChild(tooltip);
-                el.setAttribute("role", "slider");
-                el.setAttribute("tabindex", "0");
-                el.setAttribute("aria-label", this._t(type === "b" ? "point_b" : "point_k", { n: idx + 1 }));
-                el.setAttribute("aria-valuemin", type === "b" ? "0" : "2000");
-                el.setAttribute("aria-valuemax", type === "b" ? "100" : "7000");
-                el.setAttribute("aria-describedby", "handle-help");
-                el.addEventListener("pointerdown", (e) => this._onDragStart(e, idx, type, el));
-                el.addEventListener("keydown", (e) => this._onKeyDown(e, idx, type));
-                el.addEventListener("focus", () => this._select(idx, false));
-                container.appendChild(el);
+            if (container.querySelectorAll(".handle").length !== count) {
+                rebuilt = true;
+                container.innerHTML = "";
+                for (let idx = 0; idx < count; idx++) container.append(...this._createHandle(idx, type));
+            }
+            container.querySelectorAll(".handle-input").forEach(input => {
+                const idx = parseInt(input.dataset.idx, 10);
+                input.setAttribute("aria-label", this._t(type === "b" ? "point_b" : "point_k", { n: idx + 1 }));
+            });
+            container.querySelectorAll(".handle").forEach(el => {
+                el.classList.toggle("selected", parseInt(el.dataset.idx, 10) === this._selected);
             });
         });
-        if (focusedType !== null && focusedIdx !== -1) {
+        if (rebuilt && focusedType !== null && focusedIdx !== -1) {
             requestAnimationFrame(() => {
-                const el = this.shadowRoot.querySelector(`#handles-${focusedType} .handle[data-idx="${focusedIdx}"]`);
+                const el = this.shadowRoot.querySelector(`#handles-${focusedType} .handle-input[data-idx="${focusedIdx}"]`);
                 if (el) el.focus();
             });
         }
     }
 
+    _createHandle(idx, type) {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.className = `handle-input type-${type}`;
+        input.dataset.idx = idx;
+        input.min = type === "b" ? "0" : "2000";
+        input.max = type === "b" ? "100" : "7000";
+        input.step = type === "b" ? "1" : "50";
+        input.setAttribute("aria-describedby", "handle-help");
+        input.addEventListener("keydown", (e) => this._onKeyDown(e, idx, type));
+        input.addEventListener("input", () => this._onRangeInput(input, idx, type));
+        input.addEventListener("focus", () => this._select(idx, false));
+        const el = document.createElement("div");
+        el.className = `handle type-${type}`;
+        el.dataset.idx = idx;
+        el.setAttribute("aria-hidden", "true");
+        const tooltip = document.createElement("div");
+        tooltip.className = "handle-info";
+        el.appendChild(tooltip);
+        el.addEventListener("pointerdown", (e) => this._onDragStart(e, idx, type, el));
+        return [input, el];
+    }
+
+    // Value changed by the native slider itself (screen reader gestures)
+    _onRangeInput(input, idx, type) {
+        const pt = this._points[idx];
+        if (!pt) return;
+        const key = type === "b" ? "b" : "k";
+        const value = Number(input.value);
+        if (!Number.isFinite(value) || value === pt[key]) return;
+        this._pushUndo();
+        pt[key] = value;
+        this._selected = idx;
+        this._markChanged();
+    }
+
     _syncHandle(idx, pt, type, chart) {
         const el = this.shadowRoot.querySelector(`#handles-${type} .handle[data-idx="${idx}"]`);
+        const input = this.shadowRoot.querySelector(`#handles-${type} .handle-input[data-idx="${idx}"]`);
         if (!el) return;
         const x = chart.scales.x.getPixelForValue(pt.t);
         const yVal = type === "b" ? pt.b : pt.k;
@@ -1500,8 +1586,12 @@ class HCLCurveCard extends HTMLElement {
         el.style.transform = `translate(${x}px, ${y}px)`;
         const f = this._fmt;
         const valText = type === "b" ? f.percent(pt.b) : f.kelvin(pt.k);
-        el.setAttribute("aria-valuenow", String(Math.round(yVal)));
-        el.setAttribute("aria-valuetext", `${f.clock(pt.t)}, ${valText}`);
+        if (input) {
+            input.style.transform = el.style.transform;
+            const value = String(Math.round(yVal));
+            if (input.value !== value) input.value = value;
+            input.setAttribute("aria-valuetext", `${f.clock(pt.t)}, ${valText}`);
+        }
         const tooltip = el.querySelector(".handle-info");
         if (tooltip) tooltip.textContent = `${f.clock(pt.t)} | ${valText}`;
     }
@@ -1717,8 +1807,7 @@ class HCLCurveCard extends HTMLElement {
         const chart = (type === "b") ? this._chartB : this._chartK;
         const layer = this.shadowRoot.getElementById(`handles-${type}`);
         const drag = {
-            pointerId: e.pointerId, idx, type, el, chart,
-            rect: layer.getBoundingClientRect(), moved: false,
+            pointerId: e.pointerId, idx, type, el, chart, moved: false,
         };
         this._drag = drag;
         this._select(idx, false);
@@ -1730,8 +1819,11 @@ class HCLCurveCard extends HTMLElement {
             const pt = this._points[drag.idx];
             if (!pt) return;
             const { minT, maxT } = this._timeBounds(drag.idx);
-            const rawT = chart.scales.x.getValueForPixel(ev.clientX - drag.rect.left);
-            const yVal = chart.scales.y.getValueForPixel(ev.clientY - drag.rect.top);
+            // Read the position of the layer on every move: anything above the
+            // charts may have moved it since the point was grabbed (RM-B27)
+            const rect = layer.getBoundingClientRect();
+            const rawT = chart.scales.x.getValueForPixel(ev.clientX - rect.left);
+            const yVal = chart.scales.y.getValueForPixel(ev.clientY - rect.top);
             pt.t = Math.max(minT, Math.min(maxT, Math.round(rawT / HCL_STEP) * HCL_STEP));
             if (type === "b") pt.b = Math.round(Math.max(0, Math.min(100, yVal)));
             else pt.k = Math.round(Math.max(2000, Math.min(7000, yVal)));
@@ -1774,7 +1866,7 @@ class HCLCurveCard extends HTMLElement {
         if (this._dragFrame) { cancelAnimationFrame(this._dragFrame); this._dragFrame = null; }
         if (!drag.moved) this._undo.pop(); // a click only selects the point
         if (commit && drag.moved) this._markChanged();
-        else if (this._initialized) { this._updateEditor(); this._updateUIState(); }
+        else if (this._initialized) { this._updateValidationUI(); this._updateEditor(); this._updateUIState(); }
     }
 
     // ------------------------------------------------------------ service calls
@@ -1970,6 +2062,9 @@ class HCLCurveCard extends HTMLElement {
     _updateValidationUI() {
         const area = this.shadowRoot.getElementById("validation-area");
         if (!area) return;
+        // No layout change above the charts while a point is dragged (RM-B27);
+        // the messages follow when it is released
+        if (this._drag) return;
         // Only touch the DOM when the result changed
         const currentSig = JSON.stringify(this._validationResult);
         if (this._lastValidationSig === currentSig) return;
@@ -2026,21 +2121,26 @@ class HCLCurveCardEditor extends HTMLElement {
         if (sig === this._sig) return;
         this._sig = sig;
         const current = this._config.entity || "";
-        const options = sensors.map(id => ({ id, name: this._hass.states[id].attributes.friendly_name || id }));
+        const options = sensors.map(id => {
+            const attrs = this._hass.states[id].attributes;
+            return { id, name: attrs.instance || attrs.friendly_name || id };
+        });
         this.shadowRoot.innerHTML = `
           <style>
               .form { display: flex; flex-direction: column; gap: 12px; }
               label { display: flex; flex-direction: column; gap: 4px; font-size: 0.875rem; }
-              select { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--divider-color, #ccc);
+              select, input { font: inherit; padding: 8px; border-radius: 6px; border: 1px solid var(--divider-color, #ccc);
                        background: var(--card-background-color, #fff); color: var(--primary-text-color, #212121); }
           </style>
           <div class="form">
               <label><span id="l-entity"></span><select id="entity"></select></label>
               <label><span id="l-view"></span><select id="view"></select></label>
+              <label><span id="l-title"></span><input id="title" type="text"></label>
           </div>`;
         const $ = (id) => this.shadowRoot.getElementById(id);
         $("l-entity").textContent = this._t("editor_entity");
         $("l-view").textContent = this._t("editor_view");
+        $("l-title").textContent = this._t("editor_title");
         const entitySelect = $("entity");
         if (!options.length) {
             const opt = document.createElement("option");
@@ -2071,6 +2171,18 @@ class HCLCurveCardEditor extends HTMLElement {
         viewSelect.value = this._config.view || "full";
         entitySelect.addEventListener("change", () => this._changed({ entity: entitySelect.value }));
         viewSelect.addEventListener("change", () => this._changed({ view: viewSelect.value }));
+        const titleInput = $("title");
+        titleInput.value = this._config.title || "";
+        // "change" (leaving the field): the form is not rebuilt while typing
+        titleInput.addEventListener("change", () => {
+            const title = titleInput.value.trim();
+            const update = { ...this._config };
+            if (title) update.title = title; else delete update.title;
+            this._config = update;
+            this.dispatchEvent(new CustomEvent("config-changed", {
+                detail: { config: this._config }, bubbles: true, composed: true,
+            }));
+        });
     }
 
     _changed(update) {

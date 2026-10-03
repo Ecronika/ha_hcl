@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b11] - 2026-10-03
+Eleventh pre-release (beta) of 0.7.0: fixes RM-B25 to RM-B29 and adds RM-F05 of the roadmap (field test of 0.7.0b10 on a phone, with TalkBack). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Points jumped away from the finger while dragging** (RM-B27): hints above the charts ("Brightness changes too steeply …", the draft line) appeared and disappeared while a point was dragged and moved the charts, but the position was calculated against the place of the charts when the point was grabbed. At a warning threshold the charts jumped up and down and the point could hardly be placed. While a point is dragged nothing above the charts changes any more (the hints follow when it is released), and the position is measured on every move. On touch screens the points can be grabbed in a larger area (44 px; the point looks the same).
+- **Card covered the cards below in a Sections dashboard with a fixed height** (RM-B26): with a fixed number of rows the card was taller than its cell and drew over the next section (e.g. with the editor open on a phone). The card now fills a fixed height and scrolls inside; with the height on "auto" (now also the default of the card) it is as tall as its content.
+- **Curve points could not be moved with a screen reader** (RM-B28): the points were custom sliders; with TalkBack a point could be selected but not adjusted, the focus jumped to the whole chart. Every point now has a native slider (value, time and value read out), which screen readers adjust with their own gestures; the points are no longer rebuilt while they are used, so the focus stays. Keyboard and dragging work as before.
+- **Screen readers read the separators** (RM-B29): the status and draft lines were read with "dot" between the values; screen readers now get pauses instead (the visible text is unchanged).
+- **End of a scenario a full day ahead looked like now** (RM-F04 follow-up, RM-B25): `hcl_lighting.set_scenario` with `duration: 1440` showed e.g. "until 20:27" at 20:27; an end a full day ahead now shows the date.
+
+### Added
+- **Card title from the instance** (RM-F05): the card shows the name of its instance instead of "HCL Configurator" (rename the entry under Settings → Devices & services, e.g. "Kitchen"); `title:` in the card configuration (also in the visual editor) overrides it. The curve sensor has the new attribute `instance` (not stored in the history). The instance picker of the visual editor shows these names too.
+
 ## [0.7.0b10] - 2026-10-03
 Tenth pre-release (beta) of 0.7.0: fixes RM-B24 and RM-D03 and adds RM-F04 of the roadmap (field test of 0.7.0b9). The minimum Home Assistant version stays 2024.7.
 

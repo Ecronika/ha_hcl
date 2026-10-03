@@ -15,8 +15,10 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
 - **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the active scenario with its end (e.g. "until 07:00") and the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "not available" while they have no value).
 - **Scenario chips**: switch the scenario directly in the card. The curve can be edited in every scenario; it only applies in Auto.
-- **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards.
+- **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards. In Sections dashboards keep the height on "auto": the height of the card changes with its content (editor open or closed, hints); with a fixed height the card scrolls inside.
+- **Title**: the name of the instance (rename the entry under Settings → Devices & services, e.g. "Kitchen"), or `title:` in the card configuration.
 - **Keyboard**: selected point: ↑/↓ value (PgUp/PgDn in larger steps), ←/→ time, Home/End minimum/maximum value, Shift = larger steps, Del delete.
+- **Screen readers**: every point is a slider ("Brightness point 1, 07:00, 30 %"); adjust its value with the slider gesture of the screen reader, or select it and enter time and values in the fields below the charts.
 - **Save status**: Save is confirmed by Home Assistant; errors are shown in the card and the changes stay marked as unsaved. While the lights follow an unsaved preview, the card shows a hint.
 - **Presets**: One-click profiles **Default** (the integration's default curve), **Default with quiet night** (5 % / 2200 K from sleep time), **Default without midday dip**, **Focus**, **Relax**, **Early Bird** and **Night Owl**.
 - **Live Validation**: Immediate hints on implausible curves (e.g. bright, cold light at night; night = sleep time to wake time).
@@ -67,7 +69,7 @@ Edit a dashboard → **Add card** → search for **HCL Curve Card**. The visual 
 type: custom:hcl-curve-card
 entity: sensor.hcl_lighting_curve_data
 ```
-The sensor is named `sensor.<instance name>_curve_data` (e.g. `sensor.living_room_curve_data`). Optional: `view: compact`.
+The sensor is named `sensor.<instance name>_curve_data` (e.g. `sensor.living_room_curve_data`). Optional: `view: compact`, `title: Kitchen` (default: name of the instance).
 
 **Card resource**: registered automatically when Lovelace resources are managed in the UI (storage mode), as `/hcl_lighting_static/hcl-curve-card.js?v=<version>`; an update replaces the entry. In YAML mode add it yourself:
 ```yaml
@@ -129,7 +131,7 @@ Each instance is a device with these entities (IDs of new installations; existin
 | Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning, Guest (also the chips of the card). Attribute `until`: end of a timed scenario. |
 | Target brightness | `sensor.living_room_target_brightness` | Brightness HCL sends now (%, scenario and limits included; Sleep 0 %, Guest `unknown`) |
 | Target colour temperature | `sensor.living_room_target_colour_temperature` | Colour temperature HCL sends now (K) |
-| Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change). Attributes include `preview_active` (the lights follow an unsaved preview), `wake_time` and `sleep_time`. |
+| Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change). Attributes include `instance` (name of the instance, card title), `preview_active` (the lights follow an unsaved preview), `wake_time` and `sleep_time`. |
 
 The name part of the IDs follows the language Home Assistant used when the entity was created (e.g. `_hcl_aktiv` in German).
 
