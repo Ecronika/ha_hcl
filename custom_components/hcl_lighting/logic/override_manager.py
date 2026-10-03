@@ -5,6 +5,7 @@ import logging
 from datetime import timedelta
 from typing import Any
 from homeassistant.util import dt as dt_util
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import State
 from homeassistant.util.color import color_temperature_to_rgb, color_RGB_to_xy
 
@@ -12,8 +13,11 @@ from ..const import (
     OVERRIDE_TIMEOUT_HOURS,
     OVERRIDE_BRIGHTNESS_DELTA,
     OVERRIDE_KELVIN_DELTA,
+    UNREACHABLE_GRACE_SECONDS,
     XY_COLOR_DISTANCE_THRESHOLD,
 )
+
+UNREACHABLE_STATES = (STATE_UNAVAILABLE, STATE_UNKNOWN)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,7 +31,8 @@ class OverrideManager:
         #   entity_id: {
         #       "last_set": (brightness, kelvin),
         #       "manual_override_time": datetime | None,
-        #       "ignore_events_until": datetime | None
+        #       "ignore_events_until": datetime | None,
+        #       "unreachable_since": datetime  (while unavailable/unknown)
         #   }
         # }
         self._override_state = {}
@@ -133,15 +138,23 @@ class OverrideManager:
         light_data = self._override_state[entity_id]
         now = dt_util.now()
 
+        # 0. Unavailable/unknown says nothing about the light: it is not
+        # switched off and keeps its manual control (RM-B24). When it reports
+        # again, light_returned() decides by the length of the gap.
+        if state.state in UNREACHABLE_STATES:
+            light_data.setdefault("unreachable_since", now)
+            return False
+
         # Priority: internal last_set > global last_applied
         recorded_last_set = light_data.get("last_set")
         reference_values = recorded_last_set or last_set_values
         last_b = reference_values[0] if reference_values else None
         last_k = reference_values[1] if reference_values and len(reference_values) > 1 else None
 
-        # 1. Check Ignore Window with Divergence Detection
+        # 1. Check Ignore Window with Divergence Detection (lights that are
+        # on; switching off is never an HCL value and goes to step 2, RM-D03)
         ignore_until = light_data.get("ignore_events_until")
-        if ignore_until and now < ignore_until:
+        if ignore_until and now < ignore_until and state.state == "on":
             # Trajectory Analysis: Did we move AWAY from target significantly?
             divergence_detected = False
             if old_state and old_state.state == "on" and last_b is not None:
@@ -160,8 +173,9 @@ class OverrideManager:
                         # the user moved the light away from the target -> Override!
                         if dist_new > dist_old + 5:
                             _LOGGER.debug(
-                                "Override detected inside Ignore Window! Divergence: OldDist=%s%%, NewDist=%s%%",
-                                dist_old, dist_new
+                                "Change away from the HCL value inside the ignore window for %s "
+                                "(brightness distance %s%% -> %s%%): checking for manual control",
+                                entity_id, dist_old, dist_new
                             )
                             divergence_detected = True
 
@@ -174,8 +188,9 @@ class OverrideManager:
                         dist_old_k = abs(old_k - last_k)
                         if dist_new_k > dist_old_k + OVERRIDE_KELVIN_DELTA:
                             _LOGGER.debug(
-                                "Override detected inside Ignore Window! Kelvin divergence: OldDist=%sK, NewDist=%sK",
-                                dist_old_k, dist_new_k
+                                "Change away from the HCL value inside the ignore window for %s "
+                                "(colour temperature distance %sK -> %sK): checking for manual control",
+                                entity_id, dist_old_k, dist_new_k
                             )
                             divergence_detected = True
 
@@ -187,8 +202,9 @@ class OverrideManager:
                         dist_old_xy = ((old_xy[0] - exp_x) ** 2 + (old_xy[1] - exp_y) ** 2) ** 0.5
                         if dist_new_xy > dist_old_xy + XY_COLOR_DISTANCE_THRESHOLD:
                             _LOGGER.debug(
-                                "Override detected inside Ignore Window! XY divergence: OldDist=%.3f, NewDist=%.3f",
-                                dist_old_xy, dist_new_xy
+                                "Change away from the HCL value inside the ignore window for %s "
+                                "(colour distance %.3f -> %.3f): checking for manual control",
+                                entity_id, dist_old_xy, dist_new_xy
                             )
                             divergence_detected = True
                 except Exception:
@@ -199,6 +215,7 @@ class OverrideManager:
                 return False
 
         # 2. Check if light is ON
+        light_data.pop("unreachable_since", None)
         if state.state != "on":
             # Switching a light off ends its manual control (configurable)
             if self.reset_on_off and light_data.get("manual_override_time"):
@@ -280,6 +297,30 @@ class OverrideManager:
             return True
             
         return False
+
+    def light_returned(self, entity_id: str, old_state: State | None) -> None:
+        """A light reports again after being unavailable/unknown (RM-B24).
+
+        A short gap (HA restart, bridge or broker restart, radio dropout)
+        keeps its manual control. A longer gap counts like switching off
+        (e.g. a lamp without power at the wall switch comes back with its
+        power-on values), if manual control ends when a light is switched off.
+        """
+        data = self._override_state.get(entity_id)
+        if data is None:
+            return
+        since = data.pop("unreachable_since", None)
+        if since is None and old_state is not None and old_state.state in UNREACHABLE_STATES:
+            since = old_state.last_changed  # gap started before HCL listened
+        if since is None or not data.get("manual_override_time"):
+            return
+        gap = dt_util.now() - since
+        if self.reset_on_off and gap > timedelta(seconds=UNREACHABLE_GRACE_SECONDS):
+            _LOGGER.debug("Override reset for %s (not reachable for %s)", entity_id, gap)
+            data["manual_override_time"] = None
+            self._notify()
+        else:
+            _LOGGER.debug("Manual control of %s kept (not reachable for %s)", entity_id, gap)
 
     def get_pending_reengagements(self) -> list[str]:
         """Get list of entities where override has expired and need re-engagement."""

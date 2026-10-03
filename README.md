@@ -13,7 +13,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🎨 Interactive Dashboard Card
 - **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
-- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "not available" while they have no value).
+- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the active scenario with its end (e.g. "until 07:00") and the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "not available" while they have no value).
 - **Scenario chips**: switch the scenario directly in the card. The curve can be edited in every scenario; it only applies in Auto.
 - **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards.
 - **Keyboard**: selected point: ↑/↓ value (PgUp/PgDn in larger steps), ←/→ time, Home/End minimum/maximum value, Shift = larger steps, Del delete.
@@ -107,7 +107,7 @@ The three anchors must leave room for the curve sectors (wake ramp 3 h, midday s
 | Transition of updates | 20 s | Must be shorter than the update interval; lights without transition support ignore it |
 | Transition when switched on | 0 s | Transition of the values sent right after a light is switched on (0–30 s; the update cycles do not interrupt it) |
 | Return to HCL after manual control | 240 min | 0 = HCL never takes a paused light back automatically |
-| Switching a light off ends manual control | on | Off: a paused light stays paused when it is switched off and on again |
+| Switching a light off ends manual control | on | Off: a paused light stays paused when it is switched off and on again. A light that is unavailable for up to 5 minutes (restart, radio dropout) stays paused; a longer gap counts as switched off |
 | Keep manual control across restarts | off | On: paused lights stay paused after a Home Assistant restart |
 | Keep values of turn-on commands | off | On: a light switched on through Home Assistant with its own brightness or colour (scene, automation, voice, app) keeps these values |
 | Transition when the scenario changes | = transition of updates | Also used when a timed scenario ends; may be longer than the update interval (the lights are left alone until it has finished) |

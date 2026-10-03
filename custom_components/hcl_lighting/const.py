@@ -52,6 +52,7 @@ XY_COLOR_DISTANCE_THRESHOLD = 0.05 # Euclidean distance in CIE 1931 space
 IGNORE_WINDOW_SECONDS = 2.0        # Seconds to ignore events after setting a value
 OWN_CONTEXT_SECONDS = 300          # Seconds HCL remembers the contexts of its own commands
 COMMAND_TIMEOUT_SECONDS = 10       # Seconds an update waits for its light commands (they keep running)
+UNREACHABLE_GRACE_SECONDS = 300    # A light unavailable/unknown for longer counts as switched off (manual control)
  
 # v0.5.0 Scenario Engine
 CONF_SCENARIOS = "scenarios"
