@@ -614,6 +614,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 if (
                     state
                     and state.state == STATE_ON
+                    and not self.override_manager.own_report_pending(eid, state)
                     and not self.override_manager.is_overridden(eid)
                     and not self.override_manager.is_reengaging(eid)
                 ):
@@ -711,8 +712,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      return
 
             # 2. State reports caused by HCL's own commands (also late or
-            # intermediate ones during a transition) are never manual control
+            # intermediate ones during a transition) are no manual control.
+            # Home Assistant gives a change on the device within 5 s after a
+            # command the same context: one that moved away from the HCL
+            # value is manual control (RM-B33).
             if self.controller.is_own_context(new_state.context):
+                self.override_manager.check_own_report(entity_id, new_state, old_state)
                 return
 
             # 3. Check for Manual Override

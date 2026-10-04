@@ -25,6 +25,7 @@ DEFAULT_MAX_BRIGHTNESS = 100
 OVERRIDE_TIMEOUT_HOURS = 4
 OVERRIDE_BRIGHTNESS_DELTA = 2      # >2% (Safety margin against jitter/rounding noise)
 OVERRIDE_KELVIN_DELTA = 100        # >100K (Must be >56K to survive steepest HCL dip at 12:15)
+TRAJECTORY_BRIGHTNESS_DELTA = 5    # >5% further from the HCL value than before: moved away (trajectory checks)
 # Smooth Re-engagement Transition
 REENGAGE_STEPS = 6
 REENGAGE_INTERVAL_SECONDS = 30

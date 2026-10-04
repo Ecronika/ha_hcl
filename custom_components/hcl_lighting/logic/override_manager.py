@@ -13,11 +13,52 @@ from ..const import (
     OVERRIDE_TIMEOUT_HOURS,
     OVERRIDE_BRIGHTNESS_DELTA,
     OVERRIDE_KELVIN_DELTA,
+    TRAJECTORY_BRIGHTNESS_DELTA,
     UNREACHABLE_GRACE_SECONDS,
     XY_COLOR_DISTANCE_THRESHOLD,
 )
 
 UNREACHABLE_STATES = (STATE_UNAVAILABLE, STATE_UNKNOWN)
+_TRACKING_KEYS = ("last_set", "ignore_events_until", "command_start")
+
+
+def _pct(brightness) -> int | None:
+    """Brightness 0-255 as percent (None if unknown)."""
+    if brightness is None:
+        return None
+    return round(min(255, max(0, brightness)) * 100 / 255)
+
+
+def _xy_distance(xy, target) -> float | None:
+    if not xy or not target:
+        return None
+    return ((xy[0] - target[0]) ** 2 + (xy[1] - target[1]) ** 2) ** 0.5
+
+
+# Verdicts on a value reported with HCL's context (RM-B33)
+_OWN, _OPEN, _AWAY = 0, 1, 2
+
+
+def _verdict(curr, target, old, start, tolerance) -> int:
+    """Whether a value reported with HCL's context belongs to HCL's command (RM-B33).
+
+    _OWN: at the target, or moving towards it (also a slow ramp of the device).
+    _OPEN: back towards the light's value when the command was sent (start).
+    A device can report the target at once and then its own values of the
+    transition, but a user can dim back as well: it is decided when the
+    command's transition has ended (see own_report_pending).
+    _AWAY: beyond the range between start and target - a manual change.
+    """
+    if curr is None or target is None:
+        return _OWN
+    if abs(curr - target) <= tolerance:
+        return _OWN
+    if old is not None and abs(curr - target) <= abs(old - target) + tolerance:
+        return _OWN
+    if start is not None and min(start, target) - tolerance <= curr <= max(start, target) + tolerance:
+        return _OPEN
+    return _AWAY if old is not None or start is not None else _OWN
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +73,8 @@ class OverrideManager:
         #       "last_set": (brightness, kelvin),
         #       "manual_override_time": datetime | None,
         #       "ignore_events_until": datetime | None,
+        #       "command_start": (brightness %, kelvin, xy) of the light when
+        #                        HCL sent its last command (None if it was off),
         #       "unreachable_since": datetime  (while unavailable/unknown)
         #   }
         # }
@@ -101,18 +144,33 @@ class OverrideManager:
         if was_overridden:
             self._notify()
 
-    def set_last_set_values(self, entity_id: str, brightness: int, kelvin: int):
-        """Update the last known HCL values applied to the light."""
+    def set_last_set_values(
+        self, entity_id: str, brightness: int, kelvin: int, start: State | None = None
+    ) -> None:
+        """Update the last known HCL values applied to the light.
+
+        start: state of the light when the command is sent; its values are the
+        other end of the command's transition (RM-B33).
+        """
         if entity_id not in self._override_state:
             self._override_state[entity_id] = {}
-        self._override_state[entity_id]["last_set"] = (brightness, kelvin)
+        data = self._override_state[entity_id]
+        data["last_set"] = (brightness, kelvin)
+        data.pop("own_report_open", None)
+        if start is not None and start.state == "on":
+            attrs = start.attributes
+            data["command_start"] = (
+                _pct(attrs.get("brightness")), attrs.get("color_temp_kelvin"), attrs.get("xy_color")
+            )
+        else:
+            data.pop("command_start", None)
 
-    def tracking_snapshot(self, entity_id: str) -> tuple[Any, Any]:
-        """Tracking values a command changes (last values, ignore window)."""
+    def tracking_snapshot(self, entity_id: str) -> tuple[Any, ...]:
+        """Tracking values a command changes (last values, ignore window, start values)."""
         data = self._override_state.get(entity_id) or {}
-        return data.get("last_set"), data.get("ignore_events_until")
+        return tuple(data.get(key) for key in _TRACKING_KEYS)
 
-    def restore_tracking(self, entity_id: str, snapshot: tuple[Any, Any]) -> None:
+    def restore_tracking(self, entity_id: str, snapshot: tuple[Any, ...]) -> None:
         """Undo the tracking of a command that was not sent or failed.
 
         The light never got the values: neither the values nor the ignore
@@ -121,7 +179,7 @@ class OverrideManager:
         data = self._override_state.get(entity_id)
         if data is None:
             return
-        for key, value in zip(("last_set", "ignore_events_until"), snapshot):
+        for key, value in zip(_TRACKING_KEYS, snapshot):
             if value is None:
                 data.pop(key, None)
             else:
@@ -171,7 +229,7 @@ class OverrideManager:
 
                         # If new distance is significantly larger (>5%) than old distance,
                         # the user moved the light away from the target -> Override!
-                        if dist_new > dist_old + 5:
+                        if dist_new > dist_old + TRAJECTORY_BRIGHTNESS_DELTA:
                             _LOGGER.debug(
                                 "Change away from the HCL value inside the ignore window for %s "
                                 "(brightness distance %s%% -> %s%%): checking for manual control",
@@ -217,6 +275,7 @@ class OverrideManager:
         # 2. Check if light is ON
         light_data.pop("unreachable_since", None)
         if state.state != "on":
+            light_data.pop("own_report_open", None)
             # Switching a light off ends its manual control (configurable)
             if self.reset_on_off and light_data.get("manual_override_time"):
                 _LOGGER.debug("Override reset for %s (turned off)", entity_id)
@@ -293,10 +352,136 @@ class OverrideManager:
         if is_override:
             light_data["manual_override_time"] = now
             light_data.pop("reengage_until", None)
+            light_data.pop("own_report_open", None)
             self._notify()
             return True
             
         return False
+
+    def _own_report_values(self, data: dict, state: State, old_state: State | None) -> list[tuple[str, int]]:
+        """(description, verdict) of the adapted attributes of a report (RM-B33)."""
+        last_b, last_k = data["last_set"]
+        start_b, start_k, start_xy = data.get("command_start") or (None, None, None)
+        old = old_state.attributes if old_state is not None and old_state.state == "on" else {}
+        attrs = state.attributes
+        out = []
+        if self.track_brightness and last_b is not None:
+            curr_b = _pct(attrs.get("brightness"))
+            out.append((
+                f"Brightness (L:{last_b}%->C:{curr_b}%)",
+                _verdict(curr_b, last_b, _pct(old.get("brightness")), start_b, TRAJECTORY_BRIGHTNESS_DELTA),
+            ))
+        if self.track_color and last_k:
+            curr_k = attrs.get("color_temp_kelvin")
+            if curr_k is not None:
+                out.append((
+                    f"Kelvin (L:{last_k}K->C:{curr_k}K)",
+                    _verdict(curr_k, last_k, old.get("color_temp_kelvin"), start_k, OVERRIDE_KELVIN_DELTA),
+                ))
+            else:
+                # Colour lights (XY simulation): distance to the HCL colour
+                try:
+                    expected = color_RGB_to_xy(*color_temperature_to_rgb(last_k))
+                except Exception:
+                    expected = None
+                dist = _xy_distance(attrs.get("xy_color"), expected)
+                if dist is not None:
+                    out.append((
+                        f"XY Color (d:{dist:.3f})",
+                        _verdict(
+                            dist, 0.0, _xy_distance(old.get("xy_color"), expected),
+                            _xy_distance(start_xy, expected), XY_COLOR_DISTANCE_THRESHOLD,
+                        ),
+                    ))
+        return out
+
+    def _set_manual(self, entity_id: str, data: dict, reasons: list[str], why: str) -> None:
+        _LOGGER.debug("Manual Override detected for %s (%s): %s", entity_id, why, ", ".join(reasons))
+        data["manual_override_time"] = dt_util.now()
+        data.pop("reengage_until", None)
+        data.pop("own_report_open", None)
+        self._notify()
+
+    def check_own_report(self, entity_id: str, state: State | None, old_state: State | None = None) -> bool:
+        """Check a state report that carries the context of an HCL command (RM-B33).
+
+        Home Assistant gives the state changes of a light the context of the
+        last command for 5 seconds, also a change made on the device (e.g. a
+        KNX wall dimmer right after switching on). Reports of HCL's command
+        reach its values: they are at the target or move towards it. A report
+        beyond the range between the light's value at the command and the
+        target is a manual change. A report back towards the light's value at
+        the command can be either; it is decided when the transition has
+        ended (own_report_pending). Returns True if the light is now manually
+        controlled.
+        """
+        data = self._override_state.get(entity_id)
+        if not data or data.get("manual_override_time") is not None or not data.get("last_set"):
+            return False
+        if state is None or state.state != "on":
+            data.pop("own_report_open", None)
+            return False
+        verdicts = self._own_report_values(data, state, old_state)
+        reasons = [text for text, verdict in verdicts if verdict == _AWAY]
+        if reasons:
+            self._set_manual(entity_id, data, reasons, "change on the device within 5 s after an HCL command")
+            return True
+        if any(verdict == _OPEN for _text, verdict in verdicts):
+            _LOGGER.debug(
+                "Report of %s with HCL's context moved back towards the value before the command; "
+                "decided when the transition has ended", entity_id,
+            )
+            data["own_report_open"] = True
+        elif all(ok for _text, ok in self._at_target(data, state)):
+            data.pop("own_report_open", None)
+        return False
+
+    def _at_target(self, data: dict, state: State) -> list[tuple[str, bool]]:
+        """Per adapted attribute: (description, whether the light is at the HCL value)."""
+        last_b, last_k = data["last_set"]
+        attrs = state.attributes
+        out = []
+        if self.track_brightness and last_b is not None and attrs.get("brightness") is not None:
+            curr_b = _pct(attrs["brightness"])
+            out.append((f"Brightness (L:{last_b}%->C:{curr_b}%)", abs(curr_b - last_b) <= TRAJECTORY_BRIGHTNESS_DELTA))
+        if self.track_color and last_k:
+            curr_k = attrs.get("color_temp_kelvin")
+            if curr_k is not None:
+                out.append((f"Kelvin (L:{last_k}K->C:{curr_k}K)", abs(curr_k - last_k) <= OVERRIDE_KELVIN_DELTA))
+            else:
+                try:
+                    expected = color_RGB_to_xy(*color_temperature_to_rgb(last_k))
+                except Exception:
+                    expected = None
+                dist = _xy_distance(attrs.get("xy_color"), expected)
+                if dist is not None:
+                    out.append((f"XY Color (d:{dist:.3f})", dist <= XY_COLOR_DISTANCE_THRESHOLD))
+        return out
+
+    def own_report_pending(self, entity_id: str, state: State | None) -> bool:
+        """Decide an open report with HCL's context (RM-B33); True: leave the light alone.
+
+        While the transition of the command runs the light is left alone (its
+        values are still on the way). Afterwards a light that stayed away
+        from the HCL value was changed on the device: manual control.
+        """
+        data = self._override_state.get(entity_id)
+        if not data or not data.get("own_report_open"):
+            return False
+        if state is None or state.state != "on" or not data.get("last_set"):
+            data.pop("own_report_open", None)
+            return False
+        ignore_until = data.get("ignore_events_until")
+        if ignore_until is not None and dt_util.now() < ignore_until:
+            return True
+        reasons = [text for text, ok in self._at_target(data, state) if not ok]
+        if not reasons:
+            data.pop("own_report_open", None)
+            return False
+        self._set_manual(
+            entity_id, data, reasons, "stayed away from the HCL value after a report with HCL's context"
+        )
+        return True
 
     def light_returned(self, entity_id: str, old_state: State | None) -> None:
         """A light reports again after being unavailable/unknown (RM-B24).
@@ -379,6 +564,7 @@ class OverrideManager:
             self._override_state[entity_id] = {}
         self._override_state[entity_id]["manual_override_time"] = dt_util.now()
         self._override_state[entity_id].pop("reengage_until", None)
+        self._override_state[entity_id].pop("own_report_open", None)
         self._notify()
 
     def reset_override(self, entity_id: str):
