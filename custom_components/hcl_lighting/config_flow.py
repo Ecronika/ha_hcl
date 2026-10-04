@@ -49,6 +49,15 @@ def _anchor_errors(values: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
+def _target_errors(values: dict[str, Any]) -> dict[str, str]:
+    """An instance needs at least one target (RM-B35: an empty target must
+    not fall back to the lights of the first setup)."""
+    target = values.get(CONF_TARGET) or {}
+    if not any(target.values()):
+        return {CONF_TARGET: "no_lights"}
+    return {}
+
+
 def _anchor_schema(defaults: dict[str, Any]) -> dict:
     return {
         vol.Required(CONF_WAKE_TIME, default=defaults.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)): selector.TimeSelector(),
@@ -83,7 +92,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors = {}
         if user_input is not None:
-            errors = _anchor_errors(user_input)
+            errors = _target_errors(user_input) or _anchor_errors(user_input)
             if not errors:
                 return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
 
@@ -157,7 +166,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if min_b >= max_b:
                 errors["base"] = "min_greater_max"
             else:
-                errors = _anchor_errors(user_input)
+                errors = _target_errors(user_input) or _anchor_errors(user_input)
             if not errors:
                 self._pending.update(user_input)
                 return await self.async_step_behavior()

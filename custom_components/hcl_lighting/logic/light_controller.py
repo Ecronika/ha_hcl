@@ -24,20 +24,16 @@ from homeassistant.util.color import (
 )
 from homeassistant.const import (
     ATTR_ENTITY_ID,
-    STATE_OFF,
-    STATE_UNAVAILABLE,
-    STATE_UNKNOWN,
+    STATE_ON,
 )
 
 from ..const import (
     CONF_SMART_TRANSITION,
-    REENGAGE_INTERVAL_SECONDS,
-    REENGAGE_STEPS,
+    REENGAGE_TRANSITION_SECONDS,
     BRIGHTNESS_THRESHOLD,
     KELVIN_THRESHOLD,
     XY_COLOR_SENSITIVITY,
     KELVIN_RANGE,
-    CAPABILITY_CACHE_VERSION,
     MODE_AUTO,
     MODE_GUEST,
     MODE_SLEEP,
@@ -139,6 +135,9 @@ class CommandTracker:
         self.context_order: deque[tuple[float, str]] = deque()
         # Lights with a command still running
         self.in_flight: set[str] = set()
+        # Lights whose last command failed (logged once until they answer
+        # again, RM-B39)
+        self.failing: set[str] = set()
         # Number of the command that last set the tracking values of a light
         self._latest: dict[str, int] = {}
         self._numbers = itertools.count(1)
@@ -157,11 +156,35 @@ class CommandTracker:
         """Forget lights that are no longer controlled."""
         for entity_id in [eid for eid in self._latest if eid not in valid_entity_ids]:
             del self._latest[entity_id]
+        self.failing &= valid_entity_ids
 
 
 # Colour modes HCL drives through the XY simulation (Home Assistant converts
 # xy_color to the light's own mode, including RGBW and RGBWW)
 _COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW)
+
+def _native_capability(state) -> dict[str, Any]:
+    """Native capability of a light from its attributes (ct, xy_sim, dim, onoff)."""
+    attrs = state.attributes
+    modes = attrs.get(ATTR_SUPPORTED_COLOR_MODES)
+    if not isinstance(modes, (list, tuple)) or not modes:
+        modes = ()
+    supports_color = any(mode in modes for mode in _COLOR_MODES)
+    if ColorMode.COLOR_TEMP in modes:
+        cap_type = "ct"
+    elif supports_color:
+        cap_type = "xy_sim"
+    elif ColorMode.BRIGHTNESS in modes or (modes and ColorMode.ONOFF not in modes):
+        cap_type = "dim"
+    else:
+        cap_type = "onoff"
+    return {
+        "type": cap_type,
+        "min_kelvin": attrs.get("min_color_temp_kelvin") or 2000,
+        "max_kelvin": attrs.get("max_color_temp_kelvin") or 6500,
+        "supports_color": supports_color,
+    }
+
 
 class HCLLightController:
     """Controller for applying HCL settings to lights."""
@@ -178,8 +201,7 @@ class HCLLightController:
         self.override_manager = override_manager
         self.hcl_calc = hcl_calc
         self.config_entry = config_entry
-        self._capability_cache = {}
-        self._cache_version = CAPABILITY_CACHE_VERSION
+        self._capability_cache: dict[str, dict[str, Any]] = {}
         
         # State Machine
         self.active_mode = MODE_AUTO
@@ -305,10 +327,7 @@ class HCLLightController:
         if announce:
             self._mode_change_pending = True
         _LOGGER.debug("HCL Mode changed to: %s", mode)
-        
-        # Trigger immediate update logic is handled by the caller (select entity) calling switch.update_ha_state() 
-        # or sending a signal. But actually, we should probably expose a signal or callback.
-        # For now, select entity calls generic update.
+        # The caller (scenario select, set_scenario) requests the update
 
     def calculate_target_values(self, now) -> tuple[int | None, int | None]:
         """
@@ -508,9 +527,10 @@ class HCLLightController:
             error = task.exception() if not task.cancelled() else asyncio.CancelledError()
             if error is None and task.result() is True:
                 result.updated.append(entity_id)
+                self._report_success(entity_id)
                 continue
             if error is not None:
-                _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
+                self._report_failure(entity_id, error)
                 result.failed[entity_id] = error
             self._restore_tracking(entity_id, previous[entity_id])
         for task in late:
@@ -527,6 +547,26 @@ class HCLLightController:
             )
             result.pending.append(entity_id)
         return result
+
+    def _report_failure(self, entity_id: str, error: BaseException) -> None:
+        """Log a failed light command: once as a warning, repeats at debug level (RM-B39).
+
+        A light that keeps failing is tried again every update; the log gets
+        one entry when it starts failing and one when it answers again.
+        """
+        if entity_id not in self.commands.failing:
+            self.commands.failing.add(entity_id)
+            _LOGGER.warning(
+                "Light update for %s failed: %s (repeated failures are logged at debug "
+                "level until the light accepts commands again)", entity_id, error,
+            )
+        _LOGGER.debug("Light update for %s failed", entity_id, exc_info=error)
+
+    def _report_success(self, entity_id: str) -> None:
+        """A light accepted a command: end of a failure streak (RM-B39)."""
+        if entity_id in self.commands.failing:
+            self.commands.failing.discard(entity_id)
+            _LOGGER.info("Light %s accepts HCL commands again", entity_id)
 
     def _track_in_flight(self, task: asyncio.Task, entity_id: str) -> None:
         """Remember a running command until it has finished."""
@@ -561,9 +601,10 @@ class HCLLightController:
         else:
             error = task.exception()
             if error is None and task.result() is True:
+                self._report_success(entity_id)
                 return
         if error is not None:
-            _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
+            self._report_failure(entity_id, error)
         # A newer command owns the light: its tracking and protection stay
         if self._restore_tracking(entity_id, previous) and on_failure is not None:
             on_failure([entity_id])
@@ -576,13 +617,17 @@ class HCLLightController:
         state_obj=None,
         transition: float = 0,
         ignore_seconds: float | None = None,
+        on_failure: Callable[[list[str]], None] | None = None,
     ) -> bool:
-        """Ultra-fast HCL application for turn-on events (True if the command succeeded).
+        """Fast-HCL for a light that was switched on (True if a command was started).
 
         The tracking values and the ignore window are set before the command
-        (synchronously, before the first await, so the first state report of
-        the light is not taken for manual control) and restored if the
-        command is not sent or fails.
+        starts (so the first state report of the light is not taken for manual
+        control). The command runs in the background like all other light
+        commands (RM-T17): Home Assistant does not wait for it, the light gets
+        no second command while it runs, and a failure restores the tracking
+        (unless a newer command has set it since) and calls on_failure.
+        A light with a command still running gets no Fast-HCL command.
         """
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
 
@@ -592,6 +637,9 @@ class HCLLightController:
             return False
         if self._is_group(entity_id, state):
             _LOGGER.debug("Ignoring Fast-HCL for Group/Hue Group: %s", entity_id)
+            return False
+        if entity_id in self._in_flight:
+            _LOGGER.debug("No Fast-HCL for %s: a command to it is still running", entity_id)
             return False
 
         cap_type = self._get_capability(entity_id, kelvin, state)
@@ -604,42 +652,41 @@ class HCLLightController:
             service_data["xy_color"] = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
         elif cap_type != "dim":
             return False  # onoff or unknown
+        if self._filter_service_data(service_data) is None:
+            return False  # nothing HCL adapts
 
         previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
         self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin, start=state)
         self.override_manager.set_ignore_window(
             entity_id, transition if ignore_seconds is None else ignore_seconds
         )
-        try:
-            sent = await self._async_call("light", "turn_on", service_data, blocking=True)
-        except Exception as err:  # the light keeps its previous tracking
-            _LOGGER.error("Light update for %s after switching on failed: %s", entity_id, err, exc_info=err)
-            self._restore_tracking(entity_id, previous)
-            return False
-        if not sent:
-            self._restore_tracking(entity_id, previous)
-        return sent
+        task = self.hass.async_create_background_task(
+            self._async_call("light", "turn_on", service_data, blocking=True),
+            f"{DOMAIN} light command {entity_id}",
+        )
+        if task.done():
+            # finished while starting (eager start): result at once
+            self._background_result(task, entity_id, previous, on_failure)
+        else:
+            self._track_in_flight(task, entity_id)
+            task.add_done_callback(
+                lambda t: self._background_result(t, entity_id, previous, on_failure)
+            )
+        return True
 
     async def reengage_light(
         self, entity_id: str, target_brightness: int, target_kelvin: int, parent: Context | None = None
     ) -> None:
-        """Smoothly re-engage a light back to HCL values."""
+        """Bring a light back to HCL with one long transition (REENGAGE_TRANSITION_SECONDS).
+
+        The tracking values are set to the target before sending and the
+        ignore window covers the transition, so its intermediate values are
+        not taken for manual control; the update cycles leave the light alone
+        until the transition has ended (set_reengaging).
+        """
         _LOGGER.debug("Re-engaging %s (Smooth Transition)", entity_id)
-        
-        # We perform a stepwise transition to avoid sudden jumps
-        # This is a simplifed logic: Just one long transition is usually better supported by HA light 
-        # than manual steps, BUT manual steps allow us to update the "last_set" tracking more accurately?
-        # No, HA transition is fine, but we must set override last_set to TARGET.
-        
-        # Actually, let's use the explicit logic from before if we want steps, 
-        # or simplified long transition. The original code did steps.
-        # Let's use a nice single transition for simplicity and reliance on HA.
-        # Wait, original code used steps because of the "Override Delta" check?
-        # If we just fade, the override manager might think the user is changing it during fade?
-        # We set ignore_window for the duration!
-        
-        duration = REENGAGE_STEPS * REENGAGE_INTERVAL_SECONDS
-        
+        duration = REENGAGE_TRANSITION_SECONDS
+
         def _failed(eids: list[str]) -> None:
             # The command failed: the normal updates take the light back
             for eid in eids:
@@ -665,161 +712,39 @@ class HCLLightController:
     def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
         """Determine how a light is driven for a target colour temperature.
 
-        The light's capabilities are cached; the range check (native CT or XY
-        simulation) is done for every target value.
+        The native capability of a light that is on is cached together with
+        the attributes it is based on and evaluated again as soon as the light
+        reports other ones (e.g. capabilities reported late, RM-B36). A light
+        that is off or unavailable uses the cache, without one its current
+        attributes. The range check (native CT or XY simulation) is done for
+        every target value.
         """
-        return self._get_capability_internal(entity_id, kelvin, state_obj)
-
-    def _get_capability_internal(self, entity_id: str, kelvin: int, state_obj=None) -> str:
-        """Internal capability resolution logic."""
-        
-        # 1. Check Cache + Version Migration
-        if entity_id in self._capability_cache:
-            cached = self._capability_cache[entity_id]
-            
-            # Version Mismatch = Invalidate (Migration from v0.2.0)
-            cached_version = cached.get("version")
-            if cached_version != self._cache_version:
-                _LOGGER.debug(
-                    "Cache invalidated for %s (v%s->v%s, forcing recalc)", 
-                    entity_id, 
-                    cached_version or "none", 
-                    self._cache_version
-                )
-                del self._capability_cache[entity_id]
-            else:
-                # Valid Cache
-                native_type = cached["type"]
-                
-                # Dynamic Check: If Native CT but out of range -> Simulate XY
-                if (native_type == "ct" and 
-                    cached.get("min_kelvin") is not None and 
-                    cached.get("max_kelvin") is not None and
-                    cached.get("supports_color")):
-                    
-                    if kelvin < cached["min_kelvin"] or kelvin > cached["max_kelvin"]:
-                        return "xy_sim"
-                        
-                return native_type
-
-        # 2. Get Current State
         state = state_obj or self.hass.states.get(entity_id)
-        if not state:
-            # Not loaded yet?
-            return "onoff"
-        
-        if state.state is None:
-             _LOGGER.warning("Entity %s has NULL state, treating as unavailable", entity_id)
-             return "onoff"
-
-        # 3. Safe State Check (NO CACHE)
-        # Avoid caching if light is unavailable, unknown, or OFF (often missing attributes)
-        if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN, STATE_OFF):
-            _LOGGER.debug(
-                "Entity %s in unsafe state '%s' - calculating without cache", 
-                entity_id, 
-                state.state
+        cached = self._capability_cache.get(entity_id)
+        if state is not None and state.state == STATE_ON:
+            attrs = state.attributes
+            modes = attrs.get(ATTR_SUPPORTED_COLOR_MODES)
+            signature = (
+                tuple(modes) if isinstance(modes, (list, tuple)) else modes,
+                attrs.get("min_color_temp_kelvin"),
+                attrs.get("max_color_temp_kelvin"),
             )
-            # Calculate live but DON'T cache
-            return self._calculate_capability_from_state(state)
+            if cached is None or cached["signature"] != signature:
+                cached = {"signature": signature, **_native_capability(state)}
+                self._capability_cache[entity_id] = cached
+                _LOGGER.debug("Capability of %s: %s (modes=%s)", entity_id, cached["type"], modes)
+        elif cached is None:
+            if state is None:
+                return "onoff"  # not loaded yet
+            cached = _native_capability(state)
 
-        # 4. Attribute Validation (NO CACHE if invalid)
-        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
-        
-        # Explicit None Check
-        if supported_modes is None:
-             _LOGGER.debug("Entity %s has no 'supported_color_modes'", entity_id)
-             return "onoff"
-
-        # Type safety: ensure iterable
-        if not isinstance(supported_modes, (list, tuple)):
-             _LOGGER.warning("Entity %s has invalid supported_color_modes type: %s", entity_id, type(supported_modes))
-             return "onoff"
-        
-        # None or Empty List = Invalid
-        if not supported_modes:
-             _LOGGER.debug(
-                 "Entity %s is %s but has no 'supported_color_modes' - treating as onoff", 
-                 entity_id, state.state
-             )
-             return "onoff"
-
-        # 5. Safe to Cache (State=ON + Valid Attributes)
-        min_kelvin = state.attributes.get("min_color_temp_kelvin")
-        max_kelvin = state.attributes.get("max_color_temp_kelvin")
-        supports_color = any(
-            mode in supported_modes 
-            for mode in _COLOR_MODES
-        )
-
-        # Calculate Capability
-        cap_type = "onoff" # Default
-        if ColorMode.COLOR_TEMP in supported_modes:
-            cap_type = "ct"
-        elif supports_color:
-            cap_type = "xy_sim"
-        elif (ColorMode.BRIGHTNESS in supported_modes or 
-              (supported_modes and ColorMode.ONOFF not in supported_modes)):
-            cap_type = "dim"
-        
-        # Handle CT lights with missing min/max kelvin
-        if cap_type == "ct":
-            if min_kelvin is None: min_kelvin = 2000
-            if max_kelvin is None: max_kelvin = 6500
-
-        # Store NATIVE Capability in Cache
-        cap_data = {
-            "type": cap_type, # Always store native type (ct, xy_sim, dim)
-            "min_kelvin": min_kelvin,
-            "max_kelvin": max_kelvin,
-            "supports_color": supports_color,
-            "version": self._cache_version
-        }
-        self._capability_cache[entity_id] = cap_data
-
-        _LOGGER.debug(
-            "Capability cached for %s: %s (v%s, modes=%s)", 
-            entity_id, cap_type, self._cache_version, supported_modes
-        )
-
-        # Dynamic Override (Runtime Only, do not cache simulation type)
-        if (cap_type == "ct" and supports_color and 
-            (kelvin < min_kelvin or kelvin > max_kelvin)):
-             return "xy_sim"
-        
-        return cap_type
-
-    def _calculate_capability_from_state(self, state) -> str:
-        """Calculate capability without caching (for unsafe states)."""
-        supported_modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
-        
-        if supported_modes is None:
-            return "onoff"
-        
-        # Type safety: ensure iterable
-        if not isinstance(supported_modes, (list, tuple)):
-            # Invalid type (e.g. string) -> onoff
-            return "onoff"
-
-        supported_modes = supported_modes or []
-        
-        if not supported_modes:
-            return "onoff"
-        
-        supports_color = any(
-            mode in supported_modes 
-            for mode in _COLOR_MODES
-        )
-
-        if ColorMode.COLOR_TEMP in supported_modes:
-            return "ct"
-        elif supports_color:
+        native_type = cached["type"]
+        # A CT light with colour outside its CT range is simulated via XY
+        if native_type == "ct" and cached["supports_color"] and not (
+            cached["min_kelvin"] <= kelvin <= cached["max_kelvin"]
+        ):
             return "xy_sim"
-        elif (ColorMode.BRIGHTNESS in supported_modes or 
-              (supported_modes and ColorMode.ONOFF not in supported_modes)):
-            return "dim"
-        
-        return "onoff"
+        return native_type
 
     def _needs_update(self, entity_id: str, target_b: int, target_k: int) -> bool:
         """Check if an update is needed based on thresholds."""
@@ -981,9 +906,9 @@ class HCLLightController:
                 second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return first or second
         except Exception as err:  # the fallback below reports a final failure
-            _LOGGER.warning(
-                "Smart transition for %s failed (%s); sending the values without transition", entity_id, err
-            )
+            # a light that keeps failing is logged once (RM-B39)
+            log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
+            log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)
         return await self._async_call(
             "light", "turn_on",
             {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0},
@@ -1023,9 +948,9 @@ class HCLLightController:
                 sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return sent
         except Exception as err:  # the fallback below reports a final failure
-            _LOGGER.warning(
-                "Smart transition for %s failed (%s); sending the values without transition", entity_id, err
-            )
+            # a light that keeps failing is logged once (RM-B39)
+            log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
+            log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)
         # Fallback: send everything, no transition (safest)
         return await self._async_call(
             "light", "turn_on",

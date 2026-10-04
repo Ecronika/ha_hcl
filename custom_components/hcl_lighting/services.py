@@ -75,6 +75,15 @@ def _core(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
     return hass.data[DOMAIN][resolve_entry_id(hass, call.data["entity_id"])]
 
 
+def _running_core(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
+    """Core of an instance whose main switch is added (not disabled, RM-B38)."""
+    core = _core(hass, call)
+    switch = core.get("switch")
+    if switch is None or not switch.is_added:
+        raise ServiceValidationError(translation_domain=DOMAIN, translation_key="main_switch_disabled")
+    return core
+
+
 async def async_check_permissions(
     hass: HomeAssistant, call: ServiceCall, entity_ids: list[str | None], policy: str = POLICY_CONTROL
 ) -> None:
@@ -144,7 +153,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     """Register apply, set_manual_control, set_scenario and get_curve."""
 
     async def _apply(call: ServiceCall) -> None:
-        core = _core(hass, call)
+        core = _running_core(hass, call)
         await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
         if not call.data.get(ATTR_LIGHTS):
             await async_check_lights(hass, call.context, core)
@@ -156,7 +165,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
 
     async def _set_manual_control(call: ServiceCall) -> None:
-        core = _core(hass, call)
+        core = _running_core(hass, call)
         await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
         if not call.data["manual_control"]:
             # handing lights back runs an update of the instance at once
@@ -166,7 +175,7 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
 
     async def _set_scenario(call: ServiceCall) -> None:
-        core = _core(hass, call)
+        core = _running_core(hass, call)
         select = core.get("mode_select")
         if select is None:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="scenario_unavailable")

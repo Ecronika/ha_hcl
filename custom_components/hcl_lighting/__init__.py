@@ -146,7 +146,8 @@ _POINT_SCHEMA = vol.Schema(
         vol.Required("b"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         vol.Required("k"): vol.All(vol.Coerce(int), vol.Range(min=2000, max=7000)),
     },
-    extra=vol.ALLOW_EXTRA,
+    # other keys are dropped: only t, b, k are stored (RM-B40)
+    extra=vol.REMOVE_EXTRA,
 )
 
 

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b14] - 2026-10-04
+Fourteenth pre-release (beta) of 0.7.0: RM-T17, RM-B34 and RM-D04 of the roadmap (external analysis of 0.7.0b13) and RM-B35 to RM-B40, RM-T18 and RM-D05 (code review of 0.7.0b13). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Light command at switching on held Home Assistant and allowed a second command** (RM-T17): the command HCL sends when a light is switched on (Fast-HCL) was awaited in HCL's state listener without a time limit (a task Home Assistant waits for at start and stop), and the next update sent the light a second command. It now runs in the background like all other light commands; a light with a command still running gets no further command (also at switching on). A late failure restores the tracking values and ends the protection of the turn-on transition.
+- **Permission check used the lights of the last run** (RM-B34): with HCL off, the list of lights is not kept current. A user with restricted permissions could switch HCL on although a light had joined the area, device, label or group meanwhile that the user may not control; the following updates then controlled it. The check now resolves the lights of the instance at that moment.
+- **Empty light target fell back to the lights of the first setup** (RM-B35): a target emptied in the options was replaced by the target of the first setup. Setup and options now require at least one target; a stored empty target means no lights.
+- **Lights that report their capabilities late were skipped** (RM-B36): the capability of a light (colour temperature, colour, brightness, on/off) was kept from the first time it was on, e.g. "on/off only" while the integration had not reported more yet, until the next reload. It is now evaluated again whenever the light reports other capabilities.
+- **Setup waited for the light commands** (RM-B37): an instance that was on before a restart or reload sent its values during the setup and waited for them (up to 10 s for a light that does not answer). The first update now runs in the background; the lights still get the values at once.
+- **Disabled main switch** (RM-B38): with *HCL active* disabled, `apply` ended with an internal error and `set_manual_control` reported success without effect. These actions and `set_scenario` now report that the main switch is disabled.
+- **A failing light filled the log** (RM-B39): a light whose commands keep failing (e.g. reported on but not reachable) logged an error with traceback in every update (about 130 per hour). It is now logged once as a warning when it starts failing (repeats at debug level) and once as info when it accepts commands again. Actions still report failed lights to the caller.
+- **`update_curve` stored unknown keys** (RM-B40): keys besides `t`, `b` and `k` of a point were stored in the entry options; they are dropped now.
+
+### Changed
+- **Diagnostics note** (RM-D04): the README no longer calls the download "safe to attach to an issue": names and IDs are pseudonymized, but the curve and the wake, midday and sleep times remain for troubleshooting.
+- **Action description** (RM-D05): `mode` of `update_curve` is optional in the action editor, as in the action itself (default `preview`); its texts come from the translations only.
+
+### Internal
+- Misleading and outdated comments removed; one constant for the 3-minute smooth return instead of steps and interval (RM-T18). Unused capability cache version removed (RM-B36).
+
 ## [0.7.0b13] - 2026-10-04
 Thirteenth pre-release (beta) of 0.7.0: fixes RM-B33 of the roadmap (field test of 0.7.0b12 with wall dimmers). The minimum Home Assistant version stays 2024.7.
 

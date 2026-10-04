@@ -40,7 +40,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Instant-On**: Lights receive the HCL values right after they are switched on.
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
 - **Services**: apply now, set or release manual control, set a scenario with a duration, read the curve (see [Services](#services)).
-- **Diagnostics and logbook**: diagnostics download on the integration page (without the instance name; entity, device, area, floor and label IDs replaced by pseudonyms such as `light.redacted_1`, manual control as its age in minutes – safe to attach to an issue); logbook entries and an event when a light starts or stops being under manual control.
+- **Diagnostics and logbook**: diagnostics download on the integration page (without the instance name; entity, device, area, floor and label IDs replaced by pseudonyms such as `light.redacted_1`, manual control as its age in minutes; curve and wake/midday/sleep times remain for troubleshooting – review the download before sharing it publicly); logbook entries and an event when a light starts or stops being under manual control.
 - **Capabilities**: Auto-detects colour support (XY, HS, RGB, RGBW, RGBWW) and simulates colour temperatures outside a bulb's native CT range via XY on colour-capable bulbs (supported range of the curve: 2000–7000 K). CT-only bulbs are driven to the nearest temperature they can reach.
 
 ---
@@ -125,7 +125,7 @@ Each instance is a device with these entities (IDs of new installations; existin
 
 | Entity | Example ID | Purpose |
 |---|---|---|
-| HCL active | `switch.living_room_hcl_active` | HCL on/off. Attribute `manual_control` lists the paused lights. Its attributes (`manual_control`, `target_entities`, `calculated_*`) are live values and not stored in the history; the history of the values is in the target sensors, manual control in the logbook. |
+| HCL active | `switch.living_room_hcl_active` | HCL on/off. Disabling this entity stops the instance (the actions `apply`, `set_manual_control` and `set_scenario` then report it). Attribute `manual_control` lists the paused lights. Its attributes (`manual_control`, `target_entities`, `calculated_*`) are live values and not stored in the history; the history of the values is in the target sensors, manual control in the logbook. |
 | Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone |
 | Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
 | Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning, Guest (also the chips of the card). Attribute `until`: end of a timed scenario. |

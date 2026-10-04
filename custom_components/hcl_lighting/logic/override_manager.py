@@ -283,10 +283,7 @@ class OverrideManager:
                 self._notify()
             return False
 
-        # 3. Compare with Expected Values
-        # Priority: internal last_set > global last_applied
-        # recorded_last_set = light_data.get("last_set") # Already got above
-        # reference_values = recorded_last_set or last_set_values
+        # 3. Compare with the values HCL sent last (reference_values from above)
 
         if reference_values and len(reference_values) == 2:
             last_b, last_k = reference_values

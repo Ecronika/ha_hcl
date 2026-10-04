@@ -96,7 +96,8 @@ async def test_rm_b15_failed_turn_on_update_restores_the_tracking(hass, no_front
     before = _tracking(om, "light.a")
     lights.fail = {"light.a"}
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)  # switched on
-    await hass.async_block_till_done()
+    # Fast-HCL runs in the background since 0.7.0b14 (RM-T17)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert lights.for_light("light.a")  # HCL tried
     assert _tracking(om, "light.a") == before
 

@@ -15,7 +15,8 @@
         },
         "error": {
             "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
-            "invalid_time": "Invalid time."
+            "invalid_time": "Invalid time.",
+            "no_lights": "Select at least one light, area, device, floor or label."
         },
         "abort": {
             "already_configured": "Device is already configured"
@@ -76,7 +77,8 @@
             "min_greater_max": "Minimum brightness must be lower than maximum.",
             "transition_too_long": "The transition must be shorter than the update interval.",
             "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
-            "invalid_time": "Invalid time."
+            "invalid_time": "Invalid time.",
+            "no_lights": "Select at least one light, area, device, floor or label."
         }
     },
     "entity": {
@@ -245,6 +247,9 @@
         },
         "lights_failed_and_no_answer": {
             "message": "Light update failed for {failed}: {error}; no answer from {pending} within {seconds} s (command still running)"
+        },
+        "main_switch_disabled": {
+            "message": "The main switch of this HCL instance (HCL active) is disabled; enable it to use this action."
         }
     }
 }
