@@ -15,7 +15,8 @@
         },
         "error": {
             "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
-            "invalid_time": "Ungültige Uhrzeit."
+            "invalid_time": "Ungültige Uhrzeit.",
+            "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen."
         },
         "abort": {
             "already_configured": "Gerät ist bereits konfiguriert"
@@ -76,7 +77,8 @@
             "min_greater_max": "Minimale Helligkeit muss kleiner als Maximale sein.",
             "transition_too_long": "Die Übergangszeit muss kürzer als das Aktualisierungsintervall sein.",
             "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
-            "invalid_time": "Ungültige Uhrzeit."
+            "invalid_time": "Ungültige Uhrzeit.",
+            "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen."
         }
     },
     "entity": {
@@ -245,6 +247,9 @@
         },
         "lights_failed_and_no_answer": {
             "message": "Lichtbefehl fehlgeschlagen für {failed}: {error}; keine Antwort von {pending} innerhalb von {seconds} s (Befehl läuft weiter)"
+        },
+        "main_switch_disabled": {
+            "message": "Der Hauptschalter dieser HCL-Instanz („HCL aktiv“) ist deaktiviert; zum Verwenden dieser Aktion aktivieren."
         }
     }
 }

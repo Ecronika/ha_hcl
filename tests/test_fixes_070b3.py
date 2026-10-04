@@ -189,7 +189,8 @@ async def test_rm_b03_turn_on_and_smart_transition_are_limited_too(hass, no_fron
     await _select(hass, "focus")
     lights.calls.clear()
     set_light(hass, "light.warm", "on", brightness=3, color_temp_kelvin=2200, **WARM_CT)  # switched on
-    await hass.async_block_till_done()
+    # Fast-HCL runs in the background since 0.7.0b14 (RM-T17)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert lights.for_light("light.warm")[-1].data["color_temp_kelvin"] == 4000
     lights.calls.clear()
     set_light(hass, "light.warm", "on", brightness=3, color_temp_kelvin=2200, **WARM_CT)
@@ -247,7 +248,11 @@ async def test_rm_b05_final_smart_transition_failure_is_reported(hass, no_fronte
         await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert not om.is_reengaging("light.a")
     assert "Smart transition for light.a failed" in caplog.text  # primary: warning
-    assert any(r.levelname == "ERROR" and "light.a" in r.getMessage() for r in caplog.records)  # final
+    # final failure: logged (since 0.7.0b14 a warning, once per failure streak, RM-B39)
+    assert any(
+        r.levelname in ("WARNING", "ERROR") and "Light update for light.a failed" in r.getMessage()
+        for r in caplog.records
+    )
 
 
 async def test_rm_b05_fallback_success_counts(hass, no_frontend_registration):

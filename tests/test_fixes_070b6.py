@@ -54,7 +54,8 @@ async def test_rm_b21_failed_turn_on_command_sets_no_protection(hass, no_fronten
     await _hcl_on(hass)
     lights.fail = {"light.a"}
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
-    await hass.async_block_till_done()
+    # Fast-HCL runs in the background since 0.7.0b14 (RM-T17)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert lights.for_light("light.a")
     assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
 

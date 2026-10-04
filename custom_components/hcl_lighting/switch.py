@@ -47,6 +47,18 @@ from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def configured_target(entry: ConfigEntry) -> dict[str, Any]:
+    """Target of an instance: the options if they have one, else the setup (RM-B35).
+
+    Checked by key, not by value: an empty target in the options must not
+    fall back to the lights of the first setup.
+    """
+    if CONF_TARGET in entry.options:
+        return entry.options[CONF_TARGET] or {}
+    return entry.data.get(CONF_TARGET) or {}
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Switch from a config entry."""
     
@@ -105,6 +117,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self._calculated_kelvin = None
         
         self._is_on = False # Internal state for update loop control
+        # Set while the entity is added to Home Assistant; a disabled main
+        # switch is never added and the instance does nothing (RM-B38)
+        self._added = False
         self._resolved_targets = set() # Cache for target entities
         
         # Modules
@@ -140,11 +155,17 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
         await super().async_added_to_hass()
-        
-        # Restore State
+        self._added = True
+
+        # Restore State: timer and listeners start at once, the first update
+        # runs in the background - the setup (also a reload) does not wait
+        # for the light commands (RM-B37)
         if last_state := await self.async_get_last_state():
             if last_state.state == STATE_ON:
-                await self.async_turn_on()
+                await self._async_start()
+                self._entry.async_create_background_task(
+                    self.hass, self.async_request_update(), f"{DOMAIN} first update"
+                )
 
         # Target groups (and other light platforms) may still be loading during
         # HA startup; resolve the targets again once startup has finished.
@@ -183,6 +204,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
+        self._added = False
         self._is_on = False # Prevent further updates
         if self._group_listener_remove_callback:
             self._group_listener_remove_callback()
@@ -329,19 +351,30 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             "manual_control": self.override_manager.overridden_entities(),
         }
 
+    @property
+    def is_added(self) -> bool:
+        """Whether the main switch is added (not disabled): the instance runs."""
+        return self._added
+
     def controlled_lights(self) -> set[str]:
-        """Lights of this instance (resolved now if HCL has not done it yet)."""
-        if self._resolved_targets:
-            return set(self._resolved_targets)
-        return self.controller.resolve_targets(
-            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
-        )
+        """Lights of this instance, resolved now (for permission checks).
+
+        Not the runtime cache: it is not kept current while HCL is off, so a
+        light that joined an area or group meanwhile would be missing (RM-B34).
+        """
+        return self.controller.resolve_targets(configured_target(self._entry))
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on (also when restored at startup or after a reload)."""
+        """Turn the switch on."""
         context = action_context(self)
         # A user switching HCL on sends the HCL values to all its lights
         await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
+        await self._async_start()
+        # Immediate update (linked to the request that switched HCL on)
+        await self.async_request_update(context)
+
+    async def _async_start(self) -> None:
+        """Switch the update loop on: timer, targets and listeners."""
         if not self._is_on:
             # Switched on (or set up again): HCL takes its lights back at
             # once. Transition protections from before (a long apply, scenario
@@ -361,9 +394,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         
         await self._re_evaluate_targets_and_listeners()
 
-        # Immediate update (linked to the request that switched HCL on)
-        await self.async_request_update(context)
-
     async def _re_evaluate_targets_and_listeners(self) -> None:
         """Re-evaluate target entities and update state listeners."""
         # Stop existing listener if any
@@ -374,7 +404,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         # Resolve targets dynamically
         groups: set[str] = set()
         self._resolved_targets = self.controller.resolve_targets(
-            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {},
+            configured_target(self._entry),
             groups=groups,
         )
         self._watch_groups(groups)
@@ -639,6 +669,12 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         except Exception:
              _LOGGER.exception("Error in HCL update loop")
 
+    @callback
+    def _end_protection_of(self, entity_ids: list[str]) -> None:
+        """A light command failed: its transition protection ends."""
+        for entity_id in entity_ids:
+            self.override_manager.end_reengaging(entity_id)
+
     async def _handle_light_state_change(self, event: Event) -> None:
         """Handle state changes of monitored lights."""
         try:
@@ -695,16 +731,18 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                          self.override_manager.set_reengaging(entity_id, self._turn_on_transition)
 
                      # apply_fast sets the tracking values and the ignore window
-                     # synchronously before sending (no self-detection of the
-                     # first state report) and restores them if the command fails.
-                     # Await immediately to block handling of subsequent events until command is sent
+                     # synchronously before the command starts (no self-detection
+                     # of the first state report). The command runs in the
+                     # background (RM-T17); if it fails, the tracking is restored
+                     # and the transition protection ends.
                      sent = await self.controller.apply_fast(
-                         entity_id, 
-                         fresh_b, 
+                         entity_id,
+                         fresh_b,
                          fresh_k,
                          state_obj=new_state,
                          transition=self._turn_on_transition,
                          ignore_seconds=IGNORE_WINDOW_SECONDS + self._turn_on_transition,
+                         on_failure=self._end_protection_of if protect else None,
                      )
                      if protect and not sent:
                          self.override_manager.end_reengaging(entity_id)

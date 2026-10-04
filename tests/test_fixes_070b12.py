@@ -62,27 +62,28 @@ async def test_rm_b30_busy_light_gets_no_second_command_after_reload(
     assert om.tracking_snapshot("light.a") == before  # late error: rollback as before (RM-B14)
 
 
-async def test_rm_b30_late_error_keeps_the_tracking_of_a_newer_command(
+async def test_rm_b30_switched_on_while_the_old_command_runs(
     hass, no_frontend_registration, freezer
 ):
+    """light.a is switched off and on while the command of the old instance
+    still runs: no second command (since 0.7.0b14 also for Fast-HCL, RM-T17;
+    until 0.7.0b13 the new instance sent its values at once). The late error
+    of the old command rolls back its own tracking."""
     lights, entry = await _setup(hass)
     om = core(hass, entry)["override_manager"]
     before = om.tracking_snapshot("light.a")
     event = await _hanging_focus(hass, freezer, lights, fail_late=True)
     await _reload(hass, entry, freezer)
-    # light.a is switched off and on: the new instance sends its values at once
     del lights.hang["light.a"]
     lights.calls.clear()
     set_light(hass, "light.a", "off", **CT_ATTRS)
     await _settle()
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await hass.async_block_till_done()
-    assert lights.for_light("light.a")
-    newer = om.tracking_snapshot("light.a")
-    assert newer != before
+    assert lights.for_light("light.a") == []
     event.set()  # the old command fails now
     await _settle()
-    assert om.tracking_snapshot("light.a") == newer
+    assert om.tracking_snapshot("light.a") == before
 
 
 async def test_rm_b30_late_answer_after_reload_is_no_manual_control(

@@ -372,7 +372,10 @@ async def test_a11_interval_and_transitions(hass, noon, no_frontend_registration
     assert _calls_for(calls, "light.a") == []
     noon.tick(timedelta(seconds=31))
     async_fire_time_changed(hass)
-    await hass.async_block_till_done()
+    # the periodic update runs as a background task: let it finish (its
+    # command is done), a light with a command still running gets no
+    # Fast-HCL command (0.7.0b14, RM-T17)
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert _calls_for(calls, "light.a")
     calls.clear()
     set_light(hass, "light.a", "off", **CT_ATTRS)
@@ -487,4 +490,4 @@ async def test_a16_frontend_registered_once(hass):
     assert await hass.config_entries.async_setup(second.entry_id)
     await hass.async_block_till_done()
     await _async_register_lovelace_resource(hass)
-    assert hass.http.async_register_static_paths.await_count == 1
+    assert hass.http.async_register_static_paths.await_count == 1

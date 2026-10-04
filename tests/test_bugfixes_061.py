@@ -10,11 +10,11 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_mock_service
 
-from custom_components.hcl_lighting.const import DOMAIN, REENGAGE_INTERVAL_SECONDS, REENGAGE_STEPS
+from custom_components.hcl_lighting.const import DOMAIN, REENGAGE_TRANSITION_SECONDS
 
 from .helpers import CT_ATTRS, core, set_light, setup_entry, switch_entity
 
-REENGAGE_DURATION = REENGAGE_STEPS * REENGAGE_INTERVAL_SECONDS
+REENGAGE_DURATION = REENGAGE_TRANSITION_SECONDS
 SWITCH = "switch.hcl_hcl_active"
 SELECT = "select.hcl_scenario"
 
