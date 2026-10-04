@@ -459,7 +459,9 @@ class HCLLightController:
                 self.override_manager.tracking_snapshot(entity_id),
                 self.commands.claim(entity_id),
             )
-            self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
+            self.override_manager.set_last_set_values(
+                entity_id, brightness, tracked_kelvin, start=self.hass.states.get(entity_id)
+            )
             self.override_manager.set_ignore_window(entity_id, transition_val)
             jobs.append((entity_id, job))
 
@@ -604,7 +606,7 @@ class HCLLightController:
             return False  # onoff or unknown
 
         previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
-        self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
+        self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin, start=state)
         self.override_manager.set_ignore_window(
             entity_id, transition if ignore_seconds is None else ignore_seconds
         )

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b13] - 2026-10-04
+Thirteenth pre-release (beta) of 0.7.0: fixes RM-B33 of the roadmap (field test of 0.7.0b12 with wall dimmers). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Dimming at the wall right after switching on was overwritten** (RM-B33): Home Assistant gives the state changes of a light the context of the last command for 5 seconds, also a change made on the device itself (e.g. a KNX wall dimmer or a manufacturer's remote). HCL took such a change within 5 seconds after its own command for its own report and did not pause the light, so the next update set the HCL value again. This hit the usual use of wall dimmers: switching on (HCL sends its values at once) and dimming right away. Every new HCL command opened the next 5-second gap. A state report with HCL's context now counts as HCL's own only if it fits the command: at the HCL value or moving towards it. A change beyond the range between the light's value when the command was sent and the HCL value is manual control at once. A change back towards the light's earlier value can also be the device's own report during the transition (some devices report the target first and then their intermediate values); it is decided when the transition of the command has ended: if the light has not reached the HCL value by then, it is manually controlled, and HCL leaves it alone until then.
+
 ## [0.7.0b12] - 2026-10-04
 Twelfth pre-release (beta) of 0.7.0: fixes RM-B30 to RM-B32 and RM-T14 of the roadmap (external code analysis of 0.7.0b11) and quality items RM-B12, RM-T15, RM-T16 and RM-H06. The minimum Home Assistant version stays 2024.7.
 
