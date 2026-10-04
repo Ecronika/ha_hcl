@@ -7,11 +7,14 @@ from datetime import timedelta
 from typing import Any
 
 import voluptuous as vol
+from homeassistant.components import persistent_notification
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_OFF, Platform
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import async_get as async_get_restore_state
 from homeassistant.helpers.start import async_at_started
@@ -37,16 +40,24 @@ from .const import (
     HCL_MODES,
     MODE_AUTO,
     EVENT_MANUAL_CONTROL,
+    SERVICE_UPDATE_CURVE,
 )
 from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
-from .services import async_check_write_permissions, async_register_services
-from .logic.light_controller import HCLLightController
+from .services import (
+    async_check_lights,
+    async_check_write_permissions,
+    async_register_services,
+    resolve_entry_id,
+)
+from .logic.light_controller import CommandTracker, HCLLightController
 
 _LOGGER = logging.getLogger(__name__)
 
 DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
+# Light commands per entry, kept across reloads like the override state
+DATA_COMMAND_TRACKERS = f"{DOMAIN}_command_trackers"
 DATA_FRONTEND_REGISTERED = f"{DOMAIN}_frontend_registered"
 DATA_APPLIED_CONFIG = "applied_config"
 OVERRIDE_STORE_VERSION = 1
@@ -182,7 +193,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     async def _handle(call: ServiceCall) -> None:
         await _async_update_curve_service(hass, call)
 
-    hass.services.async_register(DOMAIN, "update_curve", _handle, schema=UPDATE_CURVE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_UPDATE_CURVE, _handle, schema=UPDATE_CURVE_SCHEMA)
     async_register_services(hass)
     return True
 
@@ -192,35 +203,13 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
     _LOGGER.debug(f"Service update_curve called (data={call.data})")
     points = call.data.get("points")
     mode = call.data.get("mode", "preview")
-    entity_id = call.data.get("entity_id")
-    
-    if not entity_id:
-        raise HomeAssistantError("update_curve called without entity_id")
-        
-    # Resolve Entry ID from Entity ID
-    ent_reg = er.async_get(hass)
-    entity_entry = ent_reg.async_get(entity_id)
-    
-    if not entity_entry:
-         raise HomeAssistantError(f"Entity not found: {entity_id}")
-    
-    # Hardening: Validate Entity Type
-    if entity_entry.domain not in ["sensor", "switch"]:
-         raise HomeAssistantError(f"Invalid entity '{entity_id}'. Must be an HCL sensor or switch.")
-         
-    if entity_entry.platform != DOMAIN:
-         raise HomeAssistantError(f"Entity '{entity_id}' is not an HCL Lighting entity.")
-          
-    entry_id = entity_entry.config_entry_id
-    if not entry_id:
-         raise HomeAssistantError(f"Entity {entity_id} is not linked to a Config Entry.")
-
-    if entry_id not in hass.data.get(DOMAIN, {}):
-         raise HomeAssistantError(f"Config Entry {entry_id} not loaded for HCL Lighting.")
-    
+    # Same check as the other actions: invalid input is a ServiceValidationError
+    entry_id = resolve_entry_id(hass, call.data["entity_id"])
     logic_core = hass.data[DOMAIN][entry_id]
-    # Changing the curve needs control of the given entity and the HCL switch
+    # Changing the curve needs control of the given entity, the HCL switch
+    # and the lights (they get the new values at once)
     await async_check_write_permissions(hass, call, logic_core)
+    await async_check_lights(hass, call.context, logic_core)
     hcl_calc: HCLCalculator = logic_core["calculator"]
     
     # 1. Update In-Memory Calculator
@@ -304,7 +293,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     first_setup = entry.entry_id not in managers
     override_manager = managers.setdefault(entry.entry_id, OverrideManager())
     await _async_setup_override_manager(hass, entry, override_manager, first_setup)
-    controller = HCLLightController(hass, override_manager, hcl_calc, entry)
+    # Commands of an earlier setup may still be running (see CommandTracker)
+    commands = hass.data.setdefault(DATA_COMMAND_TRACKERS, {}).setdefault(entry.entry_id, CommandTracker())
+    controller = HCLLightController(hass, override_manager, hcl_calc, entry, commands)
     # Restore the adaptation switches before any light command is sent
     controller.adapt_brightness = _restored_switch_state(hass, entry, "adapt_brightness")
     controller.adapt_color = _restored_switch_state(hass, entry, "adapt_color")
@@ -336,8 +327,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     return True
 
-from homeassistant.components.http import StaticPathConfig
-from homeassistant.helpers import entity_registry as er
 
 CARD_BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
 ONBOARDING_STORE_VERSION = 1
@@ -368,9 +357,6 @@ async def _async_card_hint(hass: HomeAssistant, entry: ConfigEntry) -> None:
     Up to 0.6 the hint was a repair issue that could not be dismissed; it is
     removed, and instances that already had it do not get the hint again.
     """
-    from homeassistant.components import persistent_notification
-    from homeassistant.helpers import issue_registry as ir
-
     store = _onboarding_store(hass)
     data = await store.async_load() or {}
     shown = set(data.get("shown", []))
@@ -428,7 +414,8 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> bool:
         _LOGGER.debug("Lovelace resources not available yet; HCL card registration is retried")
         return False
 
-    from homeassistant.components.lovelace.resources import ResourceStorageCollection
+    # Lovelace internals: imported only when the resources exist (RM-T06 moves this)
+    from homeassistant.components.lovelace.resources import ResourceStorageCollection  # noqa: PLC0415
 
     # YAML-mode resources are read-only; the user manages them in configuration.yaml
     if not isinstance(resources, ResourceStorageCollection):
@@ -480,10 +467,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Clean up state that outlives reloads when an entry is deleted."""
     hass.data.get(DATA_OVERRIDE_MANAGERS, {}).pop(entry.entry_id, None)
+    hass.data.get(DATA_COMMAND_TRACKERS, {}).pop(entry.entry_id, None)
     await _override_store(hass, entry.entry_id).async_remove()
-    from homeassistant.components import persistent_notification
-    from homeassistant.helpers import issue_registry as ir
-
     ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
     persistent_notification.async_dismiss(hass, f"{DOMAIN}_card_{entry.entry_id}")
     store = _onboarding_store(hass)

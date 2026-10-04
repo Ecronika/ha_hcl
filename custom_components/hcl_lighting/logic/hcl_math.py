@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import logging
-import math
 from typing import TypedDict, List
-from datetime import time
 from homeassistant.util import dt as dt_util
 
 from ..const import (

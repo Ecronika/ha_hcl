@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0b12] - 2026-10-04
+Twelfth pre-release (beta) of 0.7.0: fixes RM-B30 to RM-B32 and RM-T14 of the roadmap (external code analysis of 0.7.0b11) and quality items RM-B12, RM-T15, RM-T16 and RM-H06. The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Light commands across a reload** (RM-B30): a command that answered only after the 10-second limit (RM-B23) could still be running when the instance was reloaded (options or name saved). The new instance did not know it: it sent the light a second command, took a late state report of the old command for manual control, and a late failure of the old command rolled back the tracking values the new instance had set since. Running commands and their contexts now survive a reload: the light gets no second command until the first one has finished, its state reports stay HCL's own, and a late failure rolls back only if no newer command has set the light since (also within one instance, e.g. a light switched on again meanwhile).
+- **Smooth return to HCL could hold up Home Assistant** (RM-T14): the commands of the smooth return after manual control were normal tasks; a light that did not answer kept Home Assistant waiting for it (e.g. at shutdown). They are now background tasks like all other commands.
+- **Permissions of the lights an action drives** (RM-B31): an action of a user with restricted permissions was checked only for the HCL entities (and the lights given in `lights`), but drove all lights of the instance. An action that sends the HCL values to the lights at once now also needs control of every light of the instance, as if the user switched them directly: `apply` without `lights`, `set_manual_control` with `manual_control: false` (it updates the instance at once), `set_scenario`, `update_curve`, and choosing a scenario, switching *HCL active* on or an adapt switch in the dashboard. The light commands of an action run as the user who caused it (logbook, traces, permissions); periodic updates and the automatic end of a scenario run without a user. Admins, automations and scripts are not affected.
+- **Diagnostics contained personal data** (RM-B32): the download showed the instance name, entity and area IDs (room names) and the times of manual control. The name is removed, entity, device, area, floor and label IDs are replaced by pseudonyms (`light.redacted_1`, `area_1`, the same in every part of the download), manual control is given as its age in minutes. Curve and anchor times stay.
+
+### Changed
+- **Translatable error messages** (RM-H06): the errors of the actions (e.g. "Not controlled by this HCL instance", "Light update failed for …") have translations (English, German). `update_curve` reports a wrong entity as a validation error like the other actions (before: a general error) and, like them, accepts any entity of an HCL instance.
+
+### Internal
+- Ruff runs in CI (RM-B12, rules in `ruff.toml`: errors, not style); unused imports, a duplicate import and unused variables removed. Unused constants removed (RM-T15). Imports moved to module level (RM-T16; the version switch of the target resolution is decided once at import).
+
 ## [0.7.0b11] - 2026-10-03
 Eleventh pre-release (beta) of 0.7.0: fixes RM-B25 to RM-B29 and adds RM-F05 of the roadmap (field test of 0.7.0b10 on a phone, with TalkBack). The minimum Home Assistant version stays 2024.7.
 

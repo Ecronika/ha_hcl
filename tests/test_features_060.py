@@ -133,7 +133,7 @@ async def test_a01_turn_on_values_default_and_option(hass, noon, no_frontend_reg
 async def test_a02_adapt_switches_filter_commands(hass, noon, no_frontend_registration):
     calls = async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"])
+    await setup_entry(hass, ["light.a"])
     assert hass.states.get(ADAPT_B).state == "on" and hass.states.get(ADAPT_K).state == "on"
     sw = switch_entity(hass)
 

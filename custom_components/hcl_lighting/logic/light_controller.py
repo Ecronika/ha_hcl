@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import asyncio
+import itertools
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -10,7 +11,7 @@ from typing import Any
 
 import time
 
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_COLOR_TEMP_KELVIN,
@@ -21,7 +22,12 @@ from homeassistant.util.color import (
     color_RGB_to_xy,
     color_xy_to_temperature,
 )
-from homeassistant.const import ATTR_ENTITY_ID
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    STATE_OFF,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 
 from ..const import (
     CONF_SMART_TRANSITION,
@@ -53,13 +59,16 @@ from ..logic.hcl_math import HCLCalculator
 
 from .override_manager import OverrideManager
 
-from homeassistant.const import (
-    STATE_UNAVAILABLE,
-    STATE_UNKNOWN,
-    STATE_OFF,
-    STATE_ON,
-    ATTR_ENTITY_ID
-)
+# Home Assistant's target resolution changed its home (see
+# extract_referenced_entities); which one exists is decided once at import.
+try:  # 2025.8+
+    from homeassistant.helpers import target as _ha_target
+except ImportError:  # up to 2025.7
+    _ha_target = None
+try:  # up to 2025.12 (removed later)
+    from homeassistant.helpers.service import async_extract_referenced_entity_ids as _service_extract
+except ImportError:
+    _service_extract = None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,16 +87,10 @@ def extract_referenced_entities(hass: HomeAssistant, target_config: dict[str, An
         for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id")
         if target_config.get(key)
     }
-    try:
-        from homeassistant.helpers import target as ha_target
-    except ImportError:
-        ha_target = None
-    if ha_target is not None and hasattr(ha_target, "async_extract_referenced_entity_ids"):
-        selection = getattr(ha_target, "TargetSelection", None) or ha_target.TargetSelectorData
-        return ha_target.async_extract_referenced_entity_ids(hass, selection(config), expand_group=False)
-    from homeassistant.helpers.service import async_extract_referenced_entity_ids
-
-    return async_extract_referenced_entity_ids(hass, _service_call(hass, config), expand_group=False)
+    if _ha_target is not None and hasattr(_ha_target, "async_extract_referenced_entity_ids"):
+        selection = getattr(_ha_target, "TargetSelection", None) or _ha_target.TargetSelectorData
+        return _ha_target.async_extract_referenced_entity_ids(hass, selection(config), expand_group=False)
+    return _service_extract(hass, _service_call(hass, config), expand_group=False)
 
 
 def _service_call(hass: HomeAssistant, data: dict[str, Any]):
@@ -97,8 +100,6 @@ def _service_call(hass: HomeAssistant, data: dict[str, Any]):
     signature would silently put the target into the wrong field (no target
     at all), so the parameters are passed by name.
     """
-    from homeassistant.core import ServiceCall
-
     try:
         return ServiceCall(hass=hass, domain="light", service="turn_on", data=data)
     except TypeError:  # up to 2024.12: no hass parameter
@@ -121,6 +122,43 @@ class BatchResult:
     failed: dict[str, BaseException] = field(default_factory=dict)
     pending: list[str] = field(default_factory=list)
 
+class CommandTracker:
+    """Light commands of one HCL instance; kept across reloads of the entry.
+
+    A command can outlive the controller that sent it (it may answer only
+    after COMMAND_TIMEOUT_SECONDS, see apply_batch, and a reload creates a new
+    controller). Its context must still be recognised as HCL's own, the light
+    must not get a second command while it runs, and a late failure must not
+    roll back tracking values a newer command has set since.
+    """
+
+    def __init__(self) -> None:
+        # Contexts of the commands ({context_id: monotonic time}) and the same
+        # contexts oldest first, so expired ones are removed from the front
+        self.contexts: dict[str, float] = {}
+        self.context_order: deque[tuple[float, str]] = deque()
+        # Lights with a command still running
+        self.in_flight: set[str] = set()
+        # Number of the command that last set the tracking values of a light
+        self._latest: dict[str, int] = {}
+        self._numbers = itertools.count(1)
+
+    def claim(self, entity_id: str) -> int:
+        """A command sets the tracking values of a light; returns its number."""
+        number = next(self._numbers)
+        self._latest[entity_id] = number
+        return number
+
+    def is_latest(self, entity_id: str, number: int) -> bool:
+        """True if no newer command has set the tracking values of the light."""
+        return self._latest.get(entity_id) == number
+
+    def prune(self, valid_entity_ids: set[str]) -> None:
+        """Forget lights that are no longer controlled."""
+        for entity_id in [eid for eid in self._latest if eid not in valid_entity_ids]:
+            del self._latest[entity_id]
+
+
 # Colour modes HCL drives through the XY simulation (Home Assistant converts
 # xy_color to the light's own mode, including RGBW and RGBWW)
 _COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW)
@@ -128,7 +166,14 @@ _COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, Color
 class HCLLightController:
     """Controller for applying HCL settings to lights."""
 
-    def __init__(self, hass: HomeAssistant, override_manager: OverrideManager, hcl_calc: HCLCalculator, config_entry):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        override_manager: OverrideManager,
+        hcl_calc: HCLCalculator,
+        config_entry,
+        commands: CommandTracker | None = None,
+    ):
         self.hass = hass
         self.override_manager = override_manager
         self.hcl_calc = hcl_calc
@@ -145,15 +190,16 @@ class HCLLightController:
         self._adapt_brightness = True
         self._adapt_color = True
 
-        # Contexts of the service calls HCL sends itself ({context_id: monotonic time})
-        # and the same contexts oldest first, so expired ones are removed from
-        # the front instead of searching all of them for every command
-        self._own_contexts: dict[str, float] = {}
-        self._own_context_order: deque[tuple[float, str]] = deque()
-
+        # Commands of this instance, shared with the controllers of earlier
+        # setups of the entry (a command may outlive a reload)
+        self.commands = commands if commands is not None else CommandTracker()
+        # Contexts of the service calls HCL sends ({context_id: monotonic time})
+        # and the same contexts oldest first (see CommandTracker)
+        self._own_contexts = self.commands.contexts
+        self._own_context_order = self.commands.context_order
         # Lights with a command still running (a light that does not answer
         # gets no second command until the first one has finished)
-        self._in_flight: set[str] = set()
+        self._in_flight = self.commands.in_flight
 
     @property
     def adapt_brightness(self) -> bool:
@@ -188,15 +234,20 @@ class HCLLightController:
 
         parent: context of the request that caused the command (service call,
         scenario change). It is linked as parent_id, like automations and
-        scripts do, so logbook and traces show the origin; the command itself
-        runs with HCL's permissions (no user_id).
+        scripts do, so logbook and traces show the origin. The user of that
+        request is kept (user_id): the command runs with the user's
+        permissions, as Home Assistant's own actions do. Commands of the
+        periodic updates have no parent and no user.
         """
         now = time.monotonic()
         # Contexts are only needed while the resulting state changes arrive
         order = self._own_context_order
         while order and now - order[0][0] > OWN_CONTEXT_SECONDS:
             del self._own_contexts[order.popleft()[1]]
-        context = Context(parent_id=parent.id if parent is not None else None)
+        if parent is None:
+            context = Context()
+        else:
+            context = Context(user_id=parent.user_id, parent_id=parent.id)
         self._own_contexts[context.id] = now
         order.append((now, context.id))
         return context
@@ -329,6 +380,7 @@ class HCLLightController:
         to_remove = [eid for eid in self._capability_cache if eid not in valid_entity_ids]
         for eid in to_remove:
             del self._capability_cache[eid]
+        self.commands.prune(valid_entity_ids)
 
             
         if to_remove:
@@ -367,7 +419,8 @@ class HCLLightController:
         bulk = transition_val == 0 or not smart_transition
         xy = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
 
-        previous: dict[str, tuple[Any, Any]] = {}
+        # tracking before the command and the number of the command
+        previous: dict[str, tuple[tuple[Any, Any], int]] = {}
         # (light, command)
         jobs: list[tuple[str, Awaitable[bool]]] = []
 
@@ -402,7 +455,10 @@ class HCLLightController:
                 continue
             # Tracking is set before sending (state reports may arrive at once);
             # a failed command restores it.
-            previous[entity_id] = self.override_manager.tracking_snapshot(entity_id)
+            previous[entity_id] = (
+                self.override_manager.tracking_snapshot(entity_id),
+                self.commands.claim(entity_id),
+            )
             self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
             self.override_manager.set_ignore_window(entity_id, transition_val)
             jobs.append((entity_id, job))
@@ -412,7 +468,9 @@ class HCLLightController:
 
         if fast_mode:
             for entity_id, job in jobs:
-                task = self.hass.async_create_task(job)
+                # Background task (like the other commands): a light that
+                # hangs does not hold Home Assistant's own waiting for tasks
+                task = self.hass.async_create_background_task(job, f"{DOMAIN} light command {entity_id}")
                 self._track_in_flight(task, entity_id)
                 task.add_done_callback(
                     lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
@@ -452,7 +510,7 @@ class HCLLightController:
             if error is not None:
                 _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
                 result.failed[entity_id] = error
-            self.override_manager.restore_tracking(entity_id, previous[entity_id])
+            self._restore_tracking(entity_id, previous[entity_id])
         for task in late:
             entity_id = tasks[task]
             _LOGGER.warning(
@@ -473,14 +531,28 @@ class HCLLightController:
         self._in_flight.add(entity_id)
         task.add_done_callback(lambda _t, eid=entity_id: self._in_flight.discard(eid))
 
+    def _restore_tracking(self, entity_id: str, previous: tuple[tuple[Any, Any], int]) -> bool:
+        """Roll back the tracking of a command that was not sent or failed.
+
+        Only if no newer command (also of a controller set up after a reload)
+        has set the tracking values since: those belong to the newer command.
+        Returns True if rolled back.
+        """
+        snapshot, number = previous
+        if not self.commands.is_latest(entity_id, number):
+            _LOGGER.debug("Tracking of %s kept: a newer command has set it", entity_id)
+            return False
+        self.override_manager.restore_tracking(entity_id, snapshot)
+        return True
+
     def _background_result(
         self,
         task: asyncio.Task,
         entity_id: str,
-        previous: tuple[Any, Any],
+        previous: tuple[tuple[Any, Any], int],
         on_failure: Callable[[list[str]], None] | None,
     ) -> None:
-        """Result of a command sent in fast mode."""
+        """Result of a command HCL did not wait for (fast mode, late or cancelled)."""
         if task.cancelled():
             # Home Assistant stops: no error message
             error: BaseException | None = None
@@ -490,8 +562,8 @@ class HCLLightController:
                 return
         if error is not None:
             _LOGGER.error("Light update for %s failed: %s", entity_id, error, exc_info=error)
-        self.override_manager.restore_tracking(entity_id, previous)
-        if on_failure is not None:
+        # A newer command owns the light: its tracking and protection stay
+        if self._restore_tracking(entity_id, previous) and on_failure is not None:
             on_failure([entity_id])
 
     async def apply_fast(
@@ -531,7 +603,7 @@ class HCLLightController:
         elif cap_type != "dim":
             return False  # onoff or unknown
 
-        previous = self.override_manager.tracking_snapshot(entity_id)
+        previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
         self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin)
         self.override_manager.set_ignore_window(
             entity_id, transition if ignore_seconds is None else ignore_seconds
@@ -540,10 +612,10 @@ class HCLLightController:
             sent = await self._async_call("light", "turn_on", service_data, blocking=True)
         except Exception as err:  # the light keeps its previous tracking
             _LOGGER.error("Light update for %s after switching on failed: %s", entity_id, err, exc_info=err)
-            self.override_manager.restore_tracking(entity_id, previous)
+            self._restore_tracking(entity_id, previous)
             return False
         if not sent:
-            self.override_manager.restore_tracking(entity_id, previous)
+            self._restore_tracking(entity_id, previous)
         return sent
 
     async def reengage_light(

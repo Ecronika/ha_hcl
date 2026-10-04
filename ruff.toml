@@ -1,0 +1,13 @@
+# Static checks in CI (RM-B12): programming errors, not style. Formatting,
+# import order and line length are deliberately not checked.
+target-version = "py312"
+
+[lint]
+# F: pyflakes (unused imports/variables, undefined names, redefinitions)
+# E4/E9: misplaced imports, syntax errors
+# PLC0415: imports belong at module level (RM-T16)
+select = ["F", "E4", "E9", "PLC0415"]
+
+[lint.per-file-ignores]
+"tests/**" = ["PLC0415"]
+"tests_frontend/**" = ["PLC0415"]

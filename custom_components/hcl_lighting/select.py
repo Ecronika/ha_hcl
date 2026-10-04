@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraData, RestoreEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -26,6 +27,7 @@ from .const import (
     DEFAULT_WAKE_TIME,
 )
 from .logic.light_controller import HCLLightController
+from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +61,6 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
     @property
     def device_info(self):
         """Return device info (same HCL device as the switch and the sensor)."""
-        from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,
@@ -142,6 +143,10 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
         (configured duration for Focus/Relax/Cleaning, the next wake time for
         Sleep and Night light).
         """
+        # A user's choice sends the scenario values to all lights at once; the
+        # automatic end of a scenario (timer) is no action of that user
+        context = action_context(self)
+        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
         self._cancel()
         self._set_mode(option)
         options = self._entry.options
@@ -160,4 +165,4 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
 
         # Apply the new mode immediately (the switch and the curve sensor listen);
         # the context of the request is passed on to the light commands
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._context)
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", context)
