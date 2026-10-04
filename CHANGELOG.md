@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-04
+Summary of all changes since 0.6.1; the details are in the entries of the pre-releases 0.7.0b1 to 0.7.0b14 below (RM-… numbers refer to the roadmap). The minimum Home Assistant version stays 2024.7.
+
+### Upgrade notes – behaviour that changes from 0.6.1
+- **Focus, Relax and Cleaning stay within the minimum and maximum brightness** (RM-R01). With the default limits (10–100 %) nothing changes. Sleep and Night light are not limited.
+- **Sleep (and the new Night light) end at the next wake time** and return to Auto (RM-R03). `hcl_lighting.set_scenario` with `duration: 0` keeps them until changed.
+- **One light command per light** instead of one command for several lights (RM-B13): more, smaller commands, so a failing light no longer hides the success of the others.
+- **Users with restricted permissions** need control of the HCL entities and, for actions that send the HCL values at once, of every light of the instance (RM-B07, RM-B31, RM-B34). Admins, automations and scripts are not affected.
+- **At least one light target** is required in the setup and the options (RM-B35).
+- **The attributes of *HCL active*** (`calculated_*`, `target_entities`, `manual_control`) are no longer stored in the history (RM-T10); the setpoint sensors and the logbook keep the history.
+- **Diagnostics** contain pseudonyms instead of names and IDs (RM-B32).
+- **The card hint after setup** is a one-time notification instead of a repair issue; the old repair issue is removed.
+- **Removed**: the simulator `docs/hcl_simulator.html` (RM-R04) and the demo `docs/hcl_dashboard.html`. After the update reload the dashboard page without cache (Ctrl+F5) so the new card is loaded.
+
+### Added
+- **Setpoint sensors** "Target brightness" and "Target colour temperature": the values HCL sends now (scenario and limits included), e.g. to switch a light on with the HCL values or to feed a KNX/DALI gateway.
+- **Scenario "Night light"** (default 3 % / 2200 K, configurable) and the option **"Transition when the scenario changes"**.
+- **Actions** `hcl_lighting.apply`, `hcl_lighting.set_manual_control`, `hcl_lighting.set_scenario` (optional duration) and `hcl_lighting.get_curve` (response data), with translated error messages (RM-H06).
+- **Event `hcl_lighting_manual_control`** and **logbook entries** for manual control and scenario changes.
+- **Diagnostics download** (pseudonymized, RM-B32) and a **repair issue** when two instances adapt the same light for the same attribute.
+- **Dashboard card**: visual card editor, compact view (`view: compact`), size hints for Sections dashboards (height "auto" by default, RM-B26), Night light chip, presets "Default with quiet night" and "Default without midday dip", "now" values from the setpoint sensors, the end of a timed scenario (RM-F04), the instance name as title (RM-F05), screen-reader sliders for the curve points (RM-B28) and larger touch areas.
+
+### Changed
+- **Manual control**: a light that is unreachable for up to 5 minutes (restart, radio dropout) keeps its manual control (RM-B24). A change on the device itself within 5 seconds after an HCL command (e.g. dimming at a wall dimmer right after switching on) is recognised by its values (RM-B33).
+- **Updates are never dropped**: requests during a running update (scenario change, curve preview, release of manual control, `apply`) wait and are combined (RM-B01, RM-B02, RM-B18, RM-B20).
+- **Lights that do not answer** no longer hold up HCL: an update waits at most 10 s; a light gets no second command while one is still running – also across a reload and when it is switched on (RM-B23, RM-B30, RM-T14, RM-T17). The setup no longer waits for light commands (RM-B37).
+- **Failed commands** are not treated as successful (tracking, ignore window and transition protection are restored, RM-B04, RM-B14, RM-B15); `apply` reports failed lights (RM-B16). A light that keeps failing is logged once, not in every update (RM-B39).
+- **Colour temperature** is limited to the range of lights with native colour temperature (RM-B03).
+- **Targets** are resolved by Home Assistant's own target resolution of the installed version (hidden and configuration lights reached indirectly are skipped, child devices included where supported; RM-B06, RM-B17, RM-B19); member changes of light groups are picked up.
+- **Long transitions** of `apply`, scenario changes, the turn-on transition and the smooth return are no longer cut short by the update cycles; switching HCL on or a reload takes the lights back at once (RM-B21, RM-B22).
+- **Saving the curve** takes effect without reloading the integration (RM-T13).
+- **Dashboard card**: unsaved drafts are kept when the curve changes elsewhere, much less work per Home Assistant state change (RM-F03), Chart.js loaded by the card with a fixed version, time and number format of the Home Assistant profile, usable from 240 px width.
+- **Capabilities** of a light are evaluated again when it reports other ones (RM-B36).
+- **Card resource** is updated in place on version changes (one entry with `?v=<version>`), and registered again once Home Assistant has started if Lovelace was not ready.
+
+### Fixed
+- Many smaller fixes of the betas, among them: midnight (24:00) in curves, the card in Masonry dashboards, dragging and screen readers in the card, permissions of the actions, the disabled main switch (RM-B38), unknown keys stored by `update_curve` (RM-B40) and an emptied light target that fell back to the first setup (RM-B35). See the entries below.
+
+### Internal
+- Ruff in CI (RM-B12), CI tests also on Home Assistant 2025.7 and 2025.8 (RM-T09), cleanups (RM-B10, RM-T15, RM-T16, RM-T18).
+
+### Not included
+- RGBWW lights keep getting the colour temperature through the XY simulation (Home Assistant does not expose the white-channel range of such lights).
+
 ## [0.7.0b14] - 2026-10-04
 Fourteenth pre-release (beta) of 0.7.0: RM-T17, RM-B34 and RM-D04 of the roadmap (external analysis of 0.7.0b13) and RM-B35 to RM-B40, RM-T18 and RM-D05 (code review of 0.7.0b13). The minimum Home Assistant version stays 2024.7.
 
