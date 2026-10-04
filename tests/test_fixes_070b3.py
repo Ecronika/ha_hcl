@@ -372,7 +372,7 @@ async def test_rm_b07_get_curve_needs_read_permission(hass, no_frontend_registra
 
 
 # ---------------------------------------------------------------- RM-B08
-async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registration):
+async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registration, hass_admin_user):
     lights = Lights(hass)
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
@@ -387,21 +387,24 @@ async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registrat
         set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
         core(hass, entry)["override_manager"].reset_override("light.a")
         lights.calls.clear()
-        origin = Context()
+        origin = Context(user_id=hass_admin_user.id)
         await hass.services.async_call(DOMAIN, service, data, blocking=True, context=origin)
         await hass.async_block_till_done()
         sent = lights.for_light("light.a")
         assert sent, service
         assert sent[-1].context.parent_id == origin.id, service
+        # 0.7.0b12 (RM-B31): the light command runs as the user who caused it
+        assert sent[-1].context.user_id == origin.user_id, service
         assert controller.is_own_context(sent[-1].context), service
     # switching HCL on
     await hass.services.async_call("switch", "turn_off", {"entity_id": SWITCH}, blocking=True)
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     lights.calls.clear()
-    origin = Context()
+    origin = Context(user_id=hass_admin_user.id)
     await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True, context=origin)
     await hass.async_block_till_done()
     assert lights.for_light("light.a")[-1].context.parent_id == origin.id
+    assert lights.for_light("light.a")[-1].context.user_id == origin.user_id
 
 
 # ---------------------------------------------------------------- RM-B09

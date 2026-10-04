@@ -43,7 +43,6 @@ SERVICE_UPDATE_CURVE = "update_curve"
 CONF_CURVE_CONFIG = "curve_config"
 
 ATTR_CURVE_VERSION = "curve_version"
-ATTR_CURVE_HASH = "curve_hash"
 ATTR_SAMPLE_COUNT = "sample_count"
 ATTR_SAMPLES = "samples"
 
@@ -55,7 +54,6 @@ COMMAND_TIMEOUT_SECONDS = 10       # Seconds an update waits for its light comma
 UNREACHABLE_GRACE_SECONDS = 300    # A light unavailable/unknown for longer counts as switched off (manual control)
  
 # v0.5.0 Scenario Engine
-CONF_SCENARIOS = "scenarios"
  
 MODE_AUTO = "auto"
 MODE_SLEEP = "sleep"

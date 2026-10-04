@@ -27,11 +27,10 @@ class _NewServiceCall:
 
 
 def test_rm_b19_service_call_keeps_the_target_with_both_signatures(monkeypatch):
-    import homeassistant.core as ha_core
-
     target = {"area_id": ["living"], "entity_id": ["light.a"]}
     for cls in (_OldServiceCall, _NewServiceCall):
-        monkeypatch.setattr(ha_core, "ServiceCall", cls)
+        # imported at module level since 0.7.0b12 (RM-T16)
+        monkeypatch.setattr(light_controller, "ServiceCall", cls)
         call = light_controller._service_call(object(), target)
         assert isinstance(call, cls)
         assert (call.domain, call.service, call.data) == ("light", "turn_on", target), cls.__name__

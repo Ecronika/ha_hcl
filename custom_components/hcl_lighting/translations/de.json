@@ -220,5 +220,31 @@
                 "guest": "Gast"
             }
         }
+    },
+    "exceptions": {
+        "guest_mode": {
+            "message": "HCL sendet im Szenario Gast keine Werte"
+        },
+        "not_controlled": {
+            "message": "Nicht von dieser HCL-Instanz gesteuert: {lights}"
+        },
+        "not_hcl_entity": {
+            "message": "{entity_id} ist keine Entität von HCL Lighting"
+        },
+        "instance_not_loaded": {
+            "message": "Die HCL-Instanz von {entity_id} ist nicht geladen"
+        },
+        "scenario_unavailable": {
+            "message": "Die Szenario-Auswahl dieser HCL-Instanz ist nicht verfügbar"
+        },
+        "lights_failed": {
+            "message": "Lichtbefehl fehlgeschlagen für {failed}: {error}"
+        },
+        "lights_no_answer": {
+            "message": "Keine Antwort von {pending} innerhalb von {seconds} s (Befehl läuft weiter)"
+        },
+        "lights_failed_and_no_answer": {
+            "message": "Lichtbefehl fehlgeschlagen für {failed}: {error}; keine Antwort von {pending} innerhalb von {seconds} s (Befehl läuft weiter)"
+        }
     }
 }

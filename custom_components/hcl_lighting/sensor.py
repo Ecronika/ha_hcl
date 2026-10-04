@@ -5,6 +5,7 @@ import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -195,7 +196,6 @@ class HCLLightingCurveSensor(SensorEntity):
     @property
     def device_info(self):
         """Return device info."""
-        from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,
@@ -229,7 +229,6 @@ class HCLSetpointSensor(SensorEntity):
     @property
     def device_info(self):
         """Same HCL device as the other entities."""
-        from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,

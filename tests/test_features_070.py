@@ -359,8 +359,8 @@ async def test_f07_diagnostics(hass, no_frontend_registration):
 
     _calls, entry = await _light_on(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
-    assert diag["targets"] == ["light.a"]
-    assert diag["lights"]["light.a"]["capability"] == "ct"
+    assert diag["targets"] == ["light.redacted_1"]  # 0.7.0b12: pseudonyms (RM-B32)
+    assert diag["lights"]["light.redacted_1"]["capability"] == "ct"
     assert diag["setpoint"]["brightness"] == 17 and diag["scenario"] == "auto"
 
 

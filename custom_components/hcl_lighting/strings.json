@@ -220,5 +220,31 @@
                 "guest": "Guest"
             }
         }
+    },
+    "exceptions": {
+        "guest_mode": {
+            "message": "HCL sends no values in Guest mode"
+        },
+        "not_controlled": {
+            "message": "Not controlled by this HCL instance: {lights}"
+        },
+        "not_hcl_entity": {
+            "message": "{entity_id} is not an HCL Lighting entity"
+        },
+        "instance_not_loaded": {
+            "message": "The HCL instance of {entity_id} is not loaded"
+        },
+        "scenario_unavailable": {
+            "message": "The scenario of this HCL instance is not available"
+        },
+        "lights_failed": {
+            "message": "Light update failed for {failed}: {error}"
+        },
+        "lights_no_answer": {
+            "message": "No answer from {pending} within {seconds} s (command still running)"
+        },
+        "lights_failed_and_no_answer": {
+            "message": "Light update failed for {failed}: {error}; no answer from {pending} within {seconds} s (command still running)"
+        }
     }
 }

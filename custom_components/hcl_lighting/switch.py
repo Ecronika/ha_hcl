@@ -5,21 +5,18 @@ import logging
 import asyncio
 from typing import Any
 from datetime import timedelta
-import voluptuous as vol
 
 from homeassistant.util import dt as dt_util
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import Context, HomeAssistant, callback, Event
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.entity_platform import AddEntitiesCallback, async_get_current_platform
-from homeassistant.util.dt import utcnow
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.service import async_call_from_config
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
@@ -29,19 +26,6 @@ from homeassistant.const import EVENT_CALL_SERVICE, ENTITY_MATCH_ALL
 from .const import (
     DOMAIN,
     CONF_TARGET,
-    CONF_SMART_TRANSITION,
-    CONF_MIN_BRIGHTNESS,
-    CONF_MAX_BRIGHTNESS,
-    DEFAULT_MIN_BRIGHTNESS,
-    DEFAULT_MAX_BRIGHTNESS,
-    CONF_WAKE_TIME,
-    CONF_MIDDAY_TIME,
-    CONF_SLEEP_TIME,
-    DEFAULT_WAKE_TIME,
-    DEFAULT_MIDDAY_TIME,
-    DEFAULT_SLEEP_TIME,
-    SERVICE_UPDATE_CURVE,
-    CONF_CURVE_CONFIG,
     IGNORE_WINDOW_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
     CONF_UPDATE_INTERVAL,
@@ -59,6 +43,7 @@ from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
+from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -326,7 +311,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
     @property
     def device_info(self):
         """Return device info."""
-        from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,
@@ -345,8 +329,19 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             "manual_control": self.override_manager.overridden_entities(),
         }
 
+    def controlled_lights(self) -> set[str]:
+        """Lights of this instance (resolved now if HCL has not done it yet)."""
+        if self._resolved_targets:
+            return set(self._resolved_targets)
+        return self.controller.resolve_targets(
+            self._entry.options.get(CONF_TARGET) or self._entry.data.get(CONF_TARGET) or {}
+        )
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on (also when restored at startup or after a reload)."""
+        context = action_context(self)
+        # A user switching HCL on sends the HCL values to all its lights
+        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
         if not self._is_on:
             # Switched on (or set up again): HCL takes its lights back at
             # once. Transition protections from before (a long apply, scenario
@@ -367,7 +362,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         await self._re_evaluate_targets_and_listeners()
 
         # Immediate update (linked to the request that switched HCL on)
-        await self.async_request_update(self._context)
+        await self.async_request_update(context)
 
     async def _re_evaluate_targets_and_listeners(self) -> None:
         """Re-evaluate target entities and update state listeners."""
@@ -435,7 +430,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         """
         brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
         if brightness is None:
-            raise ServiceValidationError("HCL sends no values in Guest mode")
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="guest_mode")
         if not self._resolved_targets:
             await self._re_evaluate_targets_and_listeners()
         targets = self._checked_lights(lights)
@@ -466,16 +461,20 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         if result.failed or result.pending:
             # Like Home Assistant's own light actions: the caller learns about
             # the failure (the other lights have been updated)
-            parts = []
             first = next(iter(result.failed.values()), None)
-            if result.failed:
-                parts.append(f"Light update failed for {', '.join(sorted(result.failed))}: {first}")
-            if result.pending:
-                parts.append(
-                    f"No answer from {', '.join(sorted(result.pending))} "
-                    f"within {COMMAND_TIMEOUT_SECONDS} s (command still running)"
-                )
-            raise HomeAssistantError("; ".join(parts)) from first
+            placeholders = {
+                "failed": ", ".join(sorted(result.failed)),
+                "error": str(first),
+                "pending": ", ".join(sorted(result.pending)),
+                "seconds": str(COMMAND_TIMEOUT_SECONDS),
+            }
+            if result.failed and result.pending:
+                key = "lights_failed_and_no_answer"
+            else:
+                key = "lights_failed" if result.failed else "lights_no_answer"
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key=key, translation_placeholders=placeholders
+            ) from first
 
     async def async_set_manual_control(
         self, lights: list[str] | None, manual_control: bool, context: Context | None = None
@@ -498,7 +497,9 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         unknown = sorted(set(lights) - self._resolved_targets)
         if unknown:
             raise ServiceValidationError(
-                f"Not controlled by this HCL instance: {', '.join(unknown)}"
+                translation_domain=DOMAIN,
+                translation_key="not_controlled",
+                translation_placeholders={"lights": ", ".join(unknown)},
             )
         return list(lights)
 
@@ -570,10 +571,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 self.async_write_ha_state()
                 return
 
-            # Special Case: Sleep Mode handling (If brightness is 0)
-            # calculate_target_values returns 0, 2000 for sleep
-            is_sleep = (brightness == 0)
-            
             # Update State for UI/Debugging
             self._calculated_brightness = brightness
             self._calculated_kelvin = kelvin
@@ -754,7 +751,6 @@ class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
     @property
     def device_info(self):
         """Return device info (same HCL device as the main switch)."""
-        from homeassistant.helpers.entity import DeviceInfo
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name=self._entry.title,
@@ -763,10 +759,13 @@ class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
         )
 
     async def _async_set(self, value: bool) -> None:
+        context = action_context(self)
+        # The change is applied to all lights at once
+        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
         setattr(self._controller, self._key, value)
         self.async_write_ha_state()
         async_check_conflicts(self.hass)
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._context)
+        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", context)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Let HCL adapt this attribute."""

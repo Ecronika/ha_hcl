@@ -40,7 +40,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Instant-On**: Lights receive the HCL values right after they are switched on.
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
 - **Services**: apply now, set or release manual control, set a scenario with a duration, read the curve (see [Services](#services)).
-- **Diagnostics and logbook**: diagnostics download on the integration page; logbook entries and an event when a light starts or stops being under manual control.
+- **Diagnostics and logbook**: diagnostics download on the integration page (without the instance name; entity, device, area, floor and label IDs replaced by pseudonyms such as `light.redacted_1`, manual control as its age in minutes – safe to attach to an issue); logbook entries and an event when a light starts or stops being under manual control.
 - **Capabilities**: Auto-detects colour support (XY, HS, RGB, RGBW, RGBWW) and simulates colour temperatures outside a bulb's native CT range via XY on colour-capable bulbs (supported range of the curve: 2000–7000 K). CT-only bulbs are driven to the nearest temperature they can reach.
 
 ---
@@ -164,7 +164,7 @@ By default a light that is switched on receives the HCL values immediately, even
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `midday_time`, `sleep_time` |
 | `hcl_lighting.update_curve` | see [Technical Details](#-technical-details) | Used by the card |
 
-**Permissions**: for a user with restricted permissions, the writing actions (`apply`, `set_manual_control`, `set_scenario`, `update_curve`) need control of the given HCL entity, of the instance's *HCL active* switch (and of the scenario select for `set_scenario`) and of the lights given in `lights`; `get_curve` needs read access. Automations and scripts are not restricted. The light commands HCL sends for an action are linked to it (parent context), so logbook and traces show where they came from.
+**Permissions**: for a user with restricted permissions, the writing actions (`apply`, `set_manual_control`, `set_scenario`, `update_curve`) need control of the given HCL entity, of the instance's *HCL active* switch (and of the scenario select for `set_scenario`) and of the lights given in `lights`; `get_curve` needs read access. An action that sends the HCL values to the lights at once also needs control of every light of the instance, as if the user switched them directly: `apply` without `lights`, `set_manual_control` with `manual_control: false` (it updates the instance at once), `set_scenario`, `update_curve`, and choosing a scenario, switching *HCL active* on or an adapt switch on/off in the dashboard. Pausing lights (`manual_control: true`) and switching HCL off send no command. Automations and scripts are not restricted. The light commands HCL sends for an action are linked to it (parent context) and run as the user who caused them, so logbook and traces show where they came from; the periodic updates and the automatic end of a scenario run without a user.
 
 Event `hcl_lighting_manual_control` (`entity_id`, `manual_control`, `instance`, `config_entry_id`) is fired when a light starts or stops being under manual control. If the same light is adapted by two instances for the same attribute, a repair issue names the light and the instances.
 
