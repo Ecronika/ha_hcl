@@ -54,7 +54,7 @@ Eine in der Karte gespeicherte Kurve hat Vorrang vor den Ankerzeiten; Speichern 
 - **Zu steuernde Lichter** (mindestens ein Ziel).
 - **Aufwachzeit** (07:00), **Sozialer Mittag** (Tiefpunkt des Mittagstiefs, 12:30), **Schlafenszeit** (22:00); zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.
 - **Minimale/Maximale Helligkeit** (1–100 %, Minimum kleiner als Maximum; Standard 10–100 %): Kurvenwerte außerhalb werden abgeschnitten; die Karte schattiert diese Bereiche und zeigt die wirksame Helligkeit gestrichelt. Fokus, Entspannen und Putzen bleiben ebenfalls in den Grenzen, Schlafen und Nachtlicht nicht.
-- **Kompatibilitätsmodus (langsame/komplexe Lichter)**: für Lichter, die bei Aktualisierungen flackern oder stocken. Helligkeit und Farbe gehen in zwei getrennten Befehlen, die Farbtemperatur ohne Übergang; scheitert das, werden die Werte einmal ohne Übergang gesendet.
+- **Kompatibilitätsmodus (langsame/komplexe Lichter)**: für Lichter, die bei Aktualisierungen flackern oder stocken, z. B. IKEA TRÅDFRI (sie blenden je Befehl nur einen Wert über und ignorieren während eines Farbübergangs weitere Befehle). Helligkeit und Farbe gehen in zwei getrennten Befehlen, die Farbtemperatur ohne Übergang (Übergang 0, damit kein Standardübergang eines Lichtprofils oder der Integration der Leuchte greift); scheitert das, werden die Werte einmal ohne Übergang gesendet. Gilt für Aktualisierungen mit Übergang; die Werte direkt nach dem Einschalten und Aktualisierungen ohne Übergang sind immer ein Befehl.
 
 **2. Aktualisierung und manuelle Steuerung**
 | Option | Standard | Bedeutung |
@@ -69,6 +69,12 @@ Eine in der Karte gespeicherte Kurve hat Vorrang vor den Ankerzeiten; Speichern 
 | Übergang bei Szenario-Wechsel | wie Übergangszeit | 0–300 s; gilt auch, wenn ein zeitlich begrenztes Szenario endet; darf länger als das Intervall sein (die Lichter bleiben bis zum Ende in Ruhe) |
 
 **3. Szenarien**: Helligkeit (1–100 %) und Farbtemperatur (2000–7000 K) von **Fokus** (100 % / 5500 K), **Entspannen** (40 % / 2700 K), **Putzen** (100 % / 4000 K) und **Nachtlicht** (3 % / 2200 K) sowie die **Dauer** von Fokus/Entspannen/Putzen (0–1440 min, danach zurück zu Auto; 0 = bis zur Änderung).
+
+**Hinweise zu Leuchtmitteln**: Manche Leuchtmittel haben Firmware-Grenzen, die HCL nicht beheben kann; die Optionen helfen dabei:
+- **IKEA TRÅDFRI** (und ähnliche): **Kompatibilitätsmodus** einschalten (siehe oben).
+- **Lichter glimmen nach „Schlafen“ weiter**: „Schlafen“ schaltet mit dem *Übergang bei Szenario-Wechsel* aus. Manche Leuchtmittel bleiben beim Ausschalten mit Übergang auf ihrer kleinsten Stufe stehen (berichtet für IKEA und AwoX/EGLO), während Home Assistant sie als aus zeigt. Diesen Übergang auf 0 s stellen.
+- **Lichter schalten sich selbst wieder ein** (berichtet für Sengled): Während eines langen Übergangs ausgeschaltet, setzen sie ihn fort. Eine kurze *Übergangszeit der Aktualisierungen* wählen.
+- **Alte Farbe beim Einschalten sichtbar**: HCL sendet seine Werte, sobald das Licht „an“ meldet; bis dahin zeigt es kurz seine vorherigen Werte. Abhilfe: das Licht mit den HCL-Werten einschalten (siehe *Rezepte*). Mit ZHA verhindert die Option „Enhanced light transition“, dass ein solcher Befehl mit Übergang von der alten Farbe aus überblendet.
 
 ## Entitäten je Instanz
 Jede Instanz ist ein Gerät mit diesen Entitäten (Entity-IDs neuer Installationen; bestehende Installationen behalten ihre IDs, nur die Anzeigenamen ändern sich; der Namensteil der ID folgt der Sprache beim Anlegen, z. B. `_hcl_aktiv`):
@@ -94,7 +100,7 @@ Schlafen und Nachtlicht enden zur nächsten Aufwachzeit (zurück zu Auto); mit `
 ## Manuelle Steuerung
 HCL pausiert ein einzelnes Licht (der Schalter „HCL aktiv“ bleibt an), wenn
 - Home Assistant Helligkeit oder Farbe mit einem Befehl ändert, der nicht von HCL stammt (App, Dashboard, Szene, Automation, Sprachassistent), oder
-- das Licht Werte meldet, die von den HCL-Werten abweichen (z. B. Wandtaster, Hersteller-App): Helligkeit > 2 %, Farbtemperatur > 100 K, XY-Farbe > 0,05.
+- das Licht Werte meldet, die von den HCL-Werten abweichen (z. B. Wandtaster, Hersteller-App): Helligkeit > 2 %, Farbtemperatur > 100 K, XY-Farbe > 0,05. Eine Meldung „an“ mit Helligkeit 0 (z. B. KNX, wenn der Helligkeitsstatus kurz vor oder nach dem Schaltstatus kommt) enthält keine Helligkeit und zählt dafür nicht.
 
 Änderungen an einem Attribut, das HCL nicht anpasst (Anpassungs-Schalter), pausieren nicht. Home Assistant ordnet Meldungen eines Lichts bis 5 Sekunden nach einem Befehl diesem Befehl zu, auch eine Bedienung am Gerät (z. B. Dimmen am Tastdimmer direkt nach dem Einschalten). Solche Meldungen bewertet HCL nach ihren Werten: Weicht das Licht über seinen vorigen Wert hinaus ab, ist es sofort manuell gesteuert; bewegt es sich zurück Richtung vorigen Wert, entscheidet HCL am Ende des Übergangs (hat das Licht den HCL-Wert bis dahin nicht erreicht, ist es manuell gesteuert).
 

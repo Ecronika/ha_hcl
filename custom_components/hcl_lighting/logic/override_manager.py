@@ -29,6 +29,16 @@ def _pct(brightness) -> int | None:
     return round(min(255, max(0, brightness)) * 100 / 255)
 
 
+def _on_brightness(attrs) -> int | None:
+    """Brightness 0-255 of a light reported "on" (None: no brightness information).
+
+    "On" with brightness 0 is no state a light can be set to: e.g. a KNX light
+    whose brightness status arrives just before or after its switching status
+    (RM-B41). It says nothing about the brightness, like a missing value.
+    """
+    return attrs.get("brightness") or None
+
+
 def _xy_distance(xy, target) -> float | None:
     if not xy or not target:
         return None
@@ -160,7 +170,7 @@ class OverrideManager:
         if start is not None and start.state == "on":
             attrs = start.attributes
             data["command_start"] = (
-                _pct(attrs.get("brightness")), attrs.get("color_temp_kelvin"), attrs.get("xy_color")
+                _pct(_on_brightness(attrs)), attrs.get("color_temp_kelvin"), attrs.get("xy_color")
             )
         else:
             data.pop("command_start", None)
@@ -217,7 +227,7 @@ class OverrideManager:
             divergence_detected = False
             if old_state and old_state.state == "on" and last_b is not None:
                 try:
-                    if self.track_brightness:
+                    if self.track_brightness and _on_brightness(state.attributes) is not None:
                         curr_b_raw = state.attributes.get("brightness") or 0
                         old_b_raw = old_state.attributes.get("brightness") or 0
 
@@ -294,11 +304,12 @@ class OverrideManager:
         if last_b is None or last_k is None:
              return False
 
-        curr_b = state.attributes.get("brightness")
+        curr_b = _on_brightness(state.attributes)
         curr_k = state.attributes.get("color_temp_kelvin")
 
         if curr_b is None:
-            _LOGGER.debug("Ignoring event for %s (Brightness is None/Unknown)", entity_id)
+            # also "on" with brightness 0 (RM-B41)
+            _LOGGER.debug("Ignoring event for %s (no brightness reported)", entity_id)
             return False
 
         # Percentage with Bounds Check
@@ -363,10 +374,11 @@ class OverrideManager:
         attrs = state.attributes
         out = []
         if self.track_brightness and last_b is not None:
-            curr_b = _pct(attrs.get("brightness"))
+            # "on" with brightness 0 carries no brightness information (RM-B41)
+            curr_b = _pct(_on_brightness(attrs))
             out.append((
                 f"Brightness (L:{last_b}%->C:{curr_b}%)",
-                _verdict(curr_b, last_b, _pct(old.get("brightness")), start_b, TRAJECTORY_BRIGHTNESS_DELTA),
+                _verdict(curr_b, last_b, _pct(_on_brightness(old)), start_b, TRAJECTORY_BRIGHTNESS_DELTA),
             ))
         if self.track_color and last_k:
             curr_k = attrs.get("color_temp_kelvin")
@@ -438,7 +450,7 @@ class OverrideManager:
         last_b, last_k = data["last_set"]
         attrs = state.attributes
         out = []
-        if self.track_brightness and last_b is not None and attrs.get("brightness") is not None:
+        if self.track_brightness and last_b is not None and _on_brightness(attrs) is not None:
             curr_b = _pct(attrs["brightness"])
             out.append((f"Brightness (L:{last_b}%->C:{curr_b}%)", abs(curr_b - last_b) <= TRAJECTORY_BRIGHTNESS_DELTA))
         if self.track_color and last_k:

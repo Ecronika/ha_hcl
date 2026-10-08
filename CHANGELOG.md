@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-10-08
+Bugfix release: RM-B41, RM-B42 and RM-D06 of the roadmap. The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Report "on" with brightness 0 counted as manual control** (RM-B41): a light that reports "on" with brightness 0 for a moment (e.g. KNX, when the brightness status arrives just before or after the switching status) was paused after switching on, until it was switched off or the return time had passed (since 0.7.0b13); when switching off, manual control started and ended in the same second (logbook entries and `hcl_lighting_manual_control` events). Such a report carries no brightness and no longer counts as a change of brightness.
+- **Compatibility mode: colour temperature could fade after all** (RM-B42): the colour temperature commands (and the command without transition sent after a failure) had no transition, so a default transition applied (`light_profiles.csv` of Home Assistant, the default transition of Zigbee2MQTT or ZHA). The colour faded and the brightness command came during the fade, which bulbs like IKEA TRÅDFRI can ignore. They are now sent with transition 0.
+
+### Changed
+- **README: notes on lights** (RM-D06): which option helps with IKEA TRÅDFRI, lights that keep glowing after Sleep, lights that switch themselves back on and the previous colour visible when switching on; when the compatibility mode applies.
+
 ## [0.7.0] - 2026-10-04
 Summary of all changes since 0.6.1; the details are in the entries of the pre-releases 0.7.0b1 to 0.7.0b14 below (RM-… numbers refer to the roadmap). The minimum Home Assistant version stays 2024.7.
 

@@ -97,7 +97,7 @@ Open **Configure** on the integration entry. The options have three pages.
 *   **Social midday**: The lowest point of the midday dip (Default: 12:30).
 *   **Sleep time**: End of the day (Default: 22:00). Wake and sleep time must be more than 6 hours apart.
 *   **Minimum/Maximum brightness**: Global limits for the curve (1–100 %, minimum lower than maximum; default 10–100 %). Curve values outside the limits are clipped to them; the dashboard card shades the clipped ranges and shows the effective brightness as a dashed line. Focus, Relax and Cleaning also stay within the limits; Sleep and Night light do not (they are meant to be darker than a daytime minimum).
-*   **Compatibility mode (slow/complex lights)**: Enable this if your lights flash or stutter during updates. It sends brightness and colour in two separate commands, colour temperature without transition; if that fails, the values are sent once without transition.
+*   **Compatibility mode (slow/complex lights)**: Enable this if your lights flash or stutter during updates, e.g. IKEA TRÅDFRI (they fade only one value per command and ignore further commands during a colour fade). It sends brightness and colour in two separate commands, colour temperature without transition (transition 0, so no default transition of a light profile or of the light's integration applies); if that fails, the values are sent once without transition. It applies to updates with a transition; the values sent right after a light is switched on and updates without transition are always one command.
 
 The three anchors must leave room for the curve sectors (wake ramp 3 h, midday sector 30 min before to 3.5 h after midday, 4 h wind-down before sleep). If the midday time does not fit, it is moved to the nearest possible time; if the day is shorter than about 11 hours, the default profile is scaled to the wake–sleep span. A warning is logged in both cases.
 
@@ -117,6 +117,13 @@ The three anchors must leave room for the curve sectors (wake ramp 3 h, midday s
 
 ### 3. Scenarios
 Brightness (1–100 %) and colour temperature (2000–7000 K) of **Focus** (100 % / 5500 K), **Relax** (40 % / 2700 K), **Cleaning** (100 % / 4000 K) and **Night light** (3 % / 2200 K), plus a **duration** (0–1440 min) after which Focus, Relax and Cleaning return to **Auto** (0 = until changed). Sleep and Night light always return to Auto at the next wake time; `hcl_lighting.set_scenario` with `duration: 0` keeps them until changed.
+
+### Notes on lights
+Some bulbs have firmware limits that HCL cannot fix, but the options can work around them:
+*   **IKEA TRÅDFRI** (and similar): enable the **compatibility mode** (see above).
+*   **Lights that keep glowing after Sleep**: Sleep switches the lights off with the *transition when the scenario changes*. Some bulbs stay at their minimum level when switched off with a transition (reported for IKEA and AwoX/EGLO) while Home Assistant shows them off. Set this transition to 0 s.
+*   **Lights that switch themselves back on** (reported for Sengled): switched off during a long transition, they may continue it. Use a short *transition of updates*.
+*   **Previous colour visible when switching on**: HCL sends its values when the light reports on, so the light shows its previous values for a moment. To avoid that, switch it on with the HCL values (see *Recipes*). With ZHA, the option "Enhanced light transition" keeps such a command with a transition from fading from the previous colour.
 
 ---
 
@@ -214,7 +221,7 @@ actions:
 
 *   **Update Loop**: every 27 seconds by default (configurable). Only one update runs at a time: a timer tick is skipped while an update is still sending, while updates requested by a scenario change, a curve preview/revert, the release of manual control or `apply` wait for it and are then sent (several requests are combined).
 *   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
-*   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State changes that are not caused by a Home Assistant command are compared with the thresholds above. Home Assistant assigns the context of the last command to state changes of a light within 5 seconds, also to a change on the device itself (e.g. a wall dimmer). A state report with HCL's context therefore counts as HCL's own only if it fits the command (at the HCL value or moving towards it); a change beyond the light's previous value is manual control at once, a change back towards it is decided when the command's transition has ended (a light that has not reached the HCL value by then is manually controlled).
+*   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State changes that are not caused by a Home Assistant command are compared with the thresholds above. A report "on" with brightness 0 (e.g. a KNX light whose brightness status arrives just before or after its switching status) carries no brightness and is not compared for brightness. Home Assistant assigns the context of the last command to state changes of a light within 5 seconds, also to a change on the device itself (e.g. a wall dimmer). A state report with HCL's context therefore counts as HCL's own only if it fits the command (at the HCL value or moving towards it); a change beyond the light's previous value is manual control at once, a change back towards it is decided when the command's transition has ended (a light that has not reached the HCL value by then is manually controlled).
 *   **Traffic Optimization**:
     *   Brightness: Updates only if delta > 1%
     *   Kelvin: Updates only if delta > 50K (compared with the temperature the light can reach; lights in XY mode are compared by colour)
