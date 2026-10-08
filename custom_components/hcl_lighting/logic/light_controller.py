@@ -920,6 +920,9 @@ class HCLLightController:
     ) -> bool:
         """Colour temperature without transition, brightness with it (IKEA-safe).
 
+        "Without transition" is sent as transition 0: a command without it gets
+        a default transition (light profile, setting of the integration) and
+        the colour would fade after all (RM-B42).
         kelvin is already limited to the light's range. If the command fails,
         the values are sent once without transition; if that fails too, the
         error is raised to apply_batch.
@@ -940,11 +943,11 @@ class HCLLightController:
                 if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
                     sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
                 # Send color without transition to avoid glitches on IKEA bulbs
-                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True, parent=parent)
+                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
             else:
-                # Only snap color if delta is significant. NEVER send transition with color_temp.
+                # Only snap color if delta is significant; colour temperature never fades (transition 0).
                 if abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
-                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin}, blocking=True, parent=parent)
+                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
                 sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return sent
         except Exception as err:  # the fallback below reports a final failure
@@ -954,7 +957,7 @@ class HCLLightController:
         # Fallback: send everything, no transition (safest)
         return await self._async_call(
             "light", "turn_on",
-            {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin},
+            {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": 0},
             blocking=True, parent=parent,
         )
 
