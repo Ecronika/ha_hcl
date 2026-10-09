@@ -13,8 +13,11 @@ CONF_MIN_BRIGHTNESS = "min_brightness"
 CONF_MAX_BRIGHTNESS = "max_brightness"
 
 # Defaults
-DEFAULT_MIN_BRIGHTNESS = 10
+DEFAULT_MIN_BRIGHTNESS = 3  # new instances (RM-R06); many LED drivers flicker below
 DEFAULT_MAX_BRIGHTNESS = 100
+# Default of the instances set up before 0.8.0; written to their options by the
+# migration so their limit does not change (RM-R06)
+LEGACY_MIN_BRIGHTNESS = 10
 
 # Manual Override Detection
 OVERRIDE_TIMEOUT_HOURS = 4
@@ -26,11 +29,9 @@ REENGAGE_TRANSITION_SECONDS = 180
 
 # Dynamic Curve Anchors
 CONF_WAKE_TIME = "wake_time"
-CONF_MIDDAY_TIME = "midday_time"
 CONF_SLEEP_TIME = "sleep_time"
 
 DEFAULT_WAKE_TIME = "07:00"
-DEFAULT_MIDDAY_TIME = "12:30"
 DEFAULT_SLEEP_TIME = "22:00"
 
 # v0.4.0 Interactive UI
@@ -85,15 +86,16 @@ SCENARIO_DEFAULTS = {
 # v0.6.0 Options (behaviour)
 CONF_UPDATE_INTERVAL = "update_interval"            # seconds between update cycles
 CONF_TRANSITION = "transition"                      # seconds, transition of cycle updates
-CONF_TURN_ON_TRANSITION = "turn_on_transition"      # seconds, transition when a light is switched on
 CONF_OVERRIDE_TIMEOUT = "override_timeout"          # minutes until HCL takes a paused light back, 0 = never
 CONF_OVERRIDE_RESET_ON_OFF = "override_reset_on_off"  # switching a light off ends its manual control
 CONF_PERSIST_OVERRIDES = "persist_overrides"        # keep manual control across HA restarts
 CONF_RESPECT_TURN_ON_VALUES = "respect_turn_on_values"  # turn-on commands with own values are not overwritten
 
 DEFAULT_UPDATE_INTERVAL = UPDATE_INTERVAL_SECONDS
+# Range of the update interval (RM-R11; up to 0.7: 10-600 s)
+MIN_UPDATE_INTERVAL = 15
+MAX_UPDATE_INTERVAL = 300
 DEFAULT_TRANSITION = HCL_TRANSITION_SECONDS
-DEFAULT_TURN_ON_TRANSITION = 0
 DEFAULT_OVERRIDE_TIMEOUT = OVERRIDE_TIMEOUT_HOURS * 60
 DEFAULT_OVERRIDE_RESET_ON_OFF = True
 DEFAULT_PERSIST_OVERRIDES = False
@@ -114,12 +116,28 @@ EVENT_MANUAL_CONTROL = f"{DOMAIN}_manual_control"
 
 # v0.7.0 Options
 CONF_SCENARIO_TRANSITION = "scenario_transition"    # seconds, transition when the scenario changes
-# Options of 0.7.0 betas that are fixed behaviour now (removed when options are saved):
-# brightness scaling (min/max always clip), scenario limits (always on),
-# night modes ending at the wake time (always)
-OBSOLETE_OPTIONS = ("brightness_scaling", "scenario_limits", "night_end_at_wake")
+# Settings removed by the migration to entry version 1.2 (0.8.0): options of
+# 0.7.0 betas that are fixed behaviour now (brightness scaling, scenario
+# limits, night modes ending at the wake time), the midday anchor (RM-R07)
+# and the turn-on transition (RM-R10)
+REMOVED_OPTIONS = (
+    "brightness_scaling", "scenario_limits", "night_end_at_wake", "midday_time", "turn_on_transition",
+)
 
 
 def scenario_option_keys(mode: str) -> tuple[str, str]:
     """Option keys (brightness, kelvin) of a configurable scenario."""
     return f"{mode}_brightness", f"{mode}_kelvin"
+
+
+ANCHOR_DEFAULTS = {CONF_WAKE_TIME: DEFAULT_WAKE_TIME, CONF_SLEEP_TIME: DEFAULT_SLEEP_TIME}
+
+
+def anchor_time(options, key: str) -> str:
+    """Wake or sleep time of an instance (its options; the default if not set)."""
+    return str(options.get(key) or ANCHOR_DEFAULTS[key])
+
+
+def guest_issue_id(entry_id: str) -> str:
+    """Repair issue of an instance in the deprecated scenario Guest (RM-R12)."""
+    return f"guest_deprecated_{entry_id}"

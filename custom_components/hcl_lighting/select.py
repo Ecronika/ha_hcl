@@ -10,6 +10,7 @@ from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraDa
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_point_in_utc_time
@@ -19,17 +20,21 @@ from .const import (
     DOMAIN,
     HCL_MODES,
     MODE_AUTO,
+    MODE_GUEST,
     TIMED_MODES,
+    guest_issue_id,
     CONF_SCENARIO_DURATION,
     DEFAULT_SCENARIO_DURATION,
     NIGHT_MODES,
     CONF_WAKE_TIME,
     DEFAULT_WAKE_TIME,
+    anchor_time,
 )
 from .logic.light_controller import HCLLightController
 from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the HCL Select entity."""
@@ -102,13 +107,30 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
     def _set_mode(self, option: str, announce: bool = True) -> None:
         self._controller.set_active_mode(option, announce=announce)
         self._attr_current_option = option
+        self._guest_notice(option)
+
+    def _guest_notice(self, option: str) -> None:
+        """Guest is deprecated (RM-R12): warning and repair issue while it is selected."""
+        issue_id = guest_issue_id(self._entry.entry_id)
+        if option != MODE_GUEST:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        _LOGGER.warning(
+            "%s: the scenario Guest is deprecated and will be removed in 0.9.0; "
+            "switch 'HCL active' off instead", self._entry.title,
+        )
+        ir.async_create_issue(
+            self.hass, DOMAIN, issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key="guest_deprecated",
+            translation_placeholders={"instance": self._entry.title},
+        )
 
     def _next_wake_time(self) -> datetime:
         """Next occurrence of the wake time (UTC) in the Home Assistant time zone."""
         entry = self._entry
-        wake = dt_util.parse_time(
-            str(entry.options.get(CONF_WAKE_TIME) or entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME)
-        ) or dt_util.parse_time(DEFAULT_WAKE_TIME)
+        wake = dt_util.parse_time(anchor_time(entry.options, CONF_WAKE_TIME)) or dt_util.parse_time(DEFAULT_WAKE_TIME)
         now = dt_util.now()
         candidate = now.replace(hour=wake.hour, minute=wake.minute, second=0, microsecond=0)
         if candidate <= now:

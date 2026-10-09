@@ -29,6 +29,14 @@ POINTS = [
     {"t": 960, "k": 4000, "b": 50}, {"t": 1080, "k": 2700, "b": 30}, {"t": 1320, "k": 2200, "b": 10},
 ]
 
+# Default curve of the integration for 07:00 / 22:00 (pinned in the backend
+# test test_b08_valid_default_anchors_unchanged), as the sensor provides it
+DEFAULT_POINTS = [
+    {"t": 420, "k": 3000, "b": 30}, {"t": 440, "k": 4500, "b": 90}, {"t": 480, "k": 5000, "b": 100},
+    {"t": 720, "k": 6000, "b": 100}, {"t": 1080, "k": 5000, "b": 100}, {"t": 1140, "k": 5000, "b": 100},
+    {"t": 1320, "k": 2200, "b": 10}, {"t": 1335, "k": 2200, "b": 5}, {"t": 419, "k": 2200, "b": 5},
+]
+
 
 def _hass(
     mode: str, language: str = "en", dark: bool = False, extra: dict | None = None,
@@ -44,6 +52,7 @@ def _hass(
                 "state": "x",
                 "attributes": {
                     "control_points": POINTS,
+                    "default_points": DEFAULT_POINTS,
                     "mode_entity_id": "select.mode",
                     "min_brightness": 10,
                     "max_brightness": 100,
@@ -355,9 +364,24 @@ async def test_b30_night_window_follows_sleep_and_wake_time(page):
     assert page.errors == []
 
 
-async def test_b24_default_preset_equals_the_backend_default_curve(page):
-    preset = await page.evaluate("() => card._presets.default.map(p => [p.t, p.b, p.k])")
-    assert preset == [[p["t"], p["b"], p["k"]] for p in POINTS]
+async def test_rm_r08_default_curve_button_loads_the_curve_of_the_sensor(page):
+    """RM-R08: one button loads the default curve for the anchor times of the
+    instance (sensor attribute default_points) instead of fixed presets."""
+    await _set_hass(page, "auto")
+    button = "card.shadowRoot.getElementById('btn-default')"
+    assert await page.evaluate(f"() => {button}.disabled") is False
+    assert await page.evaluate("() => card.shadowRoot.getElementById('preset-select')") is None
+    await page.evaluate(f"() => {button}.click()")
+    loaded = await page.evaluate("() => card._points.map(p => [p.t, p.b, p.k])")
+    assert loaded == sorted([[p["t"], p["b"], p["k"]] for p in DEFAULT_POINTS])
+    assert await page.evaluate("() => card._isDirty") is True  # not saved yet
+    assert await _night_warnings(page) == []
+    await page.evaluate("() => card._undoLast()")
+    assert await page.evaluate("() => card._points.length") == len(POINTS)
+    # without the attribute (e.g. a sensor not loaded yet) the button is disabled
+    await _set_hass(page, "auto", extra={"default_points": None})
+    assert await page.evaluate(f"() => {button}.disabled") is True
+    assert page.errors == []
 
 
 # ---------------------------------------------------------------- 0.7.0 (frontend review cdcc389)
@@ -429,8 +453,6 @@ async def test_b41_midnight_24_00_is_the_same_as_00_00(page):
         const owl = hclNormalize([{t: 540, b: 20, k: 2700}, {t: 1200, b: 21, k: 2700}, {t: 1440, b: 5, k: 2200}]);
         return [pts.map(p => p.t), hclValueAt(pts, 0).b, owl.map(p => p.t), hclValueAt(owl, 0).b]; }""")
     assert got == [[0, 720], 10, [0, 540, 1200], 5]
-    presets = await page.evaluate("() => Object.values(card._presets).every(p => p.every(x => x.t < 1440))")
-    assert presets
 
 
 async def test_b42_invalid_inputs_change_nothing(page):
@@ -564,7 +586,7 @@ async def test_b50_night_warning_times_are_valid_clock_times(page):
     await _set_hass(page, "auto", extra={"sleep_time": "22:00", "wake_time": "07:00"})
     msgs = await page.evaluate("() => card._validationResult.warnings.filter(w => w.type === 'night').map(w => w.msg)")
     assert len(msgs) == 1 and "24:" not in msgs[0] and "22:15–07:00" in msgs[0]
-    await page.evaluate("() => card._applyPreset('default_night')")
+    await page.evaluate("() => card._loadDefaultCurve()")
     assert await _night_warnings(page) == []
 
 

@@ -22,10 +22,9 @@ from .const import (
     ATTR_SAMPLES,
     CONF_WAKE_TIME,
     CONF_SLEEP_TIME,
-    DEFAULT_WAKE_TIME,
-    DEFAULT_SLEEP_TIME,
+    anchor_time,
 )
-from .logic.hcl_math import HCLCalculator
+from .logic.hcl_math import HCLCalculator, default_points
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ class HCLLightingCurveSensor(SensorEntity):
     # State: time of the last curve/mode update
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     # The curve data is only needed live by the card, not in the history database
-    _unrecorded_attributes = frozenset({ATTR_SAMPLES, "control_points", "scenarios", "instance"})
+    _unrecorded_attributes = frozenset({ATTR_SAMPLES, "control_points", "default_points", "scenarios", "instance"})
     
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, hcl_calc: HCLCalculator, controller) -> None:
         """Initialize the sensor."""
@@ -178,15 +177,16 @@ class HCLLightingCurveSensor(SensorEntity):
             "target_brightness_entity_id": self._related_entity_id("target_brightness"),
             "target_color_temp_entity_id": self._related_entity_id("target_color_temp"),
             # Anchor times (HH:MM); the card's night checks use sleep → wake
-            "wake_time": self._anchor(CONF_WAKE_TIME, DEFAULT_WAKE_TIME),
-            "sleep_time": self._anchor(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME),
+            "wake_time": self._anchor(CONF_WAKE_TIME),
+            "sleep_time": self._anchor(CONF_SLEEP_TIME),
+            # Default curve for these anchor times ("Load default curve" in the card, RM-R08)
+            "default_points": default_points(self._anchor(CONF_WAKE_TIME), self._anchor(CONF_SLEEP_TIME)),
             # The lights follow unsaved points (preview) until save, revert or reload
             "preview_active": bool(self._hcl_calc.preview_active),
         }
 
-    def _anchor(self, key: str, default: str) -> str:
-        value = self._entry.options.get(key) or self._entry.data.get(key) or default
-        return str(value)[:5]
+    def _anchor(self, key: str) -> str:
+        return anchor_time(self._entry.options, key)[:5]
 
     def _related_entity_id(self, key: str) -> str | None:
         return er.async_get(self.hass).async_get_entity_id(

@@ -47,6 +47,7 @@ from ..const import (
     LIMITABLE_SCENARIOS,
     OWN_CONTEXT_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
+    IGNORE_WINDOW_SECONDS,
     DOMAIN,
     scenario_option_keys,
 )
@@ -165,8 +166,7 @@ _COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, Color
 
 def _native_capability(state) -> dict[str, Any]:
     """Native capability of a light from its attributes (ct, xy_sim, dim, onoff)."""
-    attrs = state.attributes
-    modes = attrs.get(ATTR_SUPPORTED_COLOR_MODES)
+    modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
     if not isinstance(modes, (list, tuple)) or not modes:
         modes = ()
     supports_color = any(mode in modes for mode in _COLOR_MODES)
@@ -178,12 +178,7 @@ def _native_capability(state) -> dict[str, Any]:
         cap_type = "dim"
     else:
         cap_type = "onoff"
-    return {
-        "type": cap_type,
-        "min_kelvin": attrs.get("min_color_temp_kelvin") or 2000,
-        "max_kelvin": attrs.get("max_color_temp_kelvin") or 6500,
-        "supports_color": supports_color,
-    }
+    return {"type": cap_type}
 
 
 class HCLLightController:
@@ -450,7 +445,7 @@ class HCLLightController:
             # Check thresholds to avoid redundant traffic
             if not self._needs_update(entity_id, brightness, kelvin):
                 continue
-            cap_type = self._get_capability(entity_id, kelvin)
+            cap_type = self._get_capability(entity_id)
             data: dict[str, Any] = {"entity_id": [entity_id], "brightness_pct": brightness, "transition": transition_val}
             if cap_type == "ct":
                 # Native colour temperature: the value the light can reach
@@ -615,19 +610,17 @@ class HCLLightController:
         brightness: int,
         kelvin: int,
         state_obj=None,
-        transition: float = 0,
-        ignore_seconds: float | None = None,
-        on_failure: Callable[[list[str]], None] | None = None,
     ) -> bool:
         """Fast-HCL for a light that was switched on (True if a command was started).
 
-        The tracking values and the ignore window are set before the command
-        starts (so the first state report of the light is not taken for manual
-        control). The command runs in the background like all other light
-        commands (RM-T17): Home Assistant does not wait for it, the light gets
-        no second command while it runs, and a failure restores the tracking
-        (unless a newer command has set it since) and calls on_failure.
-        A light with a command still running gets no Fast-HCL command.
+        The values are sent without transition (RM-R10). The tracking values
+        and the ignore window are set before the command starts (so the first
+        state report of the light is not taken for manual control). The
+        command runs in the background like all other light commands
+        (RM-T17): Home Assistant does not wait for it, the light gets no
+        second command while it runs, and a failure restores the tracking
+        (unless a newer command has set it since). A light with a command
+        still running gets no Fast-HCL command.
         """
         _LOGGER.debug("Applying Fast-HCL to %s (B:%s%%, K:%sK)", entity_id, brightness, kelvin)
 
@@ -642,8 +635,8 @@ class HCLLightController:
             _LOGGER.debug("No Fast-HCL for %s: a command to it is still running", entity_id)
             return False
 
-        cap_type = self._get_capability(entity_id, kelvin, state)
-        service_data = {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}
+        cap_type = self._get_capability(entity_id, state)
+        service_data = {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}
         tracked_kelvin = kelvin
         if cap_type == "ct":
             tracked_kelvin = self.reachable_kelvin(entity_id, kelvin, state)
@@ -657,20 +650,18 @@ class HCLLightController:
 
         previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
         self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin, start=state)
-        self.override_manager.set_ignore_window(
-            entity_id, transition if ignore_seconds is None else ignore_seconds
-        )
+        self.override_manager.set_ignore_window(entity_id, IGNORE_WINDOW_SECONDS)
         task = self.hass.async_create_background_task(
             self._async_call("light", "turn_on", service_data, blocking=True),
             f"{DOMAIN} light command {entity_id}",
         )
         if task.done():
             # finished while starting (eager start): result at once
-            self._background_result(task, entity_id, previous, on_failure)
+            self._background_result(task, entity_id, previous, None)
         else:
             self._track_in_flight(task, entity_id)
             task.add_done_callback(
-                lambda t: self._background_result(t, entity_id, previous, on_failure)
+                lambda t: self._background_result(t, entity_id, previous, None)
             )
         return True
 
@@ -705,19 +696,20 @@ class HCLLightController:
         if entity_id in result.updated:
             self.override_manager.set_reengaging(entity_id, duration)
 
-    def capability_for(self, entity_id: str, kelvin: int) -> str:
-        """How a light is driven for a colour temperature (ct, xy_sim, dim, onoff)."""
-        return self._get_capability(entity_id, kelvin)
+    def capability_for(self, entity_id: str) -> str:
+        """How a light is driven (ct, xy_sim, dim, onoff)."""
+        return self._get_capability(entity_id)
 
-    def _get_capability(self, entity_id: str, kelvin: int, state_obj=None) -> str:
-        """Determine how a light is driven for a target colour temperature.
+    def _get_capability(self, entity_id: str, state_obj=None) -> str:
+        """Determine how a light is driven.
 
         The native capability of a light that is on is cached together with
         the attributes it is based on and evaluated again as soon as the light
         reports other ones (e.g. capabilities reported late, RM-B36). A light
         that is off or unavailable uses the cache, without one its current
-        attributes. The range check (native CT or XY simulation) is done for
-        every target value.
+        attributes. A light with colour temperature is always driven by it,
+        limited to its range; only lights without colour temperature get the
+        XY simulation (RM-R09: no colour jump at the range limit, no RGB white).
         """
         state = state_obj or self.hass.states.get(entity_id)
         cached = self._capability_cache.get(entity_id)
@@ -738,13 +730,7 @@ class HCLLightController:
                 return "onoff"  # not loaded yet
             cached = _native_capability(state)
 
-        native_type = cached["type"]
-        # A CT light with colour outside its CT range is simulated via XY
-        if native_type == "ct" and cached["supports_color"] and not (
-            cached["min_kelvin"] <= kelvin <= cached["max_kelvin"]
-        ):
-            return "xy_sim"
-        return native_type
+        return cached["type"]
 
     def _needs_update(self, entity_id: str, target_b: int, target_k: int) -> bool:
         """Check if an update is needed based on thresholds."""
@@ -790,7 +776,7 @@ class HCLLightController:
              # Compare with what the light can reach: a CT light clamps the
              # target to its own range and reports the clamped value.
              delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
-        elif self._get_capability(entity_id, target_k) in ("ct", "xy_sim"):
+        elif self._get_capability(entity_id) in ("ct", "xy_sim"):
              # Light is in a colour mode (e.g. XY simulation): no colour_temp is
              # reported, so compare the XY colour with the XY value HCL sends.
              curr_xy = state.attributes.get("xy_color")
@@ -819,7 +805,7 @@ class HCLLightController:
         their min/max range. Lights simulated via XY get the target unchanged.
         """
         state = state_obj or self.hass.states.get(entity_id)
-        if state is None or self._get_capability(entity_id, kelvin) != "ct":
+        if state is None or self._get_capability(entity_id, state) != "ct":
             return kelvin
         min_k = state.attributes.get("min_color_temp_kelvin")
         max_k = state.attributes.get("max_color_temp_kelvin")

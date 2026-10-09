@@ -16,12 +16,9 @@ from homeassistant.helpers.entity import CONTEXT_RECENT_TIME_SECONDS, Entity
 
 from .const import (
     CONF_CURVE_CONFIG,
-    CONF_MIDDAY_TIME,
     CONF_SLEEP_TIME,
     CONF_WAKE_TIME,
-    DEFAULT_MIDDAY_TIME,
-    DEFAULT_SLEEP_TIME,
-    DEFAULT_WAKE_TIME,
+    anchor_time,
     DOMAIN,
     HCL_MODES,
 )
@@ -192,16 +189,15 @@ def async_register_services(hass: HomeAssistant) -> None:
         entry = hass.config_entries.async_get_entry(entry_id)
         saved = (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points")
 
-        def anchor(key: str, default: str) -> str:
-            return str(entry.options.get(key) or entry.data.get(key) or default)[:5]
+        def anchor(key: str) -> str:
+            return anchor_time(entry.options, key)[:5]
 
         return {
             "points": [dict(p) for p in core["calculator"].active_curve],
             "saved_points": [dict(p) for p in saved] if saved else None,
             "preview_active": bool(core["calculator"].preview_active),
-            "wake_time": anchor(CONF_WAKE_TIME, DEFAULT_WAKE_TIME),
-            "midday_time": anchor(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME),
-            "sleep_time": anchor(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME),
+            "wake_time": anchor(CONF_WAKE_TIME),
+            "sleep_time": anchor(CONF_SLEEP_TIME),
         }
 
     hass.services.async_register(DOMAIN, "apply", _apply, schema=APPLY_SCHEMA)

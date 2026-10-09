@@ -16,14 +16,8 @@
 const HCL_STRINGS = {
     en: {
         title: "HCL Configurator",
-        presets: "Presets",
-        preset_default: "Default (balanced)",
-        preset_default_night: "Default with quiet night",
-        preset_no_dip: "Default without midday dip",
-        preset_focus: "Focus (home office)",
-        preset_relax: "Relax (wellness)",
-        preset_early_bird: "Early bird",
-        preset_night_owl: "Night owl",
+        load_default: "Default curve",
+        load_default_title: "Load the default curve for the wake and sleep time (not saved yet)",
         revert: "Revert",
         revert_title: "Discard unsaved changes and load the saved curve",
         preview: "Preview",
@@ -79,7 +73,7 @@ const HCL_STRINGS = {
         val_peak_k: "Active phase: colour temperature too low here, raise it above 5000 K.",
         val_peak_b: "Active phase: brightness too low here, raise it above 70 %.",
         val_peak_short: "Active phase too short (<4 h). Try high brightness and colour temperature around noon.",
-        val_night_b: "At night (sleep to wake time) brighter than 10 %: {from}–{to}. For darker nights use the preset “Default with quiet night”.",
+        val_night_b: "At night (sleep to wake time) brighter than 10 %: {from}–{to}. The default curve keeps the night dim.",
         val_night_k: "At night (sleep to wake time) colder than 3000 K: {from}–{to}.",
         chart_error: "Error loading Chart.js: {msg}. Check the integration installation.",
         editor_entity: "HCL curve sensor",
@@ -91,14 +85,8 @@ const HCL_STRINGS = {
     },
     de: {
         title: "HCL-Konfigurator",
-        presets: "Vorlagen",
-        preset_default: "Standard (ausgewogen)",
-        preset_default_night: "Standard mit Nachtruhe",
-        preset_no_dip: "Standard ohne Mittagstief",
-        preset_focus: "Fokus (Homeoffice)",
-        preset_relax: "Entspannung (Wellness)",
-        preset_early_bird: "Frühaufsteher",
-        preset_night_owl: "Nachteule",
+        load_default: "Standardkurve",
+        load_default_title: "Standardkurve für Aufwach- und Schlafenszeit laden (noch nicht gespeichert)",
         revert: "Verwerfen",
         revert_title: "Ungespeicherte Änderungen verwerfen und gespeicherte Kurve laden",
         preview: "Vorschau",
@@ -154,7 +142,7 @@ const HCL_STRINGS = {
         val_peak_k: "Aktivphase: Farbtemperatur hier zu niedrig, über 5000 K anheben.",
         val_peak_b: "Aktivphase: Helligkeit hier zu niedrig, über 70 % anheben.",
         val_peak_short: "Aktivphase zu kurz (<4 h). Um die Mittagszeit hohe Helligkeit und Farbtemperatur wählen.",
-        val_night_b: "Nachts (Schlafens- bis Aufwachzeit) heller als 10 %: {from}–{to}. Für dunklere Nächte die Vorlage „Standard mit Nachtruhe“ nutzen.",
+        val_night_b: "Nachts (Schlafens- bis Aufwachzeit) heller als 10 %: {from}–{to}. Die Standardkurve hält die Nacht dunkel.",
         val_night_k: "Nachts (Schlafens- bis Aufwachzeit) kälter als 3000 K: {from}–{to}.",
         chart_error: "Chart.js konnte nicht geladen werden: {msg}. Installation der Integration prüfen.",
         editor_entity: "HCL-Kurvensensor",
@@ -187,53 +175,6 @@ const HCL_MODES = [
     ["night_light", "mdi:weather-night"],
     ["sleep", "mdi:bed"],
 ];
-
-// Presets (t: minutes, b: %, k: K). 00:00 is t=0 (24:00 is the same moment).
-const HCL_DEFAULT_CURVE = [
-    { t: 420, b: 30, k: 2700 }, { t: 540, b: 50, k: 4500 }, { t: 570, b: 75, k: 5500 },
-    { t: 600, b: 100, k: 6500 }, { t: 720, b: 100, k: 6500 }, { t: 750, b: 50, k: 4000 },
-    { t: 780, b: 50, k: 4000 }, { t: 810, b: 75, k: 6000 }, { t: 840, b: 75, k: 6000 },
-    { t: 960, b: 50, k: 4000 }, { t: 1080, b: 30, k: 2700 }, { t: 1320, b: 10, k: 2200 },
-];
-const HCL_PRESETS = {
-    // identical to the integration's default curve (anchors 07:00 / 12:30 / 22:00)
-    default: HCL_DEFAULT_CURVE,
-    // default curve with a dark, warm night between sleep and wake time
-    default_night: [
-        { t: 390, b: 5, k: 2200 }, ...HCL_DEFAULT_CURVE, { t: 1380, b: 5, k: 2200 },
-    ],
-    // default curve without the midday dip
-    no_dip: [
-        { t: 420, b: 30, k: 2700 }, { t: 540, b: 50, k: 4500 }, { t: 570, b: 75, k: 5500 },
-        { t: 600, b: 100, k: 6500 }, { t: 840, b: 100, k: 6500 }, { t: 900, b: 75, k: 6000 },
-        { t: 960, b: 50, k: 4000 }, { t: 1080, b: 30, k: 2700 }, { t: 1320, b: 10, k: 2200 },
-    ],
-    focus: [
-        { t: 0, b: 5, k: 2000 }, { t: 420, b: 15, k: 3500 }, { t: 480, b: 80, k: 5500 },
-        { t: 540, b: 100, k: 6500 }, { t: 720, b: 100, k: 6500 }, { t: 780, b: 80, k: 5500 },
-        { t: 840, b: 100, k: 6000 }, { t: 1020, b: 80, k: 5500 }, { t: 1080, b: 50, k: 3500 },
-        { t: 1200, b: 30, k: 2700 }, { t: 1320, b: 10, k: 2200 },
-    ],
-    relax: [
-        { t: 0, b: 5, k: 2000 }, { t: 315, b: 10, k: 2000 }, { t: 480, b: 20, k: 2200 },
-        { t: 600, b: 50, k: 3000 }, { t: 720, b: 71, k: 5000 }, { t: 840, b: 71, k: 5000 },
-        { t: 960, b: 70, k: 5000 }, { t: 1080, b: 40, k: 2700 }, { t: 1200, b: 30, k: 2200 },
-        { t: 1260, b: 20, k: 2000 }, { t: 1320, b: 10, k: 2000 },
-    ],
-    early_bird: [
-        { t: 360, b: 11, k: 2700 }, { t: 450, b: 50, k: 4500 }, { t: 480, b: 75, k: 5500 },
-        { t: 510, b: 100, k: 6500 }, { t: 630, b: 100, k: 6500 }, { t: 660, b: 50, k: 4000 },
-        { t: 690, b: 50, k: 4000 }, { t: 720, b: 75, k: 6000 }, { t: 750, b: 75, k: 6000 },
-        { t: 870, b: 50, k: 4000 }, { t: 990, b: 30, k: 2700 }, { t: 1290, b: 5, k: 2200 },
-    ],
-    night_owl: [
-        { t: 0, b: 5, k: 2200 }, { t: 540, b: 20, k: 2700 }, { t: 660, b: 50, k: 4500 },
-        { t: 690, b: 75, k: 5500 }, { t: 720, b: 100, k: 6500 }, { t: 840, b: 100, k: 6500 },
-        { t: 870, b: 50, k: 4000 }, { t: 900, b: 50, k: 4000 }, { t: 930, b: 75, k: 6000 },
-        { t: 960, b: 75, k: 6000 }, { t: 1080, b: 50, k: 4000 }, { t: 1200, b: 21, k: 2700 },
-    ],
-};
-const HCL_PRESET_ORDER = ["default", "default_night", "no_dip", "focus", "relax", "early_bird", "night_owl"];
 
 const HCL_UNDO_LIMIT = 50;
 const HCL_CHART_VERSION = "4.5.1";
@@ -501,7 +442,8 @@ class HCLCurveCard extends HTMLElement {
             maxSlopeB: 2.0,            // % per min
             maxSlopeK: 100,            // K per min
         };
-        this._presets = HCL_PRESETS;
+        // Default curve for the anchor times of the instance (sensor attribute, RM-R08)
+        this._defaultPoints = null;
 
         this._boundCardKey = (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
@@ -624,6 +566,8 @@ class HCLCurveCard extends HTMLElement {
             };
             if (JSON.stringify(limits) !== JSON.stringify(this._limits)) { this._limits = limits; visualsChanged = true; }
             this._targetIds = { b: attrs.target_brightness_entity_id || null, k: attrs.target_color_temp_entity_id || null };
+            const defaults = Array.isArray(attrs.default_points) && attrs.default_points.length >= 2 ? attrs.default_points : null;
+            if (JSON.stringify(defaults) !== JSON.stringify(this._defaultPoints)) { this._defaultPoints = defaults; visualsChanged = true; }
             if (this._syncMode(hass, attrs)) visualsChanged = true;
             if (this._onServerPoints(attrs.control_points)) visualsChanged = true;
         }
@@ -816,8 +760,6 @@ class HCLCurveCard extends HTMLElement {
         const chips = HCL_MODES.map(([mode, icon]) =>
             `<button class="chip" data-mode="${mode}" aria-pressed="false"><ha-icon icon="${icon}" aria-hidden="true"></ha-icon><span data-i18n="mode_${mode}"></span></button>`
         ).join("");
-        const presets = HCL_PRESET_ORDER.map(name =>
-            `<option value="${name}" data-i18n="preset_${name}"></option>`).join("");
 
         this.shadowRoot.innerHTML = `
       <style>
@@ -970,10 +912,7 @@ class HCLCurveCard extends HTMLElement {
           <div class="toggle-row"><button id="btn-toggle-editor" aria-expanded="false"></button></div>
           <div class="editor-section" id="editor-section">
               <div class="row actions">
-                  <select id="preset-select" data-i18n-title="presets">
-                      <option value="" disabled selected data-i18n="presets"></option>
-                      ${presets}
-                  </select>
+                  <button id="btn-default" data-i18n="load_default" data-i18n-title="load_default_title"></button>
                   <button id="btn-revert" data-i18n="revert" data-i18n-title="revert_title"></button>
                   <button id="btn-test" data-i18n-title="preview_title"></button>
                   <button id="btn-save" class="primary" data-i18n="save" data-i18n-title="save_title"></button>
@@ -1020,10 +959,7 @@ class HCLCurveCard extends HTMLElement {
         $("btn-add").addEventListener("click", () => this._addPoint());
         $("btn-delete").addEventListener("click", () => this._deletePoint(this._selected));
         $("btn-toggle-editor").addEventListener("click", () => this._toggleEditor());
-        $("preset-select").addEventListener("change", (e) => {
-            this._applyPreset(e.target.value);
-            e.target.value = "";
-        });
+        $("btn-default").addEventListener("click", () => this._loadDefaultCurve());
         ["in-t", "in-b", "in-k"].forEach(id => $(id).addEventListener("change", () => this._applyNumeric()));
         $("chartB").addEventListener("dblclick", (e) => this._onChartDblClick(e));
         $("chartK").addEventListener("dblclick", (e) => this._onChartDblClick(e));
@@ -1497,6 +1433,8 @@ class HCLCurveCard extends HTMLElement {
         }
         const btnRevert = $("btn-revert");
         if (btnRevert) hclSetDisabled(btnRevert, busy);
+        const btnDefault = $("btn-default");
+        if (btnDefault) hclSetDisabled(btnDefault, busy || !this._defaultPoints);
         const btnUndo = $("btn-undo");
         if (btnUndo) hclSetDisabled(btnUndo, this._undo.length === 0);
         this._renderNowInfo();
@@ -1745,10 +1683,11 @@ class HCLCurveCard extends HTMLElement {
         this._insertPoint(chart.scales.x.getValueForPixel(e.clientX - rect.left));
     }
 
-    _applyPreset(name) {
-        if (!this._presets[name]) return;
+    // Load the default curve of the instance into the editor (saved with Save)
+    _loadDefaultCurve() {
+        if (!this._defaultPoints) return;
         this._pushUndo();
-        this._points = hclNormalize(this._presets[name]);
+        this._points = hclNormalize(this._defaultPoints);
         this._selected = -1;
         this._markChanged(true);
     }

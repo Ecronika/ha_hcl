@@ -2,6 +2,7 @@
 from unittest.mock import patch
 
 import pytest
+from homeassistant.util import dt as dt_util
 
 pytest_plugins = "pytest_homeassistant_custom_component"
 
@@ -20,3 +21,9 @@ def no_frontend_registration():
         return_value=None,
     ):
         yield
+
+
+@pytest.fixture
+def evening(freezer):
+    """20:00 local time: the evening decline of the default curve (not 100 %)."""
+    freezer.move_to(dt_util.now().replace(hour=20, minute=0, second=0, microsecond=0))
