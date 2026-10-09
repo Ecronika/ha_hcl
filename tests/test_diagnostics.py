@@ -31,7 +31,7 @@ async def test_f07_diagnostics(hass, no_frontend_registration):
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["targets"] == ["light.redacted_1"]  # 0.7.0b12: pseudonyms (RM-B32)
     assert diag["lights"]["light.redacted_1"]["capability"] == "ct"
-    target_b, _k = core(hass, entry)["controller"].calculate_target_values(dt_util.now())
+    target_b, _k = core(hass, entry).controller.calculate_target_values(dt_util.now())
     assert diag["setpoint"]["brightness"] == target_b and diag["scenario"] == "auto"
 
 
@@ -60,7 +60,7 @@ async def test_rm_b32_diagnostics_without_names_ids_and_times(hass, no_frontend_
     await hass.async_block_till_done()
     await switch_entity(hass).async_turn_on()
     await hass.async_block_till_done()
-    core(hass, entry)["override_manager"].set_override("light.schlafzimmer_decke")
+    core(hass, entry).override_manager.set_override("light.schlafzimmer_decke")
     freezer.tick(timedelta(minutes=7))
 
     diag = await async_get_config_entry_diagnostics(hass, entry)

@@ -42,7 +42,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
 - **Services**: apply now, set or release manual control, set a scenario with a duration, read the curve (see [Services](#services)).
 - **Diagnostics and logbook**: diagnostics download on the integration page (without the instance name; entity, device, area, floor and label IDs replaced by pseudonyms such as `light.redacted_1`, manual control as its age in minutes; curve and wake/sleep times remain for troubleshooting – review the download before sharing it publicly); logbook entries and an event when a light starts or stops being under manual control.
-- **Capabilities**: Lights with colour temperature are always driven by it, limited to the range they can reach (also RGBCCT lights: no colour jump at the range limit, no RGB white). Lights with colour but without colour temperature (XY, HS, RGB, RGBW, RGBWW) get it through an XY simulation (supported range of the curve: 2000–7000 K).
+- **Capabilities**: Lights with colour temperature are always driven by it, limited to the range they can reach (also RGBCCT lights: no colour jump at the range limit, no RGB white; a light that is in a colour mode, e.g. left there by the XY simulation up to 0.7, is brought back to colour temperature). Lights with colour but without colour temperature (XY, HS, RGB, RGBW, RGBWW) get it through an XY simulation (supported range of the curve: 2000–7000 K).
 
 ---
 
@@ -172,7 +172,7 @@ By default a light that is switched on receives the HCL values immediately, even
 ### Services
 | Service | Fields | Effect |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. Sends the values at the time of the call; ends with an error if a light command failed or a light did not answer within 10 s (the other lights are updated). |
+| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. The lights of the instance are resolved at the time of the call (areas, devices, labels, groups), also while *HCL active* is off. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. Sends the values at the time of the call; ends with an error if a light command failed or a light did not answer within 10 s (the other lights are updated). |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, default all), `manual_control` (default `true`) | Pauses the lights or hands them back to HCL |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = until changed) | Sets the scenario; a duration overrides the configured end |
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `sleep_time` |
@@ -251,7 +251,7 @@ pytest tests            # Home Assistant / logic tests
 pytest tests_frontend   # card tests (skipped without Playwright/Chromium)
 ```
 
-`tests/` is organised by responsibility (e.g. `test_manual_control_detection.py`, `test_light_commands.py`, `test_config_flow.py`); the roadmap IDs stay in the test names (`test_rm_b41_…`). Shared helpers live in `tests/support/` (entries and entity IDs, the light test double `FakeLights`, curves); test modules do not import each other.
+`tests/` is organised by responsibility (e.g. `test_manual_control_detection.py`, `test_light_commands.py`, `test_config_flow.py`); the roadmap IDs stay in the test names (`test_rm_b41_…`). Shared helpers live in `tests/support/` (entries and entity IDs, the light test double `FakeLights`, curves, `timer_cycle()` for an update cycle); test modules do not import each other and do not call the scheduling internals of the switch.
 
 GitHub Actions (`.github/workflows/tests.yml`) runs Ruff (rules in `ruff.toml`), hassfest, the Home Assistant tests against the minimum supported release (2024.7.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium. When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
 

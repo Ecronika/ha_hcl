@@ -1,0 +1,28 @@
+{
+  "entity": {
+    "switch": {
+      "hcl_switch": {
+        "default": "mdi:theme-light-dark"
+      },
+      "adapt_brightness": {
+        "default": "mdi:brightness-6"
+      },
+      "adapt_color": {
+        "default": "mdi:thermometer"
+      }
+    },
+    "select": {
+      "hcl_mode": {
+        "default": "mdi:theme-light-dark"
+      }
+    },
+    "sensor": {
+      "target_brightness": {
+        "default": "mdi:brightness-percent"
+      },
+      "target_color_temp": {
+        "default": "mdi:thermometer"
+      }
+    }
+  }
+}

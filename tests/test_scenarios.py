@@ -12,7 +12,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hcl_lighting.const import DOMAIN
 
-from .support.entries import CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity
+from .support.entries import CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -123,9 +123,8 @@ async def test_a18_long_scenario_transition_is_not_cut_short(hass, no_frontend_r
     await select_scenario(hass, "relax")
     assert calls_for(calls, "light.a")[-1].data["transition"] == 120
     calls.clear()
-    sw = switch_entity(hass)
     freezer.tick(timedelta(seconds=30))
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a") == []
 
@@ -136,7 +135,7 @@ async def test_a18_restore_after_reload_is_no_scenario_change(hass, no_frontend_
     await select_scenario(hass, "focus")
     set_light(hass, "light.a", "on", brightness=10, color_temp_kelvin=3000, **CT_ATTRS)
     await hass.async_block_till_done()
-    core(hass, entry)["override_manager"].reset_override("light.a")  # the change above is no manual control here
+    core(hass, entry).override_manager.reset_override("light.a")  # the change above is no manual control here
     calls.clear()
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
@@ -165,7 +164,7 @@ async def test_a04_light_switched_on_in_night_light_gets_night_values(hass, no_f
     await hass.async_block_till_done()
     data = calls_for(calls, "light.a")[-1].data
     assert (data["brightness_pct"], data["color_temp_kelvin"]) == (3, 2200)
-    assert not core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert not core(hass, entry).override_manager.is_overridden("light.a")
 
 
 @pytest.mark.usefixtures("evening")
@@ -256,11 +255,11 @@ async def test_b01_sleep_mode_allows_manual_turn_on(hass, no_frontend_registrati
     # User switches the light on at night (wall switch / app).
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=2700, **CT_ATTRS)
     await hass.async_block_till_done()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
 
     assert calls_for(calls, "light.a") == [], "Sleep mode must not switch a manually switched-on light off again"
-    assert core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
 async def test_b01_sleep_mode_still_turns_off_lights_on_activation(hass, no_frontend_registration):

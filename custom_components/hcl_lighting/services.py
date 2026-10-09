@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from typing import Any
+from typing import TYPE_CHECKING
 
 import voluptuous as vol
 
@@ -22,6 +22,11 @@ from .const import (
     DOMAIN,
     HCL_MODES,
 )
+from .runtime import loaded_runtime
+
+if TYPE_CHECKING:
+    from .runtime import HCLRuntimeData
+    from .switch import HCLSwitch
 
 ATTR_LIGHTS = "lights"
 
@@ -59,7 +64,7 @@ def resolve_entry_id(hass: HomeAssistant, entity_id: str) -> str:
             translation_key="not_hcl_entity",
             translation_placeholders={"entity_id": entity_id},
         )
-    if entry.config_entry_id not in (hass.data.get(DOMAIN) or {}):
+    if loaded_runtime(hass, entry.config_entry_id) is None:
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="instance_not_loaded",
@@ -68,17 +73,20 @@ def resolve_entry_id(hass: HomeAssistant, entity_id: str) -> str:
     return entry.config_entry_id
 
 
-def _core(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
-    return hass.data[DOMAIN][resolve_entry_id(hass, call.data["entity_id"])]
+def _runtime(hass: HomeAssistant, call: ServiceCall) -> HCLRuntimeData:
+    runtime = loaded_runtime(hass, resolve_entry_id(hass, call.data["entity_id"]))
+    assert runtime is not None  # checked by resolve_entry_id
+    return runtime
 
 
-def _running_core(hass: HomeAssistant, call: ServiceCall) -> dict[str, Any]:
-    """Core of an instance whose main switch is added (not disabled, RM-B38)."""
-    core = _core(hass, call)
-    switch = core.get("switch")
+def _running_runtime(hass: HomeAssistant, call: ServiceCall) -> tuple[HCLRuntimeData, HCLSwitch]:
+    """Runtime data and main switch of an instance whose main switch is added
+    (not disabled, RM-B38)."""
+    runtime = _runtime(hass, call)
+    switch = runtime.switch
     if switch is None or not switch.is_added:
         raise ServiceValidationError(translation_domain=DOMAIN, translation_key="main_switch_disabled")
-    return core
+    return runtime, switch
 
 
 async def async_check_permissions(
@@ -122,39 +130,33 @@ def action_context(entity: Entity) -> Context | None:
     return context
 
 
-async def async_check_lights(hass: HomeAssistant, context: Context | None, core: dict[str, Any]) -> None:
+async def async_check_lights(hass: HomeAssistant, context: Context | None, runtime: HCLRuntimeData) -> None:
     """An action of a user that makes HCL send light commands needs control
     of every light of the instance, as if the user switched them directly
     (like Home Assistant's own light actions on an area or a group)."""
-    switch = core.get("switch")
+    switch = runtime.switch
     if switch is not None and context is not None and context.user_id is not None:
         await async_check_context_permissions(hass, context, sorted(switch.controlled_lights()))
 
 
-def _entity_id_of(core: dict[str, Any], key: str) -> str | None:
-    entity = core.get(key)
-    return getattr(entity, "entity_id", None) if entity is not None else None
-
-
 async def async_check_write_permissions(
-    hass: HomeAssistant, call: ServiceCall, core: dict[str, Any], extra: list[str] | None = None
+    hass: HomeAssistant, call: ServiceCall, runtime: HCLRuntimeData, extra: list[str] | None = None
 ) -> None:
     """A writing action needs control of the given HCL entity, the HCL switch
     of the instance (it controls the lights) and the lights given explicitly."""
-    await async_check_permissions(
-        hass, call, [call.data.get("entity_id"), _entity_id_of(core, "switch"), *(extra or [])]
-    )
+    switch_id = runtime.switch.entity_id if runtime.switch is not None else None
+    await async_check_permissions(hass, call, [call.data.get("entity_id"), switch_id, *(extra or [])])
 
 
 def async_register_services(hass: HomeAssistant) -> None:
     """Register apply, set_manual_control, set_scenario and get_curve."""
 
     async def _apply(call: ServiceCall) -> None:
-        core = _running_core(hass, call)
-        await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
+        runtime, switch = _running_runtime(hass, call)
+        await async_check_write_permissions(hass, call, runtime, call.data.get(ATTR_LIGHTS))
         if not call.data.get(ATTR_LIGHTS):
-            await async_check_lights(hass, call.context, core)
-        await core["switch"].async_apply(
+            await async_check_lights(hass, call.context, runtime)
+        await switch.async_apply(
             call.data.get(ATTR_LIGHTS),
             call.data.get("transition"),
             call.data["release_manual_control"],
@@ -162,22 +164,22 @@ def async_register_services(hass: HomeAssistant) -> None:
         )
 
     async def _set_manual_control(call: ServiceCall) -> None:
-        core = _running_core(hass, call)
-        await async_check_write_permissions(hass, call, core, call.data.get(ATTR_LIGHTS))
+        runtime, switch = _running_runtime(hass, call)
+        await async_check_write_permissions(hass, call, runtime, call.data.get(ATTR_LIGHTS))
         if not call.data["manual_control"]:
             # handing lights back runs an update of the instance at once
-            await async_check_lights(hass, call.context, core)
-        await core["switch"].async_set_manual_control(
+            await async_check_lights(hass, call.context, runtime)
+        await switch.async_set_manual_control(
             call.data.get(ATTR_LIGHTS), call.data["manual_control"], context=call.context
         )
 
     async def _set_scenario(call: ServiceCall) -> None:
-        core = _running_core(hass, call)
-        select = core.get("mode_select")
+        runtime, _switch = _running_runtime(hass, call)
+        select = runtime.mode_select
         if select is None:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="scenario_unavailable")
-        await async_check_write_permissions(hass, call, core, [select.entity_id])
-        await async_check_lights(hass, call.context, core)
+        await async_check_write_permissions(hass, call, runtime, [select.entity_id])
+        await async_check_lights(hass, call.context, runtime)
         # The scenario change and the light commands it causes belong to this call
         select.async_set_context(call.context)
         await select.async_select_option(call.data["scenario"], duration=call.data.get("duration"))
@@ -185,7 +187,7 @@ def async_register_services(hass: HomeAssistant) -> None:
     async def _get_curve(call: ServiceCall) -> ServiceResponse:
         entry_id = resolve_entry_id(hass, call.data["entity_id"])
         await async_check_permissions(hass, call, [call.data["entity_id"]], POLICY_READ)
-        core = hass.data[DOMAIN][entry_id]
+        runtime = _runtime(hass, call)
         entry = hass.config_entries.async_get_entry(entry_id)
         saved = (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points")
 
@@ -193,9 +195,9 @@ def async_register_services(hass: HomeAssistant) -> None:
             return anchor_time(entry.options, key)[:5]
 
         return {
-            "points": [dict(p) for p in core["calculator"].active_curve],
+            "points": [dict(p) for p in runtime.calculator.active_curve],
             "saved_points": [dict(p) for p in saved] if saved else None,
-            "preview_active": bool(core["calculator"].preview_active),
+            "preview_active": bool(runtime.calculator.preview_active),
             "wake_time": anchor(CONF_WAKE_TIME),
             "sleep_time": anchor(CONF_SLEEP_TIME),
         }

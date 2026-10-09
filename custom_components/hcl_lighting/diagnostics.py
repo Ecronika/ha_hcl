@@ -9,7 +9,8 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_CURVE_CONFIG, CONF_TARGET, DOMAIN
+from .const import CONF_CURVE_CONFIG, CONF_TARGET
+from .runtime import loaded_runtime
 
 # Target keys and the prefix of their pseudonyms (entity IDs keep their domain)
 _TARGET_KEYS = {"entity_id": None, "device_id": "device", "area_id": "area", "floor_id": "floor", "label_id": "label"}
@@ -65,8 +66,8 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
     understand the behaviour).
     """
     pseudo = _Pseudonyms()
-    core = (hass.data.get(DOMAIN) or {}).get(entry.entry_id)
-    switch = core.get("switch") if core else None
+    runtime = loaded_runtime(hass, entry.entry_id)
+    switch = runtime.switch if runtime else None
     targets = sorted(switch.resolved_targets) if switch else []
     for eid in targets:  # numbered in a stable order
         pseudo(eid)
@@ -75,14 +76,14 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "data": _settings(dict(entry.data), pseudo),
         "options": _settings(dict(entry.options), pseudo),
         "saved_curve": (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points"),
-        "loaded": core is not None,
+        "loaded": runtime is not None,
     }
-    if not core:
+    if not runtime:
         return data
 
-    controller = core["controller"]
-    manager = core["override_manager"]
-    calculator = core["calculator"]
+    controller = runtime.controller
+    manager = runtime.override_manager
+    calculator = runtime.calculator
     now = dt_util.now()
     brightness, kelvin = controller.calculate_target_values(now)
     data.update(

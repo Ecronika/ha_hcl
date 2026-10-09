@@ -63,7 +63,7 @@ async def _reload(hass, entry, freezer):
 
 async def _long_apply(hass, entry):
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
-    assert core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 # ---------------------------------------------------------------- B-31
@@ -113,12 +113,12 @@ async def test_a02_flags_survive_reload_and_restart(hass, no_frontend_registrati
     mock_restore_cache(hass, [State(ADAPT_K, "off")])
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert core(hass, entry)["controller"].adapt_color is False  # restart
+    assert core(hass, entry).controller.adapt_color is False  # restart
     assert hass.states.get(ADAPT_K).state == "off"
     await hass.services.async_call("switch", "turn_off", {"entity_id": ADAPT_B}, blocking=True)
     hass.config_entries.async_update_entry(entry, options={**entry.options, "max_brightness": 90})
     await hass.async_block_till_done()
-    ctl = core(hass, entry)["controller"]
+    ctl = core(hass, entry).controller
     assert ctl.adapt_brightness is False and ctl.adapt_color is False  # reload
 
 
@@ -126,7 +126,7 @@ async def test_a02_flags_survive_reload_and_restart(hass, no_frontend_registrati
 async def test_a06_persist_across_restart(hass, hass_storage, no_frontend_registration):
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"persist_overrides": True})
-    core(hass, entry)["override_manager"].set_override("light.a")
+    core(hass, entry).override_manager.set_override("light.a")
     await hass.config_entries.async_unload(entry.entry_id)
     hass.bus.async_fire("homeassistant_final_write")
     await hass.async_block_till_done()
@@ -134,18 +134,18 @@ async def test_a06_persist_across_restart(hass, hass_storage, no_frontend_regist
     hass.data[DATA_OVERRIDE_MANAGERS].pop(entry.entry_id)  # restart: in-memory state gone
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
 async def test_a06_no_persistence_by_default(hass, hass_storage, no_frontend_registration):
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    core(hass, entry)["override_manager"].set_override("light.a")
+    core(hass, entry).override_manager.set_override("light.a")
     await hass.config_entries.async_unload(entry.entry_id)
     hass.data[DATA_OVERRIDE_MANAGERS].pop(entry.entry_id)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert not core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert not core(hass, entry).override_manager.is_overridden("light.a")
 
 
 # ---------------------------------------------------------------- RM-B30
@@ -153,7 +153,7 @@ async def test_rm_b30_busy_light_gets_no_second_command_after_reload(
     hass, no_frontend_registration, freezer
 ):
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = om.tracking_snapshot("light.a")
     await _hanging_focus(hass, freezer, lights, fail_late=True)
     lights.calls.clear()
@@ -173,7 +173,7 @@ async def test_rm_b30_switched_on_while_the_old_command_runs(
     until 0.7.0b13 the new instance sent its values at once). The late error
     of the old command rolls back its own tracking."""
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = om.tracking_snapshot("light.a")
     event = await _hanging_focus(hass, freezer, lights, fail_late=True)
     await _reload(hass, entry, freezer)
@@ -193,7 +193,7 @@ async def test_rm_b30_late_answer_after_reload_is_no_manual_control(
     hass, no_frontend_registration, freezer
 ):
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     event = await _hanging_focus(hass, freezer, lights)
     old_command = lights.for_light("light.a")[-1]
     await _reload(hass, entry, freezer)
@@ -215,7 +215,7 @@ async def test_rm_t14_hanging_fast_mode_command_is_a_background_task(
     hass, no_frontend_registration, freezer
 ):
     lights, entry = await setup_two_dim_lights(hass)
-    controller = core(hass, entry)["controller"]
+    controller = core(hass, entry).controller
     lights.hang["light.a"] = asyncio.Event()
     result = await controller.apply_batch(["light.a"], 50, 3000, transition=0, fast_mode=True)
     assert result.updated == ["light.a"]
@@ -234,14 +234,14 @@ async def test_rm_t14_fast_mode_command_with_context_of_a_reloaded_instance(
 ):
     """Smooth return started before a reload: its state reports stay HCL's own."""
     lights, entry = await setup_two_dim_lights(hass)
-    controller = core(hass, entry)["controller"]
-    om = core(hass, entry)["override_manager"]
+    controller = core(hass, entry).controller
+    om = core(hass, entry).override_manager
     event = lights.hang["light.a"] = asyncio.Event()
     await controller.apply_batch(["light.a"], 50, 3000, transition=30, fast_mode=True)
     await settle()
     command = lights.for_light("light.a")[-1]
     await _reload(hass, entry, freezer)
-    assert core(hass, entry)["controller"] is not controller
+    assert core(hass, entry).controller is not controller
     event.set()
     await settle()
     hass.states.async_set(
@@ -324,7 +324,7 @@ async def test_rm_b22_hcl_off_and_on_takes_the_light_back_at_once(hass, no_front
     lights.calls.clear()
     await hcl_on(hass)
     assert lights.for_light("light.a")  # sent right away, not after 120 s
-    assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert not core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 async def test_rm_b22_reload_takes_the_light_back_at_once(hass, no_frontend_registration):
@@ -337,7 +337,7 @@ async def test_rm_b22_reload_takes_the_light_back_at_once(hass, no_frontend_regi
     assert await hass.config_entries.async_reload(entry.entry_id)  # e.g. options saved
     await hass.async_block_till_done()
     assert lights.for_light("light.a")
-    assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert not core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 async def test_rm_b22_turn_on_while_on_keeps_a_running_transition(hass, no_frontend_registration):
@@ -347,7 +347,7 @@ async def test_rm_b22_turn_on_while_on_keeps_a_running_transition(hass, no_front
     await hcl_on(hass)
     await _long_apply(hass, entry)
     await hcl_on(hass)  # already on (e.g. an automation): nothing is restarted
-    assert core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 # ---------------------------------------------------------------- B-06
@@ -355,14 +355,14 @@ async def test_b06_override_survives_entry_reload(hass, no_frontend_registration
     async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_last_set_values("light.a", 50, 4000)
     om.check_override("light.a", State("light.a", "on", {"brightness": 255, "color_temp_kelvin": 4000}), None)
     assert om.is_overridden("light.a")
 
     hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_MAX_BRIGHTNESS: 90})
     await hass.async_block_till_done()
-    assert core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
 async def test_b06_override_state_dropped_when_entry_removed(hass, no_frontend_registration):

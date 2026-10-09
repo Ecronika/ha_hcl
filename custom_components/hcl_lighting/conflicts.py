@@ -5,6 +5,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 
 from .const import DOMAIN
+from .runtime import loaded_runtimes
 
 DATA_CONFLICT_ISSUES = f"{DOMAIN}_conflict_issues"
 ISSUE_PREFIX = "light_in_multiple_instances_"
@@ -19,11 +20,11 @@ def async_check_conflicts(hass: HomeAssistant) -> None:
     Using one instance for brightness and another for colour is allowed.
     """
     users: dict[str, list[tuple[str, bool, bool]]] = {}
-    for core in (hass.data.get(DOMAIN) or {}).values():
-        switch = core.get("switch") if isinstance(core, dict) else None
+    for runtime in loaded_runtimes(hass):
+        switch = runtime.switch
         if switch is None or not switch.is_on:
             continue
-        controller = core["controller"]
+        controller = runtime.controller
         for light in switch.resolved_targets:
             users.setdefault(light, []).append(
                 (switch.instance_name, controller.adapt_brightness, controller.adapt_color)

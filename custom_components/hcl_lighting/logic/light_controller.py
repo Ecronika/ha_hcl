@@ -18,8 +18,6 @@ from homeassistant.components.light import (
     ColorMode
 )
 from homeassistant.util.color import (
-    color_temperature_to_rgb,
-    color_RGB_to_xy,
     color_xy_to_temperature,
 )
 from homeassistant.const import (
@@ -54,7 +52,8 @@ from ..const import (
 
 from ..logic.hcl_math import HCLCalculator
 
-from .override_manager import OverrideManager
+from .override_manager import OverrideManager, Tracking
+from .units import brightness_byte, brightness_pct, kelvin_to_xy, xy_distance
 
 # Home Assistant's target resolution changed its home (see
 # extract_referenced_entities); which one exists is decided once at import.
@@ -431,10 +430,10 @@ class HCLLightController:
         transition_val = 0 if transition is None else transition
         smart_transition = self.config_entry.options.get(CONF_SMART_TRANSITION, False)
         bulk = transition_val == 0 or not smart_transition
-        xy = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+        xy = kelvin_to_xy(kelvin)
 
         # tracking before the command and the number of the command
-        previous: dict[str, tuple[tuple[Any, Any], int]] = {}
+        previous: dict[str, tuple[Tracking, int]] = {}
         # (light, command)
         jobs: list[tuple[str, Awaitable[bool]]] = []
 
@@ -568,7 +567,7 @@ class HCLLightController:
         self._in_flight.add(entity_id)
         task.add_done_callback(lambda _t, eid=entity_id: self._in_flight.discard(eid))
 
-    def _restore_tracking(self, entity_id: str, previous: tuple[tuple[Any, Any], int]) -> bool:
+    def _restore_tracking(self, entity_id: str, previous: tuple[Tracking, int]) -> bool:
         """Roll back the tracking of a command that was not sent or failed.
 
         Only if no newer command (also of a controller set up after a reload)
@@ -586,7 +585,7 @@ class HCLLightController:
         self,
         task: asyncio.Task,
         entity_id: str,
-        previous: tuple[tuple[Any, Any], int],
+        previous: tuple[Tracking, int],
         on_failure: Callable[[list[str]], None] | None,
     ) -> None:
         """Result of a command HCL did not wait for (fast mode, late or cancelled)."""
@@ -642,7 +641,7 @@ class HCLLightController:
             tracked_kelvin = self.reachable_kelvin(entity_id, kelvin, state)
             service_data["color_temp_kelvin"] = tracked_kelvin
         elif cap_type == "xy_sim":
-            service_data["xy_color"] = color_RGB_to_xy(*color_temperature_to_rgb(kelvin))
+            service_data["xy_color"] = kelvin_to_xy(kelvin)
         elif cap_type != "dim":
             return False  # onoff or unknown
         if self._filter_service_data(service_data) is None:
@@ -743,7 +742,7 @@ class HCLLightController:
         # Use ROUND instead of INT truncation to prevent off-by-one ping-pong loops
         # e.g. 50% = 127.5 -> round(128) vs int(127).
         # Fix verified: One single source of truth for brightness percentage.
-        curr_b_pct = round(curr_b * 100 / 255) if curr_b is not None else None
+        curr_b_pct = brightness_pct(curr_b)
         curr_k = state.attributes.get(ATTR_COLOR_TEMP_KELVIN)
         
         # Safety Check: Ignore Groups (Hue Groups or HA Groups)
@@ -776,14 +775,20 @@ class HCLLightController:
              # Compare with what the light can reach: a CT light clamps the
              # target to its own range and reports the clamped value.
              delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
-        elif self._get_capability(entity_id) in ("ct", "xy_sim"):
-             # Light is in a colour mode (e.g. XY simulation): no colour_temp is
-             # reported, so compare the XY colour with the XY value HCL sends.
+        elif (capability := self._get_capability(entity_id)) in ("ct", "xy_sim"):
+             # Light is in a colour mode (no colour_temp is reported).
+             expected_k = self.reachable_kelvin(entity_id, target_k, state)
+             if capability == "ct" and not self._sent_kelvin(entity_id, expected_k):
+                 # A light with colour temperature is driven by it (RM-R09):
+                 # bring it back from a colour mode (e.g. the XY simulation of
+                 # 0.7), once per value - a light that keeps reporting a colour
+                 # mode afterwards is compared by its XY colour (RM-B43).
+                 return True
              curr_xy = state.attributes.get("xy_color")
              if not curr_xy:
                  return True
-             target_x, target_y = color_RGB_to_xy(*color_temperature_to_rgb(target_k))
-             dist_xy = ((curr_xy[0] - target_x) ** 2 + (curr_xy[1] - target_y) ** 2) ** 0.5
+             target_x, target_y = kelvin_to_xy(expected_k)
+             dist_xy = xy_distance(curr_xy, (target_x, target_y))
              if dist_xy > XY_COLOR_DISTANCE_THRESHOLD:
                  return True
              delta_k = abs(
@@ -797,6 +802,11 @@ class HCLLightController:
              return False
         
         return True
+
+    def _sent_kelvin(self, entity_id: str, kelvin: int) -> bool:
+        """Whether the last HCL command to the light had this colour temperature."""
+        last_set = self.override_manager.last_set(entity_id)
+        return last_set is not None and last_set[1] == kelvin
 
     def reachable_kelvin(self, entity_id: str, kelvin: int, state_obj=None) -> int:
         """Return the colour temperature a CT light actually shows for a target.
@@ -879,10 +889,9 @@ class HCLLightController:
         try:
             curr_bri = state.attributes.get("brightness") or 0
             curr_xy = state.attributes.get("xy_color") or (x, y)
-            target_bri_byte = int(round(float(brightness) * 255 / 100))
+            target_bri_byte = brightness_byte(brightness)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
-            curr_x, curr_y = curr_xy
-            delta_c = ((curr_x - x)**2 + (curr_y - y)**2)**0.5 * XY_COLOR_SENSITIVITY
+            delta_c = xy_distance(curr_xy, (x, y)) * XY_COLOR_SENSITIVITY
 
             if delta_c > delta_b:
                 first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
@@ -891,7 +900,7 @@ class HCLLightController:
                 first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True, parent=parent)
                 second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return first or second
-        except Exception as err:  # the fallback below reports a final failure
+        except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
             # a light that keeps failing is logged once (RM-B39)
             log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
             log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)
@@ -919,7 +928,7 @@ class HCLLightController:
         try:
             curr_bri = state.attributes.get("brightness") or 0
             curr_kelvin = state.attributes.get("color_temp_kelvin") or 2700
-            target_bri_byte = int(round(float(brightness) * 255 / 100))
+            target_bri_byte = brightness_byte(brightness)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
             sent = False
@@ -936,7 +945,7 @@ class HCLLightController:
                     sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
                 sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return sent
-        except Exception as err:  # the fallback below reports a final failure
+        except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
             # a light that keeps failing is logged once (RM-B39)
             log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
             log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)

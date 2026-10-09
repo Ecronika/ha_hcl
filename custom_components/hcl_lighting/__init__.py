@@ -1,6 +1,7 @@
 """The HCL Lighting integration."""
 from __future__ import annotations
 
+import dataclasses
 import logging
 from collections.abc import Mapping
 from datetime import timedelta
@@ -58,6 +59,7 @@ from .services import (
     resolve_entry_id,
 )
 from .logic.light_controller import CommandTracker, HCLLightController
+from .runtime import AppliedConfig, HCLConfigEntry, HCLRuntimeData, loaded_runtime
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -65,7 +67,6 @@ DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
 # Light commands per entry, kept across reloads like the override state
 DATA_COMMAND_TRACKERS = f"{DOMAIN}_command_trackers"
 DATA_FRONTEND_REGISTERED = f"{DOMAIN}_frontend_registered"
-DATA_APPLIED_CONFIG = "applied_config"
 OVERRIDE_STORE_VERSION = 1
 
 
@@ -212,12 +213,12 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
     mode = call.data.get("mode", "preview")
     # Same check as the other actions: invalid input is a ServiceValidationError
     entry_id = resolve_entry_id(hass, call.data["entity_id"])
-    logic_core = hass.data[DOMAIN][entry_id]
+    runtime = loaded_runtime(hass, entry_id)
     # Changing the curve needs control of the given entity, the HCL switch
     # and the lights (they get the new values at once)
-    await async_check_write_permissions(hass, call, logic_core)
-    await async_check_lights(hass, call.context, logic_core)
-    hcl_calc: HCLCalculator = logic_core["calculator"]
+    await async_check_write_permissions(hass, call, runtime)
+    await async_check_lights(hass, call.context, runtime)
+    hcl_calc = runtime.calculator
     
     # 1. Update In-Memory Calculator
     if points:
@@ -235,9 +236,7 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
         new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
         # Only the curve part: another change still waiting for the update
         # listener (e.g. options just saved) must reload as before
-        logic_core[DATA_APPLIED_CONFIG] = (
-            logic_core[DATA_APPLIED_CONFIG][:3] + (new_options[CONF_CURVE_CONFIG],)
-        )
+        runtime.applied_config = dataclasses.replace(runtime.applied_config, curve=new_options[CONF_CURVE_CONFIG])
         hass.config_entries.async_update_entry(config_entry, options=new_options)
         async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
         return
@@ -301,10 +300,8 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
     """Set up HCL Lighting from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-    
     # Initialize Shared Calculator
     hcl_calc = HCLCalculator()
     
@@ -345,14 +342,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ... and the scenario (the HCL switch is set up before the mode select)
     controller.set_active_mode(_restored_mode(hass, entry), announce=False)
 
-    # Store shared logic core
-    hass.data[DOMAIN][entry.entry_id] = {
-        "calculator": hcl_calc,
-        "controller": controller,
-        "override_manager": override_manager,
+    entry.runtime_data = HCLRuntimeData(
+        calculator=hcl_calc,
+        controller=controller,
+        override_manager=override_manager,
         # Configuration this setup runs with (see update_listener)
-        DATA_APPLIED_CONFIG: _applied_config(entry, entry.options),
-    }
+        applied_config=_applied_config(entry, entry.options),
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
@@ -496,12 +492,12 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> bool:
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+async def async_unload_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
+    """Unload a config entry (Home Assistant removes entry.runtime_data afterwards)."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
-        if not hass.data[DOMAIN]:
-            hass.data.pop(DOMAIN)
+        # The entities are gone: the instance no longer counts for conflicts
+        entry.runtime_data.switch = None
+        entry.runtime_data.mode_select = None
         async_check_conflicts(hass)
 
     return unload_ok
@@ -521,17 +517,17 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await store.async_save({"shown": shown})
 
 
-def _applied_config(entry: ConfigEntry, options: Mapping[str, Any]) -> tuple:
-    """What a setup reads from the entry: title, data, options; the curve last."""
-    return (
-        entry.title,
-        dict(entry.data),
-        {k: v for k, v in options.items() if k != CONF_CURVE_CONFIG},
-        options.get(CONF_CURVE_CONFIG),
+def _applied_config(entry: ConfigEntry, options: Mapping[str, Any]) -> AppliedConfig:
+    """What a setup reads from the entry: title, data, options and the curve."""
+    return AppliedConfig(
+        title=entry.title,
+        data=dict(entry.data),
+        options={k: v for k, v in options.items() if k != CONF_CURVE_CONFIG},
+        curve=options.get(CONF_CURVE_CONFIG),
     )
 
 
-async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+async def update_listener(hass: HomeAssistant, entry: HCLConfigEntry) -> None:
     """Reload after a configuration change - except for a curve saved in place.
 
     update_curve (mode save) activates the curve itself and records it in the
@@ -540,7 +536,7 @@ async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     Any other change (options, data, title, a curve changed another way)
     reloads as before.
     """
-    core = (hass.data.get(DOMAIN) or {}).get(entry.entry_id)
-    if core is not None and core.get(DATA_APPLIED_CONFIG) == _applied_config(entry, entry.options):
+    runtime = loaded_runtime(hass, entry.entry_id)
+    if runtime is not None and runtime.applied_config == _applied_config(entry, entry.options):
         return
     await hass.config_entries.async_reload(entry.entry_id)

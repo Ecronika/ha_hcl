@@ -14,7 +14,7 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, DOMAIN
 from custom_components.hcl_lighting.logic import light_controller
 
-from .support.entries import CT_ATTRS, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, switch_entity
+from .support.entries import CT_ATTRS, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -84,13 +84,12 @@ async def test_f02_apply_sends_now_and_never_switches_on(hass, no_frontend_regis
 async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_registration, freezer):
     """0.7.0b2 (B-58): the next update cycles leave a light alone during a long apply transition."""
     calls, entry = await _light_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     calls.clear()
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a")[-1].data["transition"] == 120
     calls.clear()
-    sw = switch_entity(hass)
     target_b, target_k = om.tracking_snapshot("light.a")[0]
     # from 100 % / 6500 K towards the target of the curve
     steps = [
@@ -102,13 +101,13 @@ async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_regi
         # intermediate values reported by the light during the transition
         set_light(hass, "light.a", "on", brightness=brightness, color_temp_kelvin=kelvin, **CT_ATTRS)
         await hass.async_block_till_done()
-        await sw._update_hcl()
+        await timer_cycle(hass)
         await hass.async_block_till_done()
         assert calls_for(calls, "light.a") == [], seconds
     assert not om.is_overridden("light.a")
     # after the transition the normal adaptation resumes
     freezer.tick(timedelta(seconds=35))
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a")[-1].data["transition"] == 20
 
@@ -117,14 +116,14 @@ async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_regi
 async def test_b58_short_apply_transition_sets_no_protection(hass, no_frontend_registration):
     calls, entry = await _light_on(hass)
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 5}, blocking=True)
-    assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert not core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 @pytest.mark.usefixtures("evening")
 async def test_b58_scenario_change_ends_the_apply_protection(hass, no_frontend_registration):
     calls, entry = await _light_on(hass)
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
-    assert core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert core(hass, entry).override_manager.is_reengaging("light.a")
     calls.clear()
     await select_scenario(hass, "focus")
     assert calls_for(calls, "light.a")
@@ -133,7 +132,7 @@ async def test_b58_scenario_change_ends_the_apply_protection(hass, no_frontend_r
 @pytest.mark.usefixtures("evening")
 async def test_f02_apply_skips_or_releases_manual_control(hass, no_frontend_registration):
     calls, entry = await _light_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     calls.clear()
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH}, blocking=True)
@@ -165,7 +164,7 @@ async def test_f02_apply_rejects_foreign_lights_and_guest_mode(hass, no_frontend
 @pytest.mark.usefixtures("evening")
 async def test_f02_set_manual_control(hass, no_frontend_registration):
     calls, entry = await _light_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await hass.services.async_call(
         DOMAIN, "set_manual_control", {"entity_id": SWITCH, "lights": ["light.a"]}, blocking=True
     )

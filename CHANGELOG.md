@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b2] - 2026-10-09
+Second pre-release (beta) of 0.8.0: fixes from the review of 0.8.0b1 (RM-B43 to RM-B45) and internal restructuring (RM-T01 to RM-T03, RM-T19 to RM-T22, RM-T24). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Light with colour temperature stayed in a colour mode** (RM-B43): a light that supports colour temperature and colour and was in a colour mode (e.g. left there by the XY simulation of 0.7 when it stayed on during the update) kept that mode as long as its colour was about the HCL value; since 0.8.0 such lights are always driven by colour temperature (RM-R09). It now gets colour temperature with the next update – once per value, so a light that keeps reporting a colour mode is not sent the same values again in every update.
+- **Actions used an outdated list of lights while HCL was off** (RM-B44): `hcl_lighting.apply` and `hcl_lighting.set_manual_control` worked with the lights the instance had when *HCL active* was switched off. A light added to the area (device, label, group) meanwhile was missed or rejected as "not controlled", a removed light still got the values. The lights are now resolved at the time of the call, as for the permission check.
+- **A failed command could hide a change at the device** (RM-B45): when a light was dimmed at the device in the first seconds after an HCL command and the next HCL command to it failed, the change was no longer recognised as manual control.
+
+### Changed
+- Icons of the entities come from `icons.json` (RM-T21) instead of the code; the state attribute `icon` of the HCL entities is gone (the dashboard shows the same icons).
+
+### Internal
+- Runtime data in `entry.runtime_data` as a typed `HCLRuntimeData` instead of `hass.data` (RM-T01, RM-T02); typed manual-control state per light (RM-T03), one rule for changes away from the HCL value (inside the ignore window as for reports with HCL's context; a report "on" with brightness 0 counts as no brightness there as well, RM-B41), no silent `except Exception` (RM-T19, Ruff `BLE001`/`S110`), conversions of brightness and colour in one module (RM-T22); a base class for the entities (RM-T21); tests start update cycles through a helper instead of the internals of the switch (RM-T24).
+
 ## [0.8.0b1] - 2026-10-09
 First pre-release (beta) of 0.8.0: the removals of the negative list (RM-R06 to RM-R12; RM-R05 not done, both night scenarios stay) and the reorganised tests (RM-T23). The minimum Home Assistant version stays 2024.7.
 

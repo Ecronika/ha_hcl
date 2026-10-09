@@ -16,8 +16,9 @@ from types import SimpleNamespace
 
 from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, DOMAIN, OWN_CONTEXT_SECONDS
 from custom_components.hcl_lighting.logic import light_controller as lc
+from custom_components.hcl_lighting.logic.units import kelvin_to_xy
 
-from .support.entries import COLOR_ATTRS, CT_ATTRS, SWITCH, WARM_CT, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity
+from .support.entries import COLOR_ATTRS, CT_ATTRS, SWITCH, WARM_CT, calls_for, core, cycle_running, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -64,8 +65,8 @@ async def _switch_on_hanging(hass, lights, fail_late=False):
 
 
 def _tracking(om, entity_id):
-    data = om._override_state.get(entity_id) or {}
-    return data.get("last_set"), data.get("ignore_events_until")
+    tracking = om.tracking_snapshot(entity_id)
+    return tracking.last_set, tracking.ignore_until
 
 
 async def _apply(hass, **data):
@@ -103,7 +104,7 @@ async def _setup_light(hass, options=None):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options)
     await hcl_on(hass)
-    return lights, core(hass, entry)["override_manager"], core(hass, entry)["controller"]
+    return lights, core(hass, entry).override_manager, core(hass, entry).controller
 
 
 async def _smart_update(hass, lights, brightness_pct, kelvin):
@@ -111,7 +112,7 @@ async def _smart_update(hass, lights, brightness_pct, kelvin):
     set_light(hass, "light.a", "on", brightness=_byte(brightness_pct), color_temp_kelvin=kelvin, **CT_ATTRS)
     await hass.async_block_till_done()
     lights.calls.clear()
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     await settle()
     return [dict(c.data) for c in lights.for_light("light.a")]
@@ -163,7 +164,7 @@ async def test_rm_r09_light_with_colour_temperature_stays_in_ct_mode(hass, no_fr
     calls = async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=4000, **XY_CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    ctl = core(hass, entry)["controller"]
+    ctl = core(hass, entry).controller
     assert ctl.capability_for("light.a") == "ct"
     calls.clear()
     await ctl.apply_batch(["light.a"], 50, kelvin)
@@ -171,6 +172,51 @@ async def test_rm_r09_light_with_colour_temperature_stays_in_ct_mode(hass, no_fr
     sent = [c.data for c in calls]
     assert sent and "xy_color" not in sent[-1]
     assert sent[-1]["color_temp_kelvin"] == min(6500, max(2700, kelvin))
+
+
+# ---------------------------------------------------------------- RM-B43
+def _xy(kelvin):
+    return kelvin_to_xy(kelvin)
+
+
+@pytest.mark.usefixtures("evening")
+@pytest.mark.parametrize("kelvin", [2200, 4000])
+async def test_rm_b43_light_in_xy_mode_goes_back_to_colour_temperature(hass, no_frontend_registration, kelvin):
+    """A light with colour temperature in XY mode with about the XY of the
+    target (e.g. left there by the XY simulation of 0.7) gets colour temperature."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    attrs = {**XY_CT_ATTRS, "color_mode": "xy"}
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(kelvin), **attrs)
+    entry = await setup_entry(hass, ["light.a"])
+    ctl = core(hass, entry).controller
+    calls.clear()
+    await ctl.apply_batch(["light.a"], 50, kelvin)
+    await hass.async_block_till_done()
+    sent = [c.data for c in calls]
+    assert sent, "no command: the light stays in XY mode"
+    assert "xy_color" not in sent[-1]
+    assert sent[-1]["color_temp_kelvin"] == max(2700, kelvin)
+
+
+@pytest.mark.usefixtures("evening")
+async def test_rm_b43_light_that_keeps_reporting_xy_gets_no_repeated_command(hass, no_frontend_registration):
+    """A light that reports XY after a colour temperature command is not sent the
+    same values again in every cycle."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    attrs = {**XY_CT_ATTRS, "color_mode": "xy"}
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(2200), **attrs)
+    entry = await setup_entry(hass, ["light.a"])
+    ctl = core(hass, entry).controller
+    calls.clear()
+    await ctl.apply_batch(["light.a"], 50, 2200)
+    await hass.async_block_till_done()
+    assert len(calls) == 1
+    # the light reports the values, but still in XY mode
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(2700), **attrs)
+    await hass.async_block_till_done()
+    await ctl.apply_batch(["light.a"], 50, 2200)
+    await hass.async_block_till_done()
+    assert len(calls) == 1
 
 
 # ---------------------------------------------------------------- B-35
@@ -213,7 +259,7 @@ async def test_a02_adapt_switches_filter_commands(hass, noon, no_frontend_regist
 
     calls.clear()
     await hass.services.async_call("switch", "turn_off", {"entity_id": ADAPT_B}, blocking=True)
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a") == []
 
@@ -261,7 +307,7 @@ async def test_rm_t17_hanging_fast_hcl_does_not_hold_home_assistant(hass, no_fro
 
 async def test_rm_t17_no_second_command_while_fast_hcl_runs(hass, no_frontend_registration):
     lights, entry = await _setup(hass)
-    controller = core(hass, entry)["controller"]
+    controller = core(hass, entry).controller
     await _switch_on_hanging(hass, lights)
     lights.calls.clear()
     result = await controller.apply_batch(["light.a"], 50, 3000, transition=0, fast_mode=True)
@@ -273,8 +319,8 @@ async def test_rm_t17_no_second_command_while_fast_hcl_runs(hass, no_frontend_re
 
 async def test_rm_t17_late_answer_frees_the_light(hass, no_frontend_registration):
     lights, entry = await _setup(hass)
-    controller = core(hass, entry)["controller"]
-    om = core(hass, entry)["override_manager"]
+    controller = core(hass, entry).controller
+    om = core(hass, entry).override_manager
     await _switch_on_hanging(hass, lights)
     sent = om.tracking_snapshot("light.a")
     lights.release()
@@ -285,7 +331,7 @@ async def test_rm_t17_late_answer_frees_the_light(hass, no_frontend_registration
 
 async def test_rm_t17_late_failure_restores_tracking(hass, no_frontend_registration):
     lights, entry = await _setup(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = om.tracking_snapshot("light.a")
     event = await _switch_on_hanging(hass, lights, fail_late=True)
     # without transition when switched on (RM-R10): no protection
@@ -301,7 +347,7 @@ async def test_rm_b36_capability_is_evaluated_again_when_the_light_reports_more(
 ):
     set_light(hass, "light.a", "on", brightness=128, supported_color_modes=["onoff"], color_mode="onoff")
     entry = await setup_entry(hass, ["light.a"])
-    controller = core(hass, entry)["controller"]
+    controller = core(hass, entry).controller
     assert controller.capability_for("light.a") == "onoff"
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=2700, **CT_ATTRS)
     await hass.async_block_till_done()
@@ -319,9 +365,8 @@ async def test_rm_b39_failing_light_is_logged_once(hass, no_frontend_registratio
     lights.fail = {"light.a"}
     caplog.clear()
     await hcl_on(hass)
-    sw = switch_entity(hass)
     for _ in range(3):
-        await sw._update_hcl()
+        await timer_cycle(hass)
         await hass.async_block_till_done()
     assert len(lights.for_light("light.a")) == 4  # tried again in every update
     reports = [
@@ -333,7 +378,7 @@ async def test_rm_b39_failing_light_is_logged_once(hass, no_frontend_registratio
     # the light answers again: one info, a later failure is reported again
     lights.fail = set()
     caplog.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert "Light light.a accepts HCL commands again" in caplog.text
 
@@ -377,8 +422,8 @@ async def test_rm_b04_failed_command_is_not_reported_as_updated(hass, no_fronten
     set_light(hass, "light.b", "on", brightness=3, xy_color=(0.6, 0.35), **COLOR_ATTRS)
     entry = await setup_entry(hass, ["light.a", "light.b"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
-    before = om._override_state.get("light.b", {}).get("last_set")
+    om = core(hass, entry).override_manager
+    before = om.last_set("light.b")
     lights.fail = {"light.b"}
     set_light(hass, "light.b", "on", brightness=200, xy_color=(0.2, 0.2), **COLOR_ATTRS)
     om.reset_override("light.b")
@@ -386,7 +431,7 @@ async def test_rm_b04_failed_command_is_not_reported_as_updated(hass, no_fronten
         await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert om.is_reengaging("light.a")
     assert not om.is_reengaging("light.b")  # its command failed
-    assert om._override_state.get("light.b", {}).get("last_set") == before  # tracking restored
+    assert om.last_set("light.b") == before  # tracking restored
 
 
 # ---------------------------------------------------------------- RM-B05
@@ -395,7 +440,7 @@ async def test_rm_b05_final_smart_transition_failure_is_reported(hass, no_fronte
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"smart_transition": True})
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     lights.fail = {"light.a"}
     set_light(hass, "light.a", "on", brightness=200, color_temp_kelvin=6000, **CT_ATTRS)
     om.reset_override("light.a")
@@ -416,7 +461,7 @@ async def test_rm_b05_fallback_success_counts(hass, no_frontend_registration):
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"smart_transition": True})
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     original = lights._handle
 
     async def fail_with_transition(call):
@@ -438,14 +483,14 @@ async def test_rm_b13_partial_failure_keeps_the_successful_light(hass, no_fronte
     set_light(hass, "light.b", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a", "light.b"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before_b = _tracking(om, "light.b")[0]
     lights.fail = {"light.b"}
     try:
         await _apply(hass, transition=120)
     except HomeAssistantError:
         pass  # reported since RM-B16
-    target = core(hass, entry)["controller"].calculate_target_values(dt_util.now())
+    target = core(hass, entry).controller.calculate_target_values(dt_util.now())
     assert _tracking(om, "light.a")[0][0] == target[0]  # light.a got the values
     assert _tracking(om, "light.b")[0] == before_b
     assert om.is_reengaging("light.a") and not om.is_reengaging("light.b")
@@ -458,7 +503,7 @@ async def test_rm_b14_failed_command_restores_the_ignore_window(hass, no_fronten
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = _tracking(om, "light.a")
     lights.fail = {"light.a"}
     try:
@@ -474,7 +519,7 @@ async def test_rm_b15_failed_turn_on_update_restores_the_tracking(hass, no_front
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = _tracking(om, "light.a")
     lights.fail = {"light.a"}
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)  # switched on
@@ -489,7 +534,7 @@ async def test_rm_b15_successful_turn_on_update_keeps_the_tracking(hass, no_fron
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await hass.async_block_till_done()
     last_set, ignore_until = _tracking(om, "light.a")
@@ -509,7 +554,7 @@ async def test_rm_r10_switched_on_without_transition_and_without_protection(
     )
     assert "turn_on_transition" not in entry.options  # removed by the migration
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)  # switched on
     await hass.async_block_till_done(wait_background_tasks=True)
     assert lights.for_light("light.a")[-1].data["transition"] == 0
@@ -517,7 +562,7 @@ async def test_rm_r10_switched_on_without_transition_and_without_protection(
     # the light did not take the values (e.g. no answer): the next cycle sends again
     lights.calls.clear()
     freezer.tick(timedelta(seconds=10))
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert lights.for_light("light.a")[-1].data["transition"] == 5
 
@@ -532,7 +577,7 @@ async def test_rm_b21_failed_turn_on_command_sets_no_protection(hass, no_fronten
     # Fast-HCL runs in the background since 0.7.0b14 (RM-T17)
     await hass.async_block_till_done(wait_background_tasks=True)
     assert lights.for_light("light.a")
-    assert not core(hass, entry)["override_manager"].is_reengaging("light.a")
+    assert not core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 # ---------------------------------------------------------------- RM-T11
@@ -540,7 +585,7 @@ async def test_rm_t11_expired_contexts_are_removed_without_full_scans(hass, no_f
     FakeLights(hass)
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    controller = core(hass, entry)["controller"]
+    controller = core(hass, entry).controller
     clock = [1000.0]
     # only the controller's clock (the event loop keeps the real one)
     monkeypatch.setattr(lc, "time", SimpleNamespace(monotonic=lambda: clock[0]))
@@ -568,21 +613,20 @@ async def test_rm_t11_expired_contexts_are_removed_without_full_scans(hass, no_f
 # ---------------------------------------------------------------- RM-B23
 async def test_rm_b23_hanging_light_does_not_hold_the_update(hass, no_frontend_registration, freezer):
     lights, entry = await setup_two_dim_lights(hass)
-    sw = switch_entity(hass)
     lights.hang["light.a"] = asyncio.Event()
     start_select(hass, "focus")
     await settle()
     # both commands were sent at once; light.b has its values, light.a hangs
     assert lights.for_light("light.a") and lights.for_light("light.b")
-    assert sw._update_lock.locked()  # waiting for light.a
+    assert cycle_running(hass)  # waiting for light.a
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
     await settle()
-    assert not sw._update_lock.locked()  # goes on without light.a
+    assert not cycle_running(hass)  # goes on without light.a
     # the next scenario reaches light.b at once; light.a gets no second command
     lights.calls.clear()
     start_select(hass, "relax")
     await settle()
-    assert not sw._update_lock.locked()
+    assert not cycle_running(hass)
     assert lights.for_light("light.b")
     assert lights.for_light("light.a") == []
     lights.release()
@@ -591,13 +635,13 @@ async def test_rm_b23_hanging_light_does_not_hold_the_update(hass, no_frontend_r
 
 async def test_rm_b23_light_gets_commands_again_after_its_late_answer(hass, no_frontend_registration, freezer):
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     lights.hang["light.a"] = asyncio.Event()
     start_select(hass, "focus")
     await settle()
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
     await settle()
-    assert not switch_entity(hass)._update_lock.locked()
+    assert not cycle_running(hass)
     focus = om.tracking_snapshot("light.a")[0]
     # late success: the values arrived, the tracking stays
     lights.hang["light.a"].set()
@@ -612,7 +656,7 @@ async def test_rm_b23_light_gets_commands_again_after_its_late_answer(hass, no_f
 
 async def test_rm_b23_late_error_restores_the_tracking(hass, no_frontend_registration, freezer):
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = om.tracking_snapshot("light.a")
     lights.hang["light.a"] = asyncio.Event()
     lights.fail_late.add("light.a")
@@ -621,7 +665,7 @@ async def test_rm_b23_late_error_restores_the_tracking(hass, no_frontend_registr
     assert om.tracking_snapshot("light.a") != before  # set before sending
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
     await settle()
-    assert not switch_entity(hass)._update_lock.locked()
+    assert not cycle_running(hass)
     lights.release()
     await settle()
     assert om.tracking_snapshot("light.a") == before  # like a failed command (RM-B14)
@@ -630,7 +674,7 @@ async def test_rm_b23_late_error_restores_the_tracking(hass, no_frontend_registr
 async def test_rm_b23_update_cancelled_while_waiting_handles_results(hass, no_frontend_registration, freezer):
     """Unload/shutdown during a hanging command: no unhandled task errors."""
     lights, entry = await setup_two_dim_lights(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     before = om.tracking_snapshot("light.a")
     lights.hang["light.a"] = asyncio.Event()
     lights.fail_late.add("light.a")
@@ -704,7 +748,7 @@ async def test_rm_b42_default_light_profile_does_not_add_a_transition(
     await hass.async_block_till_done()
     entry = await setup_entry(hass, ["light.probe"], SMART)
     # light far from the HCL values: both values change
-    target_b, target_k = core(hass, entry)["controller"].calculate_target_values(dt_util.now())
+    target_b, target_k = core(hass, entry).controller.calculate_target_values(dt_util.now())
     probe._attr_brightness = 255 if target_b < 50 else 3
     probe._attr_color_temp_kelvin = 2200 if target_k > 4350 else 6500
     probe.async_write_ha_state()
@@ -734,7 +778,7 @@ async def test_b05_xy_light_is_not_resent_every_cycle(hass, berlin, no_frontend_
     set_light(hass, "light.rgb", "on", brightness=255, xy_color=(round(x, 4), round(y, 4)), color_temp_kelvin=None, **xy_attrs)
     await hass.async_block_till_done()
     calls.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.rgb") == []
 
@@ -748,7 +792,7 @@ async def test_b05_clamped_ct_light_is_not_resent_every_cycle(hass, berlin, no_f
     await sw.async_turn_on()
     await hass.async_block_till_done()
     assert calls_for(calls, "light.ikea") == [], "light already at its maximum reachable CT and 100 %"
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.ikea") == []
 

@@ -6,13 +6,14 @@ import pytest
 
 from datetime import timedelta
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar, entity_registry as er
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_mock_service
 
-from custom_components.hcl_lighting.const import EVENT_MANUAL_CONTROL
+from custom_components.hcl_lighting.const import DOMAIN, EVENT_MANUAL_CONTROL
 
-from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, set_light, settle, setup_entry, switch_entity
+from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, set_light, settle, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -20,7 +21,7 @@ async def _after_hcl_command(hass, freezer):
     calls = async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await hcl_on(hass)
     sent = calls_for(calls, "light.a")
     assert sent
@@ -66,7 +67,7 @@ async def _in_ignore_window(hass):
     await switch_entity(hass).async_turn_on()
     await hass.async_block_till_done()
     assert calls
-    return core(hass, entry)["override_manager"]
+    return core(hass, entry).override_manager
 
 
 def _byte(pct: int) -> int:
@@ -94,8 +95,8 @@ async def _setup(hass):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
-    controller = core(hass, entry)["controller"]
+    om = core(hass, entry).override_manager
+    controller = core(hass, entry).controller
     return lights, om, controller
 
 
@@ -134,7 +135,7 @@ async def _setup_light(hass, options=None):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options)
     await hcl_on(hass)
-    return lights, core(hass, entry)["override_manager"], core(hass, entry)["controller"]
+    return lights, core(hass, entry).override_manager, core(hass, entry).controller
 
 
 async def _switched_on_ctx(hass, lights, start_pct=50, kelvin=2700):
@@ -201,14 +202,14 @@ async def test_a01_ha_command_with_values_pauses_light(hass, noon, no_frontend_r
     sw = switch_entity(hass)
     await sw.async_turn_on()
     await hass.async_block_till_done()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     assert not om.is_overridden("light.a"), "HCL's own commands are no manual control"
 
     # Inside the ignore window, towards the HCL target: previously undetectable
     await _user_turn_on(hass, entity_id="light.a", brightness_pct=90)
     assert om.is_overridden("light.a")
     calls.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a") == []
     assert hass.states.get(SWITCH).attributes["manual_control"] == ["light.a"]
@@ -224,7 +225,7 @@ async def test_a01_area_target_and_toggle_and_plain_turn_on(hass, noon, no_front
     set_light(hass, "light.other", "on", brightness=128, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await switch_entity(hass).async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
 
     await _user_turn_on(hass, entity_id="light.a")  # no values
     await hass.services.async_call("light", "toggle", {"entity_id": "light.a", "brightness_pct": 5}, blocking=True)
@@ -246,7 +247,7 @@ async def test_a01_turn_on_values_default_and_option(hass, noon, no_frontend_reg
     await hass.async_block_till_done()
     fast = [c for c in calls_for(calls, "light.a") if c.data.get("brightness_pct") == 100]
     assert fast, "fast path must still apply HCL by default"
-    assert not core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert not core(hass, entry).override_manager.is_overridden("light.a")
 
     # Option: keep the values of turn-on commands
     set_light(hass, "light.a", "off", **CT_ATTRS)
@@ -257,7 +258,7 @@ async def test_a01_turn_on_values_default_and_option(hass, noon, no_frontend_reg
     set_light(hass, "light.a", "on", brightness=13, color_temp_kelvin=2200, **CT_ATTRS)
     await hass.async_block_till_done()
     assert [c for c in calls_for(calls, "light.a") if c.data.get("brightness_pct") == 100] == []
-    assert core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
 # ------------------------------------------------------------------ Ä-02
@@ -267,7 +268,7 @@ async def test_a02_brightness_change_is_no_override_when_not_adapted(hass, noon,
     entry = await setup_entry(hass, ["light.a"])
     await hass.services.async_call("switch", "turn_off", {"entity_id": ADAPT_B}, blocking=True)
     await switch_entity(hass).async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await _user_turn_on(hass, entity_id="light.a", brightness_pct=30)
     noon.tick(timedelta(seconds=60))
     set_light(hass, "light.a", "on", brightness=77, color_temp_kelvin=6000, **CT_ATTRS)
@@ -317,7 +318,7 @@ async def test_rm_b33_dimming_at_the_device_after_switching_on_is_manual(hass, n
     assert om.is_overridden("light.a")
     # the next update leaves the light alone
     lights.calls.clear()
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert lights.for_light("light.a") == []
 
@@ -347,7 +348,7 @@ async def test_rm_b33_dimming_at_the_device_after_an_update_is_manual(hass, no_f
     # has ended (back towards it); the update leaves the user's value
     freezer.tick(timedelta(seconds=30))
     lights.calls.clear()
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert om.is_overridden("light.a")
     assert lights.for_light("light.a") == []
@@ -390,7 +391,31 @@ async def test_rm_b33_dimming_back_towards_the_switch_on_value_is_manual(
     assert not om.is_overridden("light.a")
     freezer.tick(timedelta(seconds=10))  # the transition has ended
     lights.calls.clear()
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert om.is_overridden("light.a")
+    assert lights.for_light("light.a") == []  # the user's value stays
+
+
+# ---------------------------------------------------------------- RM-B45
+async def test_rm_b45_failed_command_keeps_an_open_report(hass, no_frontend_registration, freezer):
+    """An open report (RM-B33) stays open when the next command fails: the
+    change on the device is still decided after the transition."""
+    lights, om, controller = await _setup(hass)
+    target, _k = controller.calculate_target_values(dt_util.now())
+    start = 100 if target <= 60 else 1
+    ctx = await _switched_on(hass, lights, om, start)
+    target_b, target_k = om.tracking_snapshot("light.a")[0]
+    await _report(hass, ctx, target_b, target_k)
+    await _report(hass, ctx, (start + target_b) // 2)  # open: decided after the transition
+    lights.fail.add("light.a")
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH}, blocking=True)
+    await hass.async_block_till_done()
+    lights.fail.clear()
+    freezer.tick(timedelta(seconds=10))  # the transition has ended
+    lights.calls.clear()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert om.is_overridden("light.a")
     assert lights.for_light("light.a") == []  # the user's value stays
@@ -405,7 +430,7 @@ async def test_rm_b33_open_report_is_left_alone_while_the_transition_runs(hass, 
     await _report(hass, ctx, target_b, target_k)
     await _report(hass, ctx, (start + target_b) // 2)
     lights.calls.clear()
-    await switch_entity(hass)._update_hcl()  # still inside the ignore window
+    await timer_cycle(hass)  # still inside the ignore window
     await hass.async_block_till_done()
     assert lights.for_light("light.a") == []
     assert not om.is_overridden("light.a")
@@ -425,7 +450,7 @@ async def test_rm_b33_intermediate_values_of_the_transition_stay_own(hass, no_fr
         await _report(hass, ctx, value, target_k)
         assert not om.is_overridden("light.a"), value
     freezer.tick(timedelta(seconds=10))
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert not om.is_overridden("light.a")
 
@@ -468,7 +493,7 @@ async def test_rm_b33_colour_light_changed_at_the_device_is_manual(hass, no_fron
     set_light(hass, "light.a", "off", **xy)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     set_light(hass, "light.a", "on", brightness=128, xy_color=(0.4, 0.4), **xy)
     await hass.async_block_till_done()
     sent = lights.for_light("light.a")
@@ -600,7 +625,7 @@ async def test_b04_kelvin_change_inside_ignore_window_is_detected(hass, berlin, 
     entry = await setup_entry(hass, ["light.a"])
     sw = switch_entity(hass)
     await sw.async_turn_on()  # sends 100 % / 6000 K and opens the ignore window
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     assert not om.is_overridden("light.a")
     # Light has reached the HCL target ...
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
@@ -616,7 +641,7 @@ async def test_b04_hcl_transition_inside_window_is_not_an_override(hass, berlin,
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await switch_entity(hass).async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     # Intermediate transition reports moving towards 100 % / 6000 K.
     for b, k in ((170, 5000), (220, 5800), (255, 6000)):
         set_light(hass, "light.a", "on", brightness=b, color_temp_kelvin=k, **CT_ATTRS)
@@ -637,4 +662,4 @@ async def test_b05_clamped_light_small_change_is_not_a_false_override(hass, berl
     berlin.tick(timedelta(seconds=60))  # ignore window over
     set_light(hass, "light.ikea", "on", brightness=253, color_temp_kelvin=4000, **attrs)  # 1 % jitter
     await hass.async_block_till_done()
-    assert not core(hass, entry)["override_manager"].is_overridden("light.ikea")
+    assert not core(hass, entry).override_manager.is_overridden("light.ikea")

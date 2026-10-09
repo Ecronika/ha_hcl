@@ -8,7 +8,6 @@ from typing import Any
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraData, RestoreEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
@@ -31,47 +30,33 @@ from .const import (
     anchor_time,
 )
 from .logic.light_controller import HCLLightController
+from .entity import HCLEntity
+from .runtime import HCLConfigEntry
 from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up the HCL Select entity."""
-    logic_core = hass.data[DOMAIN][entry.entry_id]
-    controller: HCLLightController = logic_core["controller"]
-    
-    select = HCLModeSelect(entry, controller)
-    logic_core["mode_select"] = select
+    select = HCLModeSelect(entry, entry.runtime_data.controller)
+    entry.runtime_data.mode_select = select
     async_add_entities([select])
 
-class HCLModeSelect(SelectEntity, RestoreEntity):
+class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
     """Select entity for the HCL scenario (mode)."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "hcl_mode"
-    _attr_icon = "mdi:theme-light-dark"
 
     def __init__(self, entry: ConfigEntry, controller: HCLLightController) -> None:
         """Initialize."""
-        self._entry = entry
+        super().__init__(entry, "mode")
         self._controller = controller
-        self._attr_unique_id = f"{entry.entry_id}_mode"
         self._attr_options = HCL_MODES
         self._attr_current_option = controller.active_mode
         # End of a timed scenario (Focus/Relax/Cleaning with a configured duration)
         self._until: datetime | None = None
         self._cancel_timer = None
-
-    @property
-    def device_info(self):
-        """Return device info (same HCL device as the switch and the sensor)."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.title,
-            manufacturer="HCL Integration",
-            model="HCL Controller",
-        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -168,7 +153,7 @@ class HCLModeSelect(SelectEntity, RestoreEntity):
         # A user's choice sends the scenario values to all lights at once; the
         # automatic end of a scenario (timer) is no action of that user
         context = action_context(self)
-        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
+        await async_check_lights(self.hass, context, self._entry.runtime_data)
         self._cancel()
         self._set_mode(option)
         options = self._entry.options

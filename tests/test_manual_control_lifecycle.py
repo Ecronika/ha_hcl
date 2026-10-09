@@ -11,7 +11,7 @@ from pytest_homeassistant_custom_component.common import async_mock_service
 from custom_components.hcl_lighting import DATA_OVERRIDE_MANAGERS
 from custom_components.hcl_lighting.const import REENGAGE_TRANSITION_SECONDS, UNREACHABLE_GRACE_SECONDS
 
-from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity
+from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -23,11 +23,11 @@ async def _expired_override(hass):
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     sw = switch_entity(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await hcl_on(hass)
-    om._override_state.setdefault("light.a", {})["manual_override_time"] = dt_util.now() - timedelta(hours=5)
+    om.set_override("light.a", since=dt_util.now() - timedelta(hours=5))
     calls.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     return calls, sw, om
 
@@ -65,7 +65,7 @@ async def _manual_light(hass, freezer, options=None):
     entry = await setup_entry(hass, ["light.a"], options=options)
     await switch_entity(hass).async_turn_on()
     await hass.async_block_till_done()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     freezer.tick(timedelta(seconds=60))
     calls.clear()
@@ -91,12 +91,12 @@ async def _expire_override_of_light_at(hass, freezer, hour, minute):
     set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     sw = switch_entity(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await sw.async_turn_on()
     await hass.async_block_till_done()
-    om._override_state.setdefault("light.a", {})["manual_override_time"] = dt_util.now() - timedelta(hours=5)
+    om.set_override("light.a", since=dt_util.now() - timedelta(hours=5))
     calls.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     return calls, om
 
@@ -116,7 +116,7 @@ async def test_b32_following_cycles_leave_the_reengaging_light_alone(hass, no_fr
     calls.clear()
     for _ in range(3):  # three normal cycles within the smooth transition
         freezer.tick(timedelta(seconds=30))
-        await sw._update_hcl()
+        await timer_cycle(hass)
         await hass.async_block_till_done()
     assert calls_for(calls, "light.a") == []
 
@@ -126,7 +126,7 @@ async def test_b32_normal_updates_resume_after_the_transition(hass, no_frontend_
     calls, sw, _om = await _expired_override(hass)
     calls.clear()
     freezer.tick(timedelta(seconds=REENGAGE_DURATION + 10))
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     sent = calls_for(calls, "light.a")
     assert sent and sent[-1].data.get("transition") != REENGAGE_DURATION
@@ -148,24 +148,24 @@ async def test_a06_timeout_option_and_never(hass, noon, no_frontend_registration
     entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 30})
     sw = switch_entity(hass)
     await sw.async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     noon.tick(timedelta(minutes=20))
     calls.clear()
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert calls_for(calls, "light.a") == []
     noon.tick(timedelta(minutes=11))
-    await sw._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert not om.is_overridden("light.a") and calls_for(calls, "light.a")
 
     hass.config_entries.async_update_entry(entry, options={**entry.options, "override_timeout": 0})
     await hass.async_block_till_done()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     noon.tick(timedelta(days=2))
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     assert om.is_overridden("light.a")
 
 
@@ -174,7 +174,7 @@ async def test_a06_reset_on_off_disabled(hass, noon, no_frontend_registration):
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"override_reset_on_off": False})
     await switch_entity(hass).async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     set_light(hass, "light.a", "off", **CT_ATTRS)
     await hass.async_block_till_done()
@@ -191,7 +191,7 @@ async def test_a06_default_reset_on_off_and_off_lights_cleared(hass, noon, no_fr
     entry = await setup_entry(hass, ["light.a"])
     sw = switch_entity(hass)
     await sw.async_turn_on()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     await hass.async_block_till_done()
     assert hass.states.get(SWITCH).attributes["manual_control"] == ["light.a"]
@@ -201,7 +201,7 @@ async def test_a06_default_reset_on_off_and_off_lights_cleared(hass, noon, no_fr
     assert hass.states.get(SWITCH).attributes["manual_control"] == []
     # A pause for a light that is off (switch-off not seen) is cleared by the cycle
     om.set_override("light.a")
-    await sw._update_hcl()
+    await timer_cycle(hass)
     assert not om.is_overridden("light.a")
 
 
@@ -213,7 +213,7 @@ async def test_f07_manual_control_fires_events(hass, no_frontend_registration):
     # the executor, where the order of two events is not guaranteed)
     hass.bus.async_listen("hcl_lighting_manual_control", callback(lambda event: events.append(event)))
     _calls, entry = await _light_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     om.set_override("light.a")  # no second event without change
     om.reset_override("light.a")
@@ -288,7 +288,7 @@ async def test_rm_b24_persisted_manual_control_survives_the_restart(
     set_light(hass, "light.a", "on", **ON)
     entry = await setup_entry(hass, ["light.a"], options={"persist_overrides": True})
     await switch_entity(hass).async_turn_on()
-    core(hass, entry)["override_manager"].set_override("light.a")
+    core(hass, entry).override_manager.set_override("light.a")
     await hass.config_entries.async_unload(entry.entry_id)
     hass.bus.async_fire("homeassistant_final_write")
     await hass.async_block_till_done()
@@ -296,7 +296,7 @@ async def test_rm_b24_persisted_manual_control_survives_the_restart(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await switch_entity(hass).async_turn_on()  # restored "HCL active" = on
     await hass.async_block_till_done()
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     assert om.is_overridden("light.a")
     freezer.tick(timedelta(seconds=30))
     calls.clear()
@@ -313,11 +313,11 @@ async def test_rm_b04_failed_smooth_return_hands_the_light_back(hass, no_fronten
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 1})
     await hcl_on(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     om.set_override("light.a")
     freezer.tick(timedelta(minutes=2))
     lights.fail = {"light.a"}
-    await switch_entity(hass)._update_hcl()
+    await timer_cycle(hass)
     await hass.async_block_till_done()
     assert not om.is_overridden("light.a")
     assert not om.is_reengaging("light.a")  # the 3-minute protection ends with the failure
@@ -329,9 +329,9 @@ async def test_b17_expired_override_does_not_turn_on_off_light(hass, no_frontend
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     sw = switch_entity(hass)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     await sw.async_turn_on()
-    om._override_state.setdefault("light.a", {})["manual_override_time"] = dt_util.now() - timedelta(hours=5)
+    om.set_override("light.a", since=dt_util.now() - timedelta(hours=5))
     await sw.async_turn_off()
     set_light(hass, "light.a", "off", **CT_ATTRS)  # not seen by HCL (switch off)
     await hass.async_block_till_done()
@@ -356,3 +356,29 @@ async def test_b17_expired_override_released_without_command_if_values_match(
     calls, om = await _expire_override_of_light_at(hass, freezer, 12, 0)
     assert not om.is_overridden("light.a")
     assert calls_for(calls, "light.a") == []
+
+
+# ---------------------------------------------------------------- RM-T03
+@pytest.mark.usefixtures("_late_morning")
+async def test_rm_t03_stored_manual_control_keeps_its_format(hass, hass_storage, no_frontend_registration):
+    """The typed override state reads and writes the stored format of 0.8.0b1
+    ({light: start of manual control as ISO time})."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    since = (dt_util.now() - timedelta(minutes=30)).replace(microsecond=0)
+    hass_storage["hcl_lighting.overrides.hcl_t03"] = {
+        "version": 1, "minor_version": 1, "key": "hcl_lighting.overrides.hcl_t03",
+        "data": {"light.a": since.isoformat()},
+    }
+    async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", **ON)
+    entry = MockConfigEntry(
+        domain="hcl_lighting", title="HCL", entry_id="hcl_t03",
+        options={"target": {"entity_id": ["light.a"]}, "persist_overrides": True}, minor_version=2,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    om = core(hass, entry).override_manager
+    assert om.is_overridden("light.a")
+    assert om.export_overrides() == {"light.a": since.isoformat()}

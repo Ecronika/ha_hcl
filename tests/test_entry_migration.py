@@ -38,9 +38,9 @@ async def test_setup_data_moves_to_the_options(hass, no_frontend_registration):
         "target": {"entity_id": ["light.a"]}, "wake_time": "06:30:00", "sleep_time": "23:00:00",
         "min_brightness": 10,  # the default up to 0.7 is kept (new instances: 3 %)
     }
-    assert core(hass, entry)["controller"].brightness_limits() == (10, 100)
+    assert core(hass, entry).controller.brightness_limits() == (10, 100)
     # default curve of 0.8.0 from the anchor times
-    assert {"t": 390, "b": 30, "k": 3000} in core(hass, entry)["calculator"].active_curve
+    assert {"t": 390, "b": 30, "k": 3000} in core(hass, entry).calculator.active_curve
 
 
 async def test_options_win_over_the_setup_data(hass, no_frontend_registration):
@@ -73,7 +73,7 @@ async def test_removed_settings_are_dropped_and_timing_is_limited(hass, no_front
     assert options["scenario_transition"] == 300  # may be longer than the interval
     # a saved curve stays as it is
     assert options["curve_config"]["points"] == CUSTOM_POINTS
-    assert core(hass, entry)["calculator"].active_curve == sorted(CUSTOM_POINTS, key=lambda p: p["t"])
+    assert core(hass, entry).calculator.active_curve == sorted(CUSTOM_POINTS, key=lambda p: p["t"])
 
 
 @pytest.mark.parametrize(("interval", "transition", "expected"), [(10, 5, (15, 5)), (10, 10, (15, 10)), (27, 20, (27, 20))])
@@ -95,7 +95,7 @@ async def test_current_entry_is_not_changed(hass, no_frontend_registration):
     entry = await _setup_old(hass, {}, options, minor_version=2)
     assert entry.state is ConfigEntryState.LOADED
     assert dict(entry.options) == options  # no minimum brightness added: the default (3 %) applies
-    assert core(hass, entry)["controller"].brightness_limits() == (3, 100)
+    assert core(hass, entry).controller.brightness_limits() == (3, 100)
 
 
 # ---------------------------------------------------------------- RM-B35

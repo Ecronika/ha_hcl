@@ -5,7 +5,6 @@ import logging
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -25,20 +24,18 @@ from .const import (
     anchor_time,
 )
 from .logic.hcl_math import HCLCalculator, default_points
+from .entity import HCLEntity
+from .runtime import HCLConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
 
 # The setpoint sensors are recalculated once a minute (values change slowly)
 SETPOINT_UPDATE_INTERVAL = timedelta(seconds=60)
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
+async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Sensor."""
-    
-    logic_core = hass.data[DOMAIN][entry.entry_id]
-    hcl_calc: HCLCalculator = logic_core["calculator"]
-    
-    controller = logic_core["controller"]
-    sensor = HCLLightingCurveSensor(hass, entry, hcl_calc, controller)
+    controller = entry.runtime_data.controller
+    sensor = HCLLightingCurveSensor(hass, entry, entry.runtime_data.calculator, controller)
 
     async_add_entities([
         sensor,
@@ -47,10 +44,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     ])
 
 
-class HCLLightingCurveSensor(SensorEntity):
+class HCLLightingCurveSensor(HCLEntity, SensorEntity):
     """Sensor that exposes the full HCL Curve state."""
 
-    _attr_has_entity_name = True
     _attr_name = "Curve Data"
     _attr_translation_key = "hcl_curve_sensor"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -62,11 +58,10 @@ class HCLLightingCurveSensor(SensorEntity):
     
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, hcl_calc: HCLCalculator, controller) -> None:
         """Initialize the sensor."""
+        super().__init__(entry, "curve")
         self.hass = hass
-        self._entry = entry
         self._hcl_calc = hcl_calc
         self._controller = controller
-        self._attr_unique_id = f"{entry.entry_id}_curve"
         self._attr_native_value = dt_util.utcnow()
         
     async def async_added_to_hass(self) -> None:
@@ -193,18 +188,8 @@ class HCLLightingCurveSensor(SensorEntity):
             "sensor", DOMAIN, f"{self._entry.entry_id}_{key}"
         )
 
-    @property
-    def device_info(self):
-        """Return device info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.title,
-            manufacturer="HCL Integration",
-            model="HCL Controller",
-        )
 
-
-class HCLSetpointSensor(SensorEntity):
+class HCLSetpointSensor(HCLEntity, SensorEntity):
     """Brightness or colour temperature HCL is currently aiming for.
 
     The value HCL sends to the lights now (curve or scenario, min/max and
@@ -212,29 +197,16 @@ class HCLSetpointSensor(SensorEntity):
     passed on to other systems (e.g. KNX/DALI gateways). Unknown in Guest mode.
     """
 
-    _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_suggested_display_precision = 0
 
     def __init__(self, entry: ConfigEntry, controller, kind: str) -> None:
-        self._entry = entry
+        key = "target_brightness" if kind == "brightness" else "target_color_temp"
+        super().__init__(entry, key)
         self._controller = controller
         self._kind = kind
-        key = "target_brightness" if kind == "brightness" else "target_color_temp"
         self._attr_translation_key = key
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_native_unit_of_measurement = "%" if kind == "brightness" else "K"
-        self._attr_icon = "mdi:brightness-percent" if kind == "brightness" else "mdi:thermometer"
-
-    @property
-    def device_info(self):
-        """Same HCL device as the other entities."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.title,
-            manufacturer="HCL Integration",
-            model="HCL Controller",
-        )
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
