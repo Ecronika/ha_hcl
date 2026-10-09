@@ -8,7 +8,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import FlowResult, section
 from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
 
@@ -16,17 +16,17 @@ from .const import (
     DOMAIN, CONF_TARGET, CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS,
-    CONF_WAKE_TIME, CONF_MIDDAY_TIME, CONF_SLEEP_TIME,
-    DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME,
+    CONF_WAKE_TIME, CONF_SLEEP_TIME, ANCHOR_DEFAULTS, anchor_time,
     CONF_CURVE_CONFIG,
-    CONF_UPDATE_INTERVAL, CONF_TRANSITION, CONF_TURN_ON_TRANSITION,
+    CONF_UPDATE_INTERVAL, CONF_TRANSITION,
     CONF_OVERRIDE_TIMEOUT, CONF_OVERRIDE_RESET_ON_OFF, CONF_PERSIST_OVERRIDES,
     CONF_RESPECT_TURN_ON_VALUES, CONF_SCENARIO_DURATION,
-    DEFAULT_UPDATE_INTERVAL, DEFAULT_TRANSITION, DEFAULT_TURN_ON_TRANSITION,
+    DEFAULT_UPDATE_INTERVAL, DEFAULT_TRANSITION,
+    MIN_UPDATE_INTERVAL, MAX_UPDATE_INTERVAL,
     DEFAULT_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_RESET_ON_OFF, DEFAULT_PERSIST_OVERRIDES,
     DEFAULT_RESPECT_TURN_ON_VALUES, DEFAULT_SCENARIO_DURATION,
     SCENARIO_DEFAULTS, CONFIGURABLE_SCENARIOS, scenario_option_keys,
-    CONF_SCENARIO_TRANSITION, OBSOLETE_OPTIONS,
+    CONF_SCENARIO_TRANSITION,
 )
 
 from homeassistant.const import CONF_NAME
@@ -35,12 +35,14 @@ _LOGGER = logging.getLogger(__name__)
 
 # The curve needs more than 6 hours between wake and sleep time
 MIN_ACTIVE_SPAN_MINUTES = 360
+# Collapsible section of the timing options (RM-R11)
+SECTION_ADVANCED = "advanced"
 
 
 def _anchor_errors(values: dict[str, Any]) -> dict[str, str]:
     """Validate the wake/sleep anchor times of a form."""
-    wake = dt_util.parse_time(str(values.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME))
-    sleep = dt_util.parse_time(str(values.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME))
+    wake = dt_util.parse_time(anchor_time(values, CONF_WAKE_TIME))
+    sleep = dt_util.parse_time(anchor_time(values, CONF_SLEEP_TIME))
     if wake is None or sleep is None:
         return {"base": "invalid_time"}
     span = ((sleep.hour * 60 + sleep.minute) - (wake.hour * 60 + wake.minute)) % 1440
@@ -60,9 +62,8 @@ def _target_errors(values: dict[str, Any]) -> dict[str, str]:
 
 def _anchor_schema(defaults: dict[str, Any]) -> dict:
     return {
-        vol.Required(CONF_WAKE_TIME, default=defaults.get(CONF_WAKE_TIME, DEFAULT_WAKE_TIME)): selector.TimeSelector(),
-        vol.Required(CONF_MIDDAY_TIME, default=defaults.get(CONF_MIDDAY_TIME, DEFAULT_MIDDAY_TIME)): selector.TimeSelector(),
-        vol.Required(CONF_SLEEP_TIME, default=defaults.get(CONF_SLEEP_TIME, DEFAULT_SLEEP_TIME)): selector.TimeSelector(),
+        vol.Required(key, default=anchor_time(defaults, key)): selector.TimeSelector()
+        for key in (CONF_WAKE_TIME, CONF_SLEEP_TIME)
     }
 
 
@@ -77,6 +78,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HCL Lighting."""
 
     VERSION = 1
+    # 1.2 (0.8.0): all settings in the options (see async_migrate_entry)
+    MINOR_VERSION = 2
 
     @staticmethod
     @callback
@@ -94,7 +97,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             errors = _target_errors(user_input) or _anchor_errors(user_input)
             if not errors:
-                return self.async_create_entry(title=user_input[CONF_NAME], data=user_input)
+                options = {k: v for k, v in user_input.items() if k != CONF_NAME}
+                return self.async_create_entry(title=user_input[CONF_NAME], data={}, options=options)
 
         defaults = user_input or {}
         return self.async_show_form(
@@ -125,31 +129,23 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         self._pending: dict[str, Any] = {}
 
     def _current(self) -> dict[str, Any]:
-        """Effective settings: entry data overridden by the options."""
-        entry = self.config_entry_proxy
-        return {**entry.data, **entry.options}
+        """Current settings (all in the options since entry version 1.2)."""
+        return dict(self.config_entry_proxy.options)
 
     def _merged_options(self, user_input: dict[str, Any]) -> dict[str, Any]:
         """Merge the form into the existing options.
 
         Options not shown in this form (e.g. the curve saved by the dashboard
         card) are kept. A saved curve is only discarded when an anchor time
-        (wake/midday/sleep) is changed, so the curve is regenerated from the
-        new anchors.
+        (wake/sleep) is changed, so the curve is regenerated from the new
+        anchors.
         """
         entry = self.config_entry_proxy
-        defaults = {
-            CONF_WAKE_TIME: DEFAULT_WAKE_TIME,
-            CONF_MIDDAY_TIME: DEFAULT_MIDDAY_TIME,
-            CONF_SLEEP_TIME: DEFAULT_SLEEP_TIME,
-        }
         new_options = {**entry.options, **user_input}
-        for key in OBSOLETE_OPTIONS:  # fixed behaviour since 0.7.0b9
-            new_options.pop(key, None)
-        for key, default in defaults.items():
-            old = entry.options.get(key) or entry.data.get(key) or default
-            new = user_input.get(key) or default
-            if dt_util.parse_time(str(old)) != dt_util.parse_time(str(new)):
+        for key in ANCHOR_DEFAULTS:
+            old = anchor_time(entry.options, key)
+            new = anchor_time(user_input, key)
+            if dt_util.parse_time(old) != dt_util.parse_time(new):
                 new_options.pop(CONF_CURVE_CONFIG, None)
                 break
         return new_options
@@ -202,25 +198,34 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     ) -> FlowResult:
         """Update timing and manual-control behaviour."""
         errors = {}
+        flat: dict[str, Any] = {}
         if user_input is not None:
-            if user_input[CONF_TRANSITION] >= user_input[CONF_UPDATE_INTERVAL]:
+            # the timing options come in their own section (RM-R11)
+            flat = {k: v for k, v in user_input.items() if k != SECTION_ADVANCED}
+            flat.update(user_input.get(SECTION_ADVANCED) or {})
+            if flat[CONF_TRANSITION] >= flat[CONF_UPDATE_INTERVAL]:
                 errors["base"] = "transition_too_long"
             else:
-                self._pending.update(user_input)
+                self._pending.update(flat)
                 return await self.async_step_scenarios()
 
-        current = {**self._current(), **(user_input or {})}
-        schema = vol.Schema(
+        current = {**self._current(), **flat}
+        advanced = vol.Schema(
             {
-                vol.Required(CONF_UPDATE_INTERVAL, default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): _number(10, 600, unit="s"),
+                vol.Required(CONF_UPDATE_INTERVAL, default=current.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)): _number(MIN_UPDATE_INTERVAL, MAX_UPDATE_INTERVAL, unit="s"),
                 vol.Required(CONF_TRANSITION, default=current.get(CONF_TRANSITION, DEFAULT_TRANSITION)): _number(0, 300, unit="s"),
-                vol.Required(CONF_TURN_ON_TRANSITION, default=current.get(CONF_TURN_ON_TRANSITION, DEFAULT_TURN_ON_TRANSITION)): _number(0, 30, unit="s"),
                 # Default: the update transition (behaviour up to 0.6)
                 vol.Required(CONF_SCENARIO_TRANSITION, default=current.get(CONF_SCENARIO_TRANSITION, current.get(CONF_TRANSITION, DEFAULT_TRANSITION))): _number(0, 300, unit="s"),
+            }
+        )
+        schema = vol.Schema(
+            {
                 vol.Required(CONF_OVERRIDE_TIMEOUT, default=current.get(CONF_OVERRIDE_TIMEOUT, DEFAULT_OVERRIDE_TIMEOUT)): _number(0, 1440, unit="min"),
                 vol.Required(CONF_OVERRIDE_RESET_ON_OFF, default=current.get(CONF_OVERRIDE_RESET_ON_OFF, DEFAULT_OVERRIDE_RESET_ON_OFF)): selector.BooleanSelector(),
                 vol.Required(CONF_PERSIST_OVERRIDES, default=current.get(CONF_PERSIST_OVERRIDES, DEFAULT_PERSIST_OVERRIDES)): selector.BooleanSelector(),
                 vol.Required(CONF_RESPECT_TURN_ON_VALUES, default=current.get(CONF_RESPECT_TURN_ON_VALUES, DEFAULT_RESPECT_TURN_ON_VALUES)): selector.BooleanSelector(),
+                # collapsed unless the form is shown again with an error in it
+                vol.Required(SECTION_ADVANCED): section(advanced, {"collapsed": not errors}),
             }
         )
         return self.async_show_form(step_id="behavior", data_schema=schema, errors=errors)

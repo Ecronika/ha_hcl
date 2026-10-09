@@ -10,7 +10,7 @@ import voluptuous as vol
 from homeassistant.components import persistent_notification
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_OFF, Platform
+from homeassistant.const import CONF_NAME, STATE_OFF, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
@@ -25,12 +25,18 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     CONF_WAKE_TIME,
-    CONF_MIDDAY_TIME,
     CONF_SLEEP_TIME,
-    DEFAULT_WAKE_TIME,
-    DEFAULT_MIDDAY_TIME,
-    DEFAULT_SLEEP_TIME,
     CONF_CURVE_CONFIG,
+    CONF_MIN_BRIGHTNESS,
+    CONF_TRANSITION,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
+    LEGACY_MIN_BRIGHTNESS,
+    MAX_UPDATE_INTERVAL,
+    MIN_UPDATE_INTERVAL,
+    REMOVED_OPTIONS,
+    anchor_time,
+    guest_issue_id,
     CONF_OVERRIDE_TIMEOUT,
     CONF_OVERRIDE_RESET_ON_OFF,
     CONF_PERSIST_OVERRIDES,
@@ -243,10 +249,9 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
              hcl_calc.generate_curve_from_config(curve_config)
         else:
              # No saved curve: default curve from the anchor times
-             wake = config_entry.options.get(CONF_WAKE_TIME) or config_entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
-             midday = config_entry.options.get(CONF_MIDDAY_TIME) or config_entry.data.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
-             sleep = config_entry.options.get(CONF_SLEEP_TIME) or config_entry.data.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
-             hcl_calc.generate_curve(wake, midday, sleep)
+             hcl_calc.generate_curve(
+                 anchor_time(config_entry.options, CONF_WAKE_TIME), anchor_time(config_entry.options, CONF_SLEEP_TIME)
+             )
         _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
         # Notify frontend to refresh
         async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
@@ -255,6 +260,45 @@ async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) ->
     # 3. Preview/Apply: lights follow the points until the next reload
     async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
 
+
+
+def migrated_options(data: Mapping[str, Any], options: Mapping[str, Any]) -> dict[str, Any]:
+    """Settings of an entry before version 1.2 as options of version 1.2 (0.8.0).
+
+    Up to 0.7 the setup stored the target and the anchor times in the entry
+    data and the options flow copied them into the options; every reader had
+    to fall back from the options to the data. Now all settings are options:
+    - setup values the options do not have are moved there (the name stays
+      the title of the entry),
+    - removed settings are dropped (midday anchor RM-R07, turn-on transition
+      RM-R10, options of 0.7.0 betas),
+    - the minimum brightness keeps the old default of 10 % if it was never set
+      (new instances: 3 %, RM-R06),
+    - the update interval is limited to 15-300 s, the transition stays
+      shorter than the interval (RM-R11).
+    """
+    new = {k: v for k, v in data.items() if k != CONF_NAME}
+    new.update(options)
+    for key in REMOVED_OPTIONS:
+        new.pop(key, None)
+    new.setdefault(CONF_MIN_BRIGHTNESS, LEGACY_MIN_BRIGHTNESS)
+    if CONF_UPDATE_INTERVAL in new:
+        new[CONF_UPDATE_INTERVAL] = max(MIN_UPDATE_INTERVAL, min(MAX_UPDATE_INTERVAL, new[CONF_UPDATE_INTERVAL]))
+    interval = new.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+    if CONF_TRANSITION in new and new[CONF_TRANSITION] >= interval:
+        new[CONF_TRANSITION] = interval - 1
+    return new
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate an entry of an older version (1.1 → 1.2: everything in the options)."""
+    if entry.version > 1:
+        return False  # from a newer version of the integration
+    if entry.minor_version < 2:
+        options = migrated_options(entry.data, entry.options)
+        hass.config_entries.async_update_entry(entry, data={}, options=options, minor_version=2)
+        _LOGGER.info("Migrated %s to entry version 1.2 (all settings in the options)", entry.title)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -278,13 +322,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
              curve_config = None
 
     if not curve_config:
-        # Legacy / Default Initialization
-        wake = entry.options.get(CONF_WAKE_TIME) or entry.data.get(CONF_WAKE_TIME) or DEFAULT_WAKE_TIME
-        midday = entry.options.get(CONF_MIDDAY_TIME) or entry.data.get(CONF_MIDDAY_TIME) or DEFAULT_MIDDAY_TIME
-        sleep = entry.options.get(CONF_SLEEP_TIME) or entry.data.get(CONF_SLEEP_TIME) or DEFAULT_SLEEP_TIME
-        
-        hcl_calc.generate_curve(wake, midday, sleep)
-        _LOGGER.debug("Initialized with Legacy Config")
+        # No saved curve: default curve from the anchor times
+        hcl_calc.generate_curve(
+            anchor_time(entry.options, CONF_WAKE_TIME), anchor_time(entry.options, CONF_SLEEP_TIME)
+        )
+        _LOGGER.debug("Initialized with the default curve")
 
     # Store shared instance
     # Initialize Logic Core
@@ -471,6 +513,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data.get(DATA_COMMAND_TRACKERS, {}).pop(entry.entry_id, None)
     await _override_store(hass, entry.entry_id).async_remove()
     ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, guest_issue_id(entry.entry_id))
     persistent_notification.async_dismiss(hass, f"{DOMAIN}_card_{entry.entry_id}")
     store = _onboarding_store(hass)
     data = await store.async_load() or {}

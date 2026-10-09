@@ -26,15 +26,12 @@ from homeassistant.const import EVENT_CALL_SERVICE, ENTITY_MATCH_ALL
 from .const import (
     DOMAIN,
     CONF_TARGET,
-    IGNORE_WINDOW_SECONDS,
     COMMAND_TIMEOUT_SECONDS,
     CONF_UPDATE_INTERVAL,
     CONF_TRANSITION,
-    CONF_TURN_ON_TRANSITION,
     CONF_RESPECT_TURN_ON_VALUES,
     DEFAULT_UPDATE_INTERVAL,
     DEFAULT_TRANSITION,
-    DEFAULT_TURN_ON_TRANSITION,
     DEFAULT_RESPECT_TURN_ON_VALUES,
     CONF_SCENARIO_TRANSITION,
 )
@@ -49,14 +46,8 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def configured_target(entry: ConfigEntry) -> dict[str, Any]:
-    """Target of an instance: the options if they have one, else the setup (RM-B35).
-
-    Checked by key, not by value: an empty target in the options must not
-    fall back to the lights of the first setup.
-    """
-    if CONF_TARGET in entry.options:
-        return entry.options[CONF_TARGET] or {}
-    return entry.data.get(CONF_TARGET) or {}
+    """Target of an instance (an empty target means no lights, RM-B35)."""
+    return entry.options.get(CONF_TARGET) or {}
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
@@ -141,7 +132,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         options = entry.options
         self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         self._transition = float(options.get(CONF_TRANSITION, DEFAULT_TRANSITION))
-        self._turn_on_transition = float(options.get(CONF_TURN_ON_TRANSITION, DEFAULT_TURN_ON_TRANSITION))
         # Transition when the scenario changes (default: the update transition)
         self._scenario_transition = float(options.get(CONF_SCENARIO_TRANSITION, self._transition))
         self._respect_turn_on_values = bool(
@@ -669,12 +659,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         except Exception:
              _LOGGER.exception("Error in HCL update loop")
 
-    @callback
-    def _end_protection_of(self, entity_ids: list[str]) -> None:
-        """A light command failed: its transition protection ends."""
-        for entity_id in entity_ids:
-            self.override_manager.end_reengaging(entity_id)
-
     async def _handle_light_state_change(self, event: Event) -> None:
         """Handle state changes of monitored lights."""
         try:
@@ -723,29 +707,18 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                      self._calculated_brightness = fresh_b
                      self._calculated_kelvin = fresh_k
 
-                     # The turn-on transition must not be cut short by the next
-                     # update cycles (like a long apply or scenario transition);
-                     # set before sending, ended if the command is not sent.
-                     protect = self._turn_on_transition > 0
-                     if protect:
-                         self.override_manager.set_reengaging(entity_id, self._turn_on_transition)
-
-                     # apply_fast sets the tracking values and the ignore window
-                     # synchronously before the command starts (no self-detection
-                     # of the first state report). The command runs in the
-                     # background (RM-T17); if it fails, the tracking is restored
-                     # and the transition protection ends.
-                     sent = await self.controller.apply_fast(
+                     # The light gets the values at once, without transition
+                     # (RM-R10). apply_fast sets the tracking values and the
+                     # ignore window synchronously before the command starts
+                     # (no self-detection of the first state report). The
+                     # command runs in the background (RM-T17); if it fails,
+                     # the tracking is restored.
+                     await self.controller.apply_fast(
                          entity_id,
                          fresh_b,
                          fresh_k,
                          state_obj=new_state,
-                         transition=self._turn_on_transition,
-                         ignore_seconds=IGNORE_WINDOW_SECONDS + self._turn_on_transition,
-                         on_failure=self._end_protection_of if protect else None,
                      )
-                     if protect and not sent:
-                         self.override_manager.end_reengaging(entity_id)
                      # IMPORTANT: Return here to avoid detecting this initial state as an override
                      return
 

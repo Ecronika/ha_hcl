@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b1] - 2026-10-09
+First pre-release (beta) of 0.8.0: the removals of the negative list (RM-R06 to RM-R12; RM-R05 not done, both night scenarios stay) and the reorganised tests (RM-T23). The minimum Home Assistant version stays 2024.7.
+
+### Breaking changes and upgrade notes
+- **New default curve** (RM-R06, RM-R07) for instances without a curve saved in the card: a quick morning rise (30 % / 3000 K at wake time, 90 % / 4500 K after 20 minutes, 100 % / 5000 K after one hour), 100 % during the day with 6000 K five hours after wake time, from three hours before sleep time down to 10 % / 2200 K, and a dim, warm night (5 % / 2200 K) until the wake time. **No midday dip** any more. A curve saved in the card is not changed.
+- **Midday time removed** (RM-R07): the anchor "Social midday" is gone from setup and options, and `midday_time` from the response of `hcl_lighting.get_curve`. The curve is generated from the wake and sleep time.
+- **Minimum brightness 3 %** for new instances (RM-R06; before 10 %). Instances set up before keep their minimum; if it was never changed it is stored as 10 %. The night of the default curve (5 %) only shows with a minimum of 5 % or less.
+- **Turn-on transition removed** (RM-R10): a light that is switched on gets the HCL values at once, without transition; the option "Transition when switched on" is gone.
+- **Timing options in a collapsed section** "Advanced: timing" (RM-R11); the update interval is limited to 15–300 s (before 10–600 s). Stored values outside are moved to the limit, the transition stays shorter than the interval.
+- **Lights with colour temperature stay in colour temperature mode** (RM-R09): a light that supports colour temperature and colour (e.g. RGBCCT) is limited to its colour temperature range instead of switching to an XY colour outside it (no colour jump at the range limit, no RGB white). Lights without colour temperature keep the XY simulation.
+- **Card: presets replaced by "Default curve"** (RM-R08): the button loads the default curve for the wake and sleep time of the instance (sensor attribute `default_points`). The presets Default with quiet night, without midday dip, Focus, Relax, Early bird and Night owl are gone.
+- **Scenario Guest deprecated** (RM-R12): it still works in 0.8.0, but selecting it logs a warning and shows a repair issue; it will be removed in 0.9.0. Switch "HCL active" off instead (also in automations with `hcl_lighting.set_scenario`).
+- **Config entry version 1.2**: all settings are stored in the options (target and anchor times were in the entry data up to 0.7). The migration runs once at the first start.
+
+### Internal
+- Tests organised by responsibility (RM-T23): shared helpers in `tests/support/` (one light test double), no imports between test modules; the roadmap IDs stay in the test names.
+
 ## [0.7.1] - 2026-10-08
 Bugfix release: RM-B41, RM-B42 and RM-D06 of the roadmap. The minimum Home Assistant version stays 2024.7.
 

@@ -8,7 +8,6 @@ from ..const import (
     DEFAULT_MIN_BRIGHTNESS, 
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_WAKE_TIME,
-    DEFAULT_MIDDAY_TIME,
     DEFAULT_SLEEP_TIME,
 )
 
@@ -37,7 +36,7 @@ class HCLCalculator:
         # True while the lights follow unsaved points (preview/apply from the card)
         self.preview_active = False
         # Boot with default config
-        self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_MIDDAY_TIME, DEFAULT_SLEEP_TIME)
+        self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_SLEEP_TIME)
 
     def generate_curve_from_config(self, config: CurveConfig):
         """Generate the active curve from a CurveConfig object."""
@@ -79,101 +78,10 @@ class HCLCalculator:
         self.active_curve = unique_points
         _LOGGER.debug("Calculated HCL Curve with %d control points", len(self.active_curve))
 
-    def generate_curve(self, wake_str: str, midday_str: str, sleep_str: str):
-        """Legacy wrapper: Generate curve from 3 anchors (v0.3.0 style) -> Migrates to v0.4.0 points."""
-        config = self.migrate_legacy_config(wake_str, midday_str, sleep_str)
-        self.generate_curve_from_config(config)
+    def generate_curve(self, wake_str: str, sleep_str: str):
+        """Set the default curve for the wake and sleep time (RM-R06/R07)."""
+        self.calculate_curve_from_points(default_points(wake_str, sleep_str))
 
-    def migrate_legacy_config(self, wake_str: str, midday_str: str, sleep_str: str) -> CurveConfig:
-        """Migrate v0.3.0 anchors to v0.4.0 explicit point list (v0.2.1 Replica Profile)."""
-        try:
-            wake_time = dt_util.parse_time(wake_str) or dt_util.parse_time(DEFAULT_WAKE_TIME)
-            midday_time = dt_util.parse_time(midday_str) or dt_util.parse_time(DEFAULT_MIDDAY_TIME)
-            sleep_time = dt_util.parse_time(sleep_str) or dt_util.parse_time(DEFAULT_SLEEP_TIME)
-        except Exception:
-            wake_time = dt_util.parse_time(DEFAULT_WAKE_TIME)
-            midday_time = dt_util.parse_time(DEFAULT_MIDDAY_TIME)
-            sleep_time = dt_util.parse_time(DEFAULT_SLEEP_TIME)
-
-        def to_min(t): return t.hour * 60 + t.minute
-        
-        w_min = to_min(wake_time)
-        m_min = to_min(midday_time)
-        s_min = to_min(sleep_time)
-
-        # Sanity Check: Prevent invalid or compressed spans
-        # Calculate active day duration (accounting for midnight wrap)
-        total_span = (s_min - w_min) % 1440
-        if total_span <= 360: # Less than 6 hours active day is suspicious
-            _LOGGER.warning(
-                "Legacy config has very short wake-sleep span (%d min). Using safe defaults.", 
-                total_span
-            )
-            w_min, m_min, s_min = 420, 750, 1320 # Fallback 07:00, 12:30, 22:00
-            total_span = (s_min - w_min) % 1440
-
-        # v0.2.1 Replica Logic (Offsets)
-        # Structure: time, kelvin, brightness
-        def build(w, m, s):
-            return [
-                # Wake Sector
-                (w, 2700, 30),
-                (w + 120, 4500, 50),
-                (w + 150, 5500, 75),
-                (w + 180, 6500, 100),
-
-                # Midday Sector
-                (m - 30, 6500, 100),
-                (m, 4000, 50), # Dip
-                (m + 30, 4000, 50),
-                (m + 60, 6000, 75),
-                (m + 90, 6000, 75),
-                (m + 210, 4000, 50),
-
-                # Sleep Sector
-                (s - 240, 2700, 30),
-                (s, 2200, 10),
-            ]
-
-        # Elastic Intervals: the three sectors must stay in chronological order
-        # (times relative to wake, unwrapped): w+180 < m-30 and m+210 < s-240.
-        # Midday is moved into its feasible window; if the active day is too short
-        # for all sectors, the default template (07:00/12:30/22:00, 900 min) is
-        # scaled to the wake..sleep span instead.
-        rel_m = (m_min - w_min) % 1440
-        min_rel_m = 180 + 30 + 1
-        max_rel_m = total_span - 240 - 210 - 1
-        if min_rel_m <= max_rel_m:
-            if not min_rel_m <= rel_m <= max_rel_m:
-                clamped = max(min_rel_m, min(max_rel_m, rel_m))
-                _LOGGER.warning(
-                    "Midday time does not fit between wake and sleep time; using %02d:%02d instead",
-                    ((w_min + clamped) % 1440) // 60, ((w_min + clamped) % 1440) % 60,
-                )
-                rel_m = clamped
-            raw_points = build(w_min, w_min + rel_m, w_min + total_span)
-        else:
-            _LOGGER.warning(
-                "Wake-sleep span (%d min) too short for the midday sector; scaling the default profile",
-                total_span,
-            )
-            scale = total_span / 900
-            raw_points = [
-                (w_min + round(t * scale), k, b) for t, k, b in build(0, 330, 900)
-            ]
-
-        # Convert to HCLPoint list
-        points: List[HCLPoint] = []
-        for t, k, b in raw_points:
-            # Normalize t
-            norm_t = t
-            if norm_t < 0: norm_t += 1440
-            if norm_t >= 1440: norm_t -= 1440
-            
-            points.append({"t": norm_t, "k": k, "b": b})
-            
-        return {"points": points, "version": 2}
-    
     MINUTES_PER_DAY = 1440
     
     def get_hcl_values(
@@ -374,3 +282,50 @@ class HCLCalculator:
         
         # Standard Hermite formula uses derivatives w.r.t t (0..1), so scale slopes by h
         return h00*y0 + h10*h*m0 + h01*y1 + h11*h*m1
+
+
+# Default curve (RM-R06/R07): (minutes from the anchor, kelvin, brightness %).
+# Day: from the wake time - a gentle start, activation within 20 minutes, a
+# bright plateau, cooler towards midday (wake + 5 h) ...
+_FROM_WAKE = ((0, 3000, 30), (20, 4500, 90), (60, 5000, 100), (300, 6000, 100))
+# ... back to 5000 K, from 3 h before the sleep time down to 10 % / 2200 K
+_TO_SLEEP = ((-240, 5000, 100), (-180, 5000, 100), (0, 2200, 10))
+# Night (sleep to wake time): dim and warm for orientation; the rise starts at
+# the wake time, not before
+_NIGHT = (2200, 5)
+_NIGHT_AFTER_SLEEP = 15
+_NIGHT_MIN_MINUTES = 30
+# The day needs this span for the points above (wake + 5 h < sleep - 4 h);
+# a shorter day (> 6 h, checked by the config flow) gets the reference day
+# (07:00-22:00) scaled to its span.
+_FULL_DAY_MINUTES = 300 + 240 + 1
+_REFERENCE_DAY_MINUTES = 900
+_FALLBACK = ("07:00", "22:00")
+
+
+def _minutes(value: str | None, default: str) -> int:
+    parsed = dt_util.parse_time(str(value)) if value else None
+    parsed = parsed or dt_util.parse_time(default)
+    return parsed.hour * 60 + parsed.minute
+
+
+def default_points(wake_str: str | None, sleep_str: str | None) -> List[HCLPoint]:
+    """Control points of the default curve for a wake and sleep time (RM-R06/R07)."""
+    wake = _minutes(wake_str, DEFAULT_WAKE_TIME)
+    sleep = _minutes(sleep_str, DEFAULT_SLEEP_TIME)
+    span = (sleep - wake) % 1440
+    if span <= 360:  # rejected by the config flow; old or invalid data
+        _LOGGER.warning("Wake-sleep span (%d min) too short; using 07:00-22:00", span)
+        wake, sleep = _minutes(_FALLBACK[0], DEFAULT_WAKE_TIME), _minutes(_FALLBACK[1], DEFAULT_SLEEP_TIME)
+        span = (sleep - wake) % 1440
+    day = [(t, k, b) for t, k, b in _FROM_WAKE] + [(span + t, k, b) for t, k, b in _TO_SLEEP]
+    if span < _FULL_DAY_MINUTES:
+        scale = span / _REFERENCE_DAY_MINUTES
+        reference = [(t, k, b) for t, k, b in _FROM_WAKE] + [
+            (_REFERENCE_DAY_MINUTES + t, k, b) for t, k, b in _TO_SLEEP
+        ]
+        day = [(round(t * scale), k, b) for t, k, b in reference]
+    night = 1440 - span
+    if night >= _NIGHT_MIN_MINUTES:
+        day += [(span + _NIGHT_AFTER_SLEEP, *_NIGHT), (night + span - 1, *_NIGHT)]
+    return [{"t": (wake + t) % 1440, "k": k, "b": b} for t, k, b in day]

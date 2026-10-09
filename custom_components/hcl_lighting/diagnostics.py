@@ -102,7 +102,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
                     "color_mode": st and st.attributes.get("color_mode"),
                     "min_color_temp_kelvin": st and st.attributes.get("min_color_temp_kelvin"),
                     "max_color_temp_kelvin": st and st.attributes.get("max_color_temp_kelvin"),
-                    "capability": controller.capability_for(eid, kelvin or 2700),
+                    "capability": controller.capability_for(eid),
                     "manual_control": manager.is_overridden(eid),
                     "returning_to_hcl": manager.is_reengaging(eid),
                 }
