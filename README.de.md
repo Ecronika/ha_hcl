@@ -11,7 +11,7 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 - **Sofort beim Einschalten**: Lichter bekommen die HCL-Werte direkt nach dem Einschalten, ohne Übergang (nicht im Gastmodus; wer während „Schlafen“ einschaltet, steuert manuell).
 - **Sparsame Befehle**: Aktualisiert wird nur bei spürbarer Änderung (Helligkeit > 1 %, Farbtemperatur > 50 K).
 - **Sollwert-Sensoren**, **Aktionen**, **Logbuch und Event** bei manueller Steuerung, **Diagnose** und **Reparatur-Hinweis** bei Doppelsteuerung.
-- **Farbfähigkeiten** werden erkannt: Lichter mit Farbtemperatur bekommen sie immer direkt, begrenzt auf ihren Bereich (auch RGBCCT-Leuchten: kein Farbsprung an der Bereichsgrenze, kein RGB-Weiß); Farbleuchten ohne Farbtemperatur (XY, HS, RGB, RGBW, RGBWW) bekommen sie über XY (Kurvenbereich 2000–7000 K).
+- **Farbfähigkeiten** werden erkannt: Lichter mit Farbtemperatur bekommen sie immer direkt, begrenzt auf ihren Bereich (auch RGBCCT-Leuchten: kein Farbsprung an der Bereichsgrenze, kein RGB-Weiß; eine Leuchte im Farbmodus, z. B. aus der XY-Simulation bis 0.7, wird in den Farbtemperatur-Modus zurückgeholt); Farbleuchten ohne Farbtemperatur (XY, HS, RGB, RGBW, RGBWW) bekommen sie über XY (Kurvenbereich 2000–7000 K).
 
 ## Installation
 1. HACS → Integrationen → Menü → Benutzerdefinierte Repositories → `https://github.com/Ecronika/ha_hcl` als **Integration** hinzufügen und installieren, Home Assistant neu starten.
@@ -116,7 +116,7 @@ Standardmäßig bekommt ein eingeschaltetes Licht sofort die HCL-Werte, auch wen
 ## Aktionen (Services)
 | Aktion | Felder | Wirkung |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (beliebige Entität der Instanz), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sendet die aktuellen Werte sofort an eingeschaltete Lichter. Schaltet nie ein; manuell gesteuerte nur mit `release_manual_control: true`; nicht im Gastmodus. Ein Übergang länger als der der Aktualisierungen wird nicht unterbrochen. Scheitert ein Lichtbefehl oder antwortet ein Licht nicht innerhalb von 10 s, endet die Aktion mit einem Fehler; die übrigen Lichter sind aktualisiert |
+| `hcl_lighting.apply` | `entity_id` (beliebige Entität der Instanz), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sendet die aktuellen Werte sofort an eingeschaltete Lichter. Die Lichter der Instanz werden beim Aufruf aufgelöst (Bereiche, Geräte, Labels, Gruppen), auch bei ausgeschaltetem *HCL aktiv*. Schaltet nie ein; manuell gesteuerte nur mit `release_manual_control: true`; nicht im Gastmodus. Ein Übergang länger als der der Aktualisierungen wird nicht unterbrochen. Scheitert ein Lichtbefehl oder antwortet ein Licht nicht innerhalb von 10 s, endet die Aktion mit einem Fehler; die übrigen Lichter sind aktualisiert |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, Standard alle), `manual_control` (Standard `true`) | Lichter pausieren oder an HCL zurückgeben |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = bis zur Änderung) | Setzt das Szenario; eine Dauer ersetzt das eingestellte Ende |
 | `hcl_lighting.get_curve` | `entity_id` | Antwortdaten: `points`, `saved_points`, `preview_active`, `wake_time`, `sleep_time` |

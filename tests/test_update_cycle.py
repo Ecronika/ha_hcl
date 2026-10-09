@@ -8,7 +8,7 @@ from homeassistant.util import dt as dt_util
 
 from custom_components.hcl_lighting.const import DOMAIN
 
-from .support.entries import CT_ATTRS, SELECT, SWITCH, core, hcl_on, set_light, settle, setup_entry, switch_entity
+from .support.entries import CT_ATTRS, SELECT, SWITCH, core, hcl_on, set_light, settle, setup_entry, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -20,7 +20,7 @@ async def _blocked_cycle(hass, lights):
     lights.calls.clear()
     lights.gate = asyncio.Event()
     gate = lights.gate
-    cycle = hass.async_create_task(switch_entity(hass)._update_hcl())
+    cycle = hass.async_create_task(timer_cycle(hass))
     await lights.wait_for_calls(1)  # a cycle hangs on a slow light
     return gate, cycle
 
@@ -75,13 +75,12 @@ async def test_rm_b01_periodic_update_is_skipped_while_busy(hass, no_frontend_re
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    sw = switch_entity(hass)
     lights.calls.clear()
     lights.gate = asyncio.Event()
     gate = lights.gate
-    first = hass.async_create_task(sw._update_hcl())
+    first = hass.async_create_task(timer_cycle(hass))
     await lights.wait_for_calls(1)
-    await sw._update_hcl()  # timer tick while busy: skipped, returns at once
+    await timer_cycle(hass)  # timer tick while busy: skipped, returns at once
     gate.set()
     await first
     await hass.async_block_till_done()
@@ -94,12 +93,11 @@ async def test_rm_b02_apply_waits_for_a_running_update(hass, no_frontend_registr
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    sw = switch_entity(hass)
     lights.calls.clear()
     lights.events.clear()
     lights.gate = asyncio.Event()
     gate = lights.gate
-    cycle = hass.async_create_task(sw._update_hcl())
+    cycle = hass.async_create_task(timer_cycle(hass))
     await lights.wait_for_calls(1)
     apply = hass.async_create_task(
         hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 7}, blocking=True)
@@ -119,13 +117,12 @@ async def test_rm_b18_older_apply_does_not_send_a_later_scenario(hass, no_fronte
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"], options={"scenario_transition": 120})
     await hcl_on(hass)
-    sw = switch_entity(hass)
     lights.calls.clear()
     lights.gate = asyncio.Event()
     gate = lights.gate
-    cycle = hass.async_create_task(sw._update_hcl())
+    cycle = hass.async_create_task(timer_cycle(hass))
     await lights.wait_for_calls(1)  # a cycle hangs on a slow light
-    auto = core(hass, entry)["controller"].calculate_target_values(dt_util.now())
+    auto = core(hass, entry).controller.calculate_target_values(dt_util.now())
     apply = hass.async_create_task(_apply(hass, transition=0))
     await settle()
     await hass.services.async_call("select", "select_option", {"entity_id": SELECT, "option": "focus"}, blocking=True)
@@ -145,7 +142,7 @@ async def test_rm_b20_scenario_after_a_waiting_long_apply_is_not_blocked(hass, n
     entry = await setup_entry(hass, ["light.a"], options={"scenario_transition": 120})
     await hcl_on(hass)
     gate, cycle = await _blocked_cycle(hass, lights)
-    auto = core(hass, entry)["controller"].calculate_target_values(dt_util.now())
+    auto = core(hass, entry).controller.calculate_target_values(dt_util.now())
     apply = hass.async_create_task(
         hass.services.async_call("hcl_lighting", "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     )

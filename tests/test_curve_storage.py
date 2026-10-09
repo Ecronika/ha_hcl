@@ -140,7 +140,7 @@ async def test_rm_t13_saving_the_curve_does_not_reload(hass, no_frontend_registr
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    calc = core(hass, entry)["calculator"]
+    calc = core(hass, entry).calculator
     ours = _hcl_entities(hass)
     unavailable = []
     unsub = hass.bus.async_listen(
@@ -189,7 +189,7 @@ async def test_rm_t13_saved_curve_survives_a_reload(hass, no_frontend_registrati
     await hass.async_block_till_done()
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    assert core(hass, entry)["calculator"].active_curve == POINTS
+    assert core(hass, entry).calculator.active_curve == POINTS
     assert hass.states.get(SENSOR).attributes["control_points"] == POINTS
 
 
@@ -211,7 +211,7 @@ async def test_rm_t13_other_option_changes_still_reload(hass, no_frontend_regist
     assert core(hass, entry) is not second
     assert entry.options["transition"] == 9
     assert entry.options[CONF_CURVE_CONFIG]["points"] == POINTS
-    assert core(hass, entry)["calculator"].active_curve == POINTS
+    assert core(hass, entry).calculator.active_curve == POINTS
 
 
 async def test_rm_t13_save_ends_a_running_transition_protection(hass, no_frontend_registration):
@@ -221,7 +221,7 @@ async def test_rm_t13_save_ends_a_running_transition_protection(hass, no_fronten
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
-    om = core(hass, entry)["override_manager"]
+    om = core(hass, entry).override_manager
     assert om.is_reengaging("light.a")
     lights.calls.clear()
     await hass.services.async_call(
@@ -262,7 +262,7 @@ async def test_b03_changed_anchor_times_regenerate_curve(hass, no_frontend_regis
     )
     await _run_options_flow(hass, entry, **{CONF_WAKE_TIME: "06:00:00"})
     assert CONF_CURVE_CONFIG not in entry.options
-    curve = core(hass, entry)["calculator"].active_curve
+    curve = core(hass, entry).calculator.active_curve
     assert {"t": 360, "k": 3000, "b": 30} in curve  # regenerated from the new wake time
 
 

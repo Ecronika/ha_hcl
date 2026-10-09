@@ -266,3 +266,26 @@ async def test_rm_r08_curve_sensor_has_the_default_curve_of_the_anchor_times(has
     attrs = hass.states.get(SENSOR).attributes
     assert attrs["default_points"] == default_points("06:15", "23:00")
     assert "default_points" in HCLLightingCurveSensor._unrecorded_attributes
+
+
+# ---------------------------------------------------------------- RM-T21
+async def test_rm_t21_entities_share_one_device_and_take_their_icons_from_icons_json(hass, no_frontend_registration):
+    import json
+    from pathlib import Path
+
+    from homeassistant.helpers import device_registry as dr
+
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"])
+    entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert len(entities) == 7
+    devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    assert len(devices) == 1 and devices[0].identifiers == {(DOMAIN, entry.entry_id)}
+    assert {e.device_id for e in entities} == {devices[0].id}
+    icons = json.loads(
+        (Path(__file__).parents[1] / "custom_components" / DOMAIN / "icons.json").read_text(encoding="utf-8")
+    )["entity"]
+    for e in entities:
+        assert e.original_icon is None, e.entity_id  # no icon in the code
+        if e.translation_key != "hcl_curve_sensor":  # timestamp sensor: icon of its device class
+            assert icons[e.domain][e.translation_key]["default"].startswith("mdi:"), e.entity_id

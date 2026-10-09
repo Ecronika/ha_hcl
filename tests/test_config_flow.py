@@ -61,11 +61,11 @@ async def test_a12_setup_with_anchor_times(hass, no_frontend_registration):
     assert result["type"] == "create_entry"
     entry = result["result"]
     # curve from the setup anchors
-    assert {"t": 360, "b": 30, "k": 3000} in core(hass, entry)["calculator"].active_curve
+    assert {"t": 360, "b": 30, "k": 3000} in core(hass, entry).calculator.active_curve
     # all settings in the options (entry version 1.2); a new instance has min 3 % (RM-R06)
     assert entry.data == {} and entry.minor_version == 2
     assert entry.options["target"] == {"entity_id": ["light.a"]} and entry.options["wake_time"] == "06:00:00"
-    assert core(hass, entry)["controller"].brightness_limits() == (3, 100)
+    assert core(hass, entry).controller.brightness_limits() == (3, 100)
 
 
 # ---------------------------------------------------------------- RM-B35

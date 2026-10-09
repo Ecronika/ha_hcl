@@ -6,8 +6,9 @@ target-version = "py312"
 # F: pyflakes (unused imports/variables, undefined names, redefinitions)
 # E4/E9: misplaced imports, syntax errors
 # PLC0415: imports belong at module level (RM-T16)
-select = ["F", "E4", "E9", "PLC0415"]
+# BLE001/S110: no silent "except Exception" (RM-T19); intended ones carry a noqa with the reason
+select = ["F", "E4", "E9", "PLC0415", "BLE001", "S110"]
 
 [lint.per-file-ignores]
-"tests/**" = ["PLC0415"]
+"tests/**" = ["PLC0415", "BLE001"]
 "tests_frontend/**" = ["PLC0415"]

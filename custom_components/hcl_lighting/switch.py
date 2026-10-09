@@ -10,7 +10,6 @@ from homeassistant.util import dt as dt_util
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.core import Context, HomeAssistant, callback, Event
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -40,6 +39,8 @@ from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
+from .entity import HCLEntity
+from .runtime import HCLConfigEntry
 from .services import action_context, async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,22 +51,17 @@ def configured_target(entry: ConfigEntry) -> dict[str, Any]:
     return entry.options.get(CONF_TARGET) or {}
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
+async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the HCL Switch from a config entry."""
-    
-    # Retrieve Shared Logic Core
-    logic_core = hass.data[DOMAIN][entry.entry_id]
-    hcl_calc = logic_core["calculator"]
-    controller = logic_core["controller"]
-    override_manager = logic_core["override_manager"]
-    
-    switch = HCLSwitch(hass, entry, controller, hcl_calc, override_manager)
-    logic_core["switch"] = switch
+    runtime = entry.runtime_data
+    controller = runtime.controller
+    switch = HCLSwitch(hass, entry, controller, runtime.calculator, runtime.override_manager)
+    runtime.switch = switch
 
     async_add_entities([
         switch,
-        HCLAdaptSwitch(entry, controller, "adapt_brightness", "mdi:brightness-6"),
-        HCLAdaptSwitch(entry, controller, "adapt_color", "mdi:thermometer"),
+        HCLAdaptSwitch(entry, controller, "adapt_brightness"),
+        HCLAdaptSwitch(entry, controller, "adapt_color"),
     ])
 
 
@@ -78,10 +74,9 @@ _COLOR_ATTRS = {
 }
 _TARGET_KEYS = ("entity_id", "device_id", "area_id", "floor_id", "label_id")
 
-class HCLSwitch(RestoreEntity, SwitchEntity):
+class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     """Representation of a HCL Lighting Switch."""
 
-    _attr_has_entity_name = True
     _attr_translation_key = "hcl_switch"
     # Live state only: the calculated values change with every curve step
     # (history: target value sensors), the light list is large and manual
@@ -93,13 +88,11 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller: HCLLightController, hcl_calc: HCLCalculator, override_manager: OverrideManager) -> None:
         """Initialize the switch."""
+        super().__init__(entry, None)
         self.hass = hass
-        self._entry = entry
-        self._attr_unique_id = entry.entry_id
-        
+
         # State
         self._attr_is_on = False
-        self._attr_icon = "mdi:theme-light-dark"
         
         self._timer_remove_callback = None
         self._state_listener_remove_callback = None
@@ -321,16 +314,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         return self._entry.title
 
     @property
-    def device_info(self):
-        """Return device info."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.title,
-            manufacturer="HCL Integration",
-            model="HCL Controller",
-        )
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return the state attributes."""
         return {
@@ -347,10 +330,11 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         return self._added
 
     def controlled_lights(self) -> set[str]:
-        """Lights of this instance, resolved now (for permission checks).
+        """Lights of this instance, resolved now (permission checks and actions).
 
         Not the runtime cache: it is not kept current while HCL is off, so a
-        light that joined an area or group meanwhile would be missing (RM-B34).
+        light that joined an area or group meanwhile would be missing (RM-B34,
+        RM-B44).
         """
         return self.controller.resolve_targets(configured_target(self._entry))
 
@@ -358,7 +342,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         """Turn the switch on."""
         context = action_context(self)
         # A user switching HCL on sends the HCL values to all its lights
-        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
+        await async_check_lights(self.hass, context, self._entry.runtime_data)
         await self._async_start()
         # Immediate update (linked to the request that switched HCL on)
         await self.async_request_update(context)
@@ -451,8 +435,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
         if brightness is None:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="guest_mode")
-        if not self._resolved_targets:
-            await self._re_evaluate_targets_and_listeners()
         targets = self._checked_lights(lights)
         async with self._update_lock:
             if release_manual_control:
@@ -500,8 +482,6 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
         self, lights: list[str] | None, manual_control: bool, context: Context | None = None
     ) -> None:
         """Pause lights (manual control) or hand them back to HCL (service)."""
-        if not self._resolved_targets:
-            await self._re_evaluate_targets_and_listeners()
         targets = self._checked_lights(lights)
         for eid in targets:
             if manual_control:
@@ -512,9 +492,14 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             await self.async_request_update(context)
 
     def _checked_lights(self, lights: list[str] | None) -> list[str]:
+        """Lights of an action: the given ones, which must belong to the instance,
+        or all of them. Resolved now like the permission check (controlled_lights),
+        not from the runtime cache, which is not kept current while HCL is off
+        (RM-B44); an action does not start the runtime listeners."""
+        controlled = self.controlled_lights()
         if not lights:
-            return sorted(self._resolved_targets)
-        unknown = sorted(set(lights) - self._resolved_targets)
+            return sorted(controlled)
+        unknown = sorted(set(lights) - controlled)
         if unknown:
             raise ServiceValidationError(
                 translation_domain=DOMAIN,
@@ -616,7 +601,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                         self.override_manager.reset_override(eid)
 
             # 3. Check for Re-engagements (Expired Overrides)
-            expired_overrides = self.override_manager.get_pending_reengagements()
+            expired_overrides = self.override_manager.pop_expired_overrides()
             for eid in expired_overrides:
                 # Only lights that are still on are brought back to HCL;
                 # re-engaging must never switch a light on.
@@ -634,7 +619,7 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
                 if (
                     state
                     and state.state == STATE_ON
-                    and not self.override_manager.own_report_pending(eid, state)
+                    and not self.override_manager.settle_open_report(eid, state)
                     and not self.override_manager.is_overridden(eid)
                     and not self.override_manager.is_reengaging(eid)
                 ):
@@ -745,39 +730,25 @@ class HCLSwitch(RestoreEntity, SwitchEntity):
             _LOGGER.exception("Error handling state change for %s", event.data.get("entity_id", "unknown"))
 
 
-class HCLAdaptSwitch(RestoreEntity, SwitchEntity):
+class HCLAdaptSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     """Switch that enables adaptation of brightness or colour temperature."""
 
-    _attr_has_entity_name = True
-
-    def __init__(self, entry: ConfigEntry, controller: HCLLightController, key: str, icon: str) -> None:
+    def __init__(self, entry: ConfigEntry, controller: HCLLightController, key: str) -> None:
         """Initialize (key: adapt_brightness | adapt_color)."""
-        self._entry = entry
+        super().__init__(entry, key)
         self._controller = controller
         self._key = key
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
         self._attr_translation_key = key
-        self._attr_icon = icon
 
     @property
     def is_on(self) -> bool:
         """Return true if HCL adapts this attribute."""
         return getattr(self._controller, self._key)
 
-    @property
-    def device_info(self):
-        """Return device info (same HCL device as the main switch)."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)},
-            name=self._entry.title,
-            manufacturer="HCL Integration",
-            model="HCL Controller",
-        )
-
     async def _async_set(self, value: bool) -> None:
         context = action_context(self)
         # The change is applied to all lights at once
-        await async_check_lights(self.hass, context, self.hass.data[DOMAIN][self._entry.entry_id])
+        await async_check_lights(self.hass, context, self._entry.runtime_data)
         setattr(self._controller, self._key, value)
         self.async_write_ha_state()
         async_check_conflicts(self.hass)

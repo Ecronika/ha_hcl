@@ -68,7 +68,7 @@ async def test_rm_b31_pausing_needs_no_control_of_other_lights(
     await hass.services.async_call(
         DOMAIN, "set_manual_control", {"entity_id": SWITCH, "lights": ["light.a"]}, blocking=True, context=ctx
     )
-    assert core(hass, entry)["override_manager"].is_overridden("light.a")
+    assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
 @pytest.mark.parametrize(
@@ -249,7 +249,7 @@ async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registrat
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     await hcl_on(hass)
-    controller = core(hass, entry)["controller"]
+    controller = core(hass, entry).controller
     for service, data in (
         ("apply", {"entity_id": SWITCH, "release_manual_control": True}),
         ("set_scenario", {"entity_id": SELECT, "scenario": "focus"}),
@@ -257,7 +257,7 @@ async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registrat
         ("update_curve", {"entity_id": SENSOR, "mode": "revert"}),
     ):
         set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
-        core(hass, entry)["override_manager"].reset_override("light.a")
+        core(hass, entry).override_manager.reset_override("light.a")
         lights.calls.clear()
         origin = Context(user_id=hass_admin_user.id)
         await hass.services.async_call(DOMAIN, service, data, blocking=True, context=origin)

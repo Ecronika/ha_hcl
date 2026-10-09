@@ -7,6 +7,7 @@ from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.hcl_lighting.const import DOMAIN
+from custom_components.hcl_lighting.runtime import HCLRuntimeData
 
 CT_ATTRS = {
     "supported_color_modes": ["color_temp"],
@@ -35,9 +36,9 @@ async def setup_entry(hass: HomeAssistant, lights: list[str], options: dict | No
     return entry
 
 
-def core(hass: HomeAssistant, entry: MockConfigEntry) -> dict:
-    """Return the logic core of an entry."""
-    return hass.data[DOMAIN][entry.entry_id]
+def core(hass: HomeAssistant, entry: MockConfigEntry) -> HCLRuntimeData:
+    """Return the runtime data of a loaded entry."""
+    return entry.runtime_data
 
 
 def switch_entity(hass: HomeAssistant):
@@ -47,6 +48,19 @@ def switch_entity(hass: HomeAssistant):
     comp = hass.data["entity_components"]["switch"]
     return next(e for e in comp.entities if isinstance(e, HCLSwitch))
 
+
+
+def timer_cycle(hass: HomeAssistant):
+    """One periodic update cycle of the HCL switch, as its timer starts it (it
+    is skipped while a cycle is running). Tests use this instead of the
+    internals of the switch (RM-T24), so a change of the scheduling only
+    changes this helper."""
+    return switch_entity(hass)._update_hcl()
+
+
+def cycle_running(hass: HomeAssistant) -> bool:
+    """Whether an update cycle (or a request waiting for one) holds the switch."""
+    return switch_entity(hass)._update_lock.locked()
 
 # Entity ids of an instance named "HCL"
 SWITCH = "switch.hcl_hcl_active"
