@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b3] - 2026-10-10
+Third pre-release (beta) of 0.8.0: the fix from the review of 0.8.0b2 (RM-B46), the daylight compensation with an indoor lux sensor (RM-E02) on a new environmental controller (RM-E01), and internal restructuring (RM-T04, RM-T06 to RM-T08). The minimum Home Assistant version stays 2024.7.
+
+### Added
+- **Daylight compensation** (RM-E02, optional, off by default): an indoor lux sensor lowers the brightness in Auto when there is enough daylight (measured closed loop). New options step *Daylight compensation* with lux sensor, target illuminance at the sensor (50–2000 lx) and a collapsed section *Advanced: daylight control* (dead band, smoothing, response band, maximum rate, sensor stale after, grace for a missing sensor value). The brightness never goes above the curve or below the minimum brightness, the colour temperature is not changed and HCL still never switches a light on or off. Not in scenarios (the reduction is kept for the return to Auto); held while all lights that are on are manually controlled, while *Adapt brightness* or *HCL active* is off; a sensor without a valid value holds the reduction for 5 minutes, then the brightness returns slowly to the curve. The reduction is stored (at most every 5 minutes and when Home Assistant stops) and reused after a restart or reload if it is at most 2 hours old. A lux sensor used by several active instances shows a repair issue.
+- **Environmental controller** (RM-E01): one place derives the effective setpoint from the curve or scenario value; the target sensors, `apply`, Fast-HCL and the card show the effective value. Without daylight compensation the values are unchanged.
+- **Target sensors**: with the daylight compensation on, the attributes `base_value`, `environment_status` and `environment_reason`, on the brightness sensor also `reason_codes`, `measured_lux`, `filtered_lux`, `target_lux`, `cap_pct` and `sensor_age` (not stored in the history). Diagnostics contain the last environment evaluation (the lux sensor pseudonymised).
+- **Card**: with the daylight compensation the "now" line shows the curve or scenario value and the effective value, e.g. "80 % → 35 % · daylight".
+
+### Fixed
+- **Colour temperature not sent in compatibility mode** (RM-B46): a light in a colour mode reports no `color_temp_kelvin`; this counted as 2700 K, so for a reachable target of about 2650–2750 K (e.g. a curve value of 2200 K on a light limited to 2700 K) only brightness was sent, the light stayed in the colour mode and got a brightness command in every update. A missing colour temperature now always sends the colour temperature, and a value counts as sent only after a command that carried it.
+
+### Internal
+- Update scheduling in its own class `HCLUpdateScheduler` (RM-T04) instead of the switch entity; uses of Home Assistant internals (action context, Lovelace resource registration) in one module `ha_internals.py` (RM-T06); typed capability cache and state-change events (RM-T07); target resolution of the actions moved to `logic/targets.py` (RM-T08).
+
 ## [0.8.0b2] - 2026-10-09
 Second pre-release (beta) of 0.8.0: fixes from the review of 0.8.0b1 (RM-B43 to RM-B45) and internal restructuring (RM-T01 to RM-T03, RM-T19 to RM-T22, RM-T24). The minimum Home Assistant version stays 2024.7.
 

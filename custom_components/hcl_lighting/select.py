@@ -32,7 +32,8 @@ from .const import (
 from .logic.light_controller import HCLLightController
 from .entity import HCLEntity
 from .runtime import HCLConfigEntry
-from .services import action_context, async_check_lights
+from .ha_internals import action_context
+from .services import async_check_lights
 
 _LOGGER = logging.getLogger(__name__)
 

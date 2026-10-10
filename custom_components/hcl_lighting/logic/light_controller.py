@@ -7,11 +7,11 @@ import itertools
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
 import time
 
-from homeassistant.core import Context, HomeAssistant, ServiceCall
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_COLOR_TEMP_KELVIN,
@@ -27,6 +27,8 @@ from homeassistant.const import (
 
 from ..const import (
     CONF_SMART_TRANSITION,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
     REENGAGE_TRANSITION_SECONDS,
     BRIGHTNESS_THRESHOLD,
     KELVIN_THRESHOLD,
@@ -52,54 +54,13 @@ from ..const import (
 
 from ..logic.hcl_math import HCLCalculator
 
+from .daylight_compensation import DAYLIGHT_KEY
+from .environmental_controller import EnvironmentalContext, EnvironmentalController, EnvironmentalResult, HCLSetpoint
 from .override_manager import OverrideManager, Tracking
+from .targets import resolve_lights
 from .units import brightness_byte, brightness_pct, kelvin_to_xy, xy_distance
 
-# Home Assistant's target resolution changed its home (see
-# extract_referenced_entities); which one exists is decided once at import.
-try:  # 2025.8+
-    from homeassistant.helpers import target as _ha_target
-except ImportError:  # up to 2025.7
-    _ha_target = None
-try:  # up to 2025.12 (removed later)
-    from homeassistant.helpers.service import async_extract_referenced_entity_ids as _service_extract
-except ImportError:
-    _service_extract = None
-
 _LOGGER = logging.getLogger(__name__)
-
-
-def extract_referenced_entities(hass: HomeAssistant, target_config: dict[str, Any]):
-    """Home Assistant's own resolution of a target (entities, devices, areas,
-    floors, labels) for the running version.
-
-    2026.1+: helpers.target with TargetSelection; 2025.8–2025.12: with
-    TargetSelectorData; up to 2025.7: helpers.service with a service call
-    (its constructor changed in 2025.1, see _service_call).
-    Groups are not expanded here (HCL expands light groups itself).
-    """
-    config = {
-        key: target_config[key]
-        for key in ("entity_id", "device_id", "area_id", "floor_id", "label_id")
-        if target_config.get(key)
-    }
-    if _ha_target is not None and hasattr(_ha_target, "async_extract_referenced_entity_ids"):
-        selection = getattr(_ha_target, "TargetSelection", None) or _ha_target.TargetSelectorData
-        return _ha_target.async_extract_referenced_entity_ids(hass, selection(config), expand_group=False)
-    return _service_extract(hass, _service_call(hass, config), expand_group=False)
-
-
-def _service_call(hass: HomeAssistant, data: dict[str, Any]):
-    """ServiceCall for the target helper of Home Assistant up to 2025.7.
-
-    2025.1 added hass as first parameter; a positional call with the old
-    signature would silently put the target into the wrong field (no target
-    at all), so the parameters are passed by name.
-    """
-    try:
-        return ServiceCall(hass=hass, domain="light", service="turn_on", data=data)
-    except TypeError:  # up to 2024.12: no hass parameter
-        return ServiceCall(domain="light", service="turn_on", data=data)
 
 
 @dataclass(slots=True)
@@ -163,7 +124,17 @@ class CommandTracker:
 # xy_color to the light's own mode, including RGBW and RGBWW)
 _COLOR_MODES = (ColorMode.XY, ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW)
 
-def _native_capability(state) -> dict[str, Any]:
+# How a light is driven: native colour temperature, colour through the XY
+# simulation, brightness only, on/off only
+Capability = Literal["ct", "xy_sim", "dim", "onoff"]
+
+
+class _CachedCapability(NamedTuple):
+    signature: tuple[Any, Any, Any]  # supported colour modes, min/max kelvin
+    type: Capability
+
+
+def _native_capability(state) -> Capability:
     """Native capability of a light from its attributes (ct, xy_sim, dim, onoff)."""
     modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
     if not isinstance(modes, (list, tuple)) or not modes:
@@ -177,7 +148,7 @@ def _native_capability(state) -> dict[str, Any]:
         cap_type = "dim"
     else:
         cap_type = "onoff"
-    return {"type": cap_type}
+    return cap_type
 
 
 class HCLLightController:
@@ -195,7 +166,7 @@ class HCLLightController:
         self.override_manager = override_manager
         self.hcl_calc = hcl_calc
         self.config_entry = config_entry
-        self._capability_cache: dict[str, dict[str, Any]] = {}
+        self._capability_cache: dict[str, _CachedCapability] = {}
         
         # State Machine
         self.active_mode = MODE_AUTO
@@ -216,6 +187,16 @@ class HCLLightController:
         # Lights with a command still running (a light that does not answer
         # gets no second command until the first one has finished)
         self._in_flight = self.commands.in_flight
+
+        # Environmental features (RM-E01): base -> effective setpoint. Without
+        # a configured feature the effective setpoint is the base.
+        self.environment = EnvironmentalController()
+        self.daylight_store = None  # DaylightCapStore when the daylight compensation is on
+        self.environment_sensor: str | None = None  # lux sensor of the daylight compensation
+        # Whether HCL is active (main switch on): no environmental step while off
+        self.hcl_active = False
+        # light counts of the last cycle: peek() shows the same hold as the cycle
+        self._cycle_lights: dict[str, Any] = {}
 
     @property
     def adapt_brightness(self) -> bool:
@@ -303,6 +284,13 @@ class HCLLightController:
         data = self._filter_service_data(data)
         if data is None:
             return False
+        entities = data.get("entity_id")
+        if isinstance(entities, list) and len(entities) == 1:
+            entities = entities[0]
+        if isinstance(entities, str) and "color_temp_kelvin" in data:
+            # proof for RM-B43: this light gets colour temperature (restored with
+            # the tracking if the command fails, RM-B46)
+            self.override_manager.mark_ct_sent(entities, data["color_temp_kelvin"])
         await self.hass.services.async_call(
             domain, service, data, blocking=blocking, context=self._new_context(parent)
         )
@@ -324,8 +312,60 @@ class HCLLightController:
         # The caller (scenario select, set_scenario) requests the update
 
     def calculate_target_values(self, now) -> tuple[int | None, int | None]:
+        """The effective setpoint now (brightness %, kelvin): the base of the
+        curve or scenario with the environmental features of the last update
+        cycle (peek: nothing is advanced, RM-E01). Used by apply, Fast-HCL,
+        the target sensors and the diagnostics."""
+        result = self.target_result(now)
+        if result is None:
+            return self.calculate_base_values(now)
+        return result.effective.brightness, result.effective.kelvin
+
+    def target_result(self, now) -> EnvironmentalResult | None:
+        """Environmental snapshot for now (peek); None without a feature or in Guest."""
+        brightness, kelvin = self.calculate_base_values(now)
+        if not self.environment.enabled or brightness is None:
+            return None
+        lights = {k: v for k, v in self._cycle_lights.items() if k != "seed_brightness"}
+        return self.environment.peek(now, HCLSetpoint(brightness, kelvin), self.environment_context(**lights))
+
+    def step_target_values(self, now, **lights: Any) -> tuple[int | None, int | None]:
+        """The effective setpoint of a regular update cycle: the environmental
+        features are advanced once (step, under the update lock, RM-E01).
+        lights: light counts and seed of the cycle (see EnvironmentalContext)."""
+        brightness, kelvin = self.calculate_base_values(now)
+        self._cycle_lights = dict(lights)
+        if not self.environment.enabled or brightness is None:
+            return brightness, kelvin
+        result = self.environment.step(now, HCLSetpoint(brightness, kelvin), self.environment_context(**lights))
+        if self.daylight_store is not None:
+            snapshot = result.modifier(DAYLIGHT_KEY)
+            if snapshot is not None:
+                self.daylight_store.note(self.environment.state(DAYLIGHT_KEY), snapshot.status, now)
+        return result.effective.brightness, result.effective.kelvin
+
+    def environment_context(self, **lights: Any) -> EnvironmentalContext:
+        """What the environmental features know about this instance now."""
+        min_b, max_b = self.brightness_limits()
+        options = self.config_entry.options
+        return EnvironmentalContext(
+            mode=self.active_mode,
+            hcl_active=self.hcl_active,
+            adapt_brightness=self._adapt_brightness,
+            adapt_color=self._adapt_color,
+            update_interval=float(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)),
+            min_brightness=int(min_b),
+            max_brightness=int(max_b),
+            **lights,
+        )
+
+    def command_source(self) -> str:
+        """Source of the values of the current mode: the Auto path or a scenario."""
+        return "auto" if self.active_mode == MODE_AUTO else "scenario"
+
+    def calculate_base_values(self, now) -> tuple[int | None, int | None]:
         """
-        Calculate target (Brightness, Kelvin) based on Priority Stack.
+        Base setpoint (Brightness, Kelvin) based on Priority Stack.
         User Intent > Curve.
         """
         
@@ -408,6 +448,7 @@ class HCLLightController:
         fast_mode: bool = False,
         parent: Context | None = None,
         on_failure: Callable[[list[str]], None] | None = None,
+        source: str | None = None,
     ) -> BatchResult:
         """Apply settings to a batch of lights (one command per light, in parallel).
 
@@ -473,7 +514,8 @@ class HCLLightController:
                 self.commands.claim(entity_id),
             )
             self.override_manager.set_last_set_values(
-                entity_id, brightness, tracked_kelvin, start=self.hass.states.get(entity_id)
+                entity_id, brightness, tracked_kelvin, start=self.hass.states.get(entity_id),
+                source=source or self.command_source(),
             )
             self.override_manager.set_ignore_window(entity_id, transition_val)
             jobs.append((entity_id, job))
@@ -648,7 +690,9 @@ class HCLLightController:
             return False  # nothing HCL adapts
 
         previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
-        self.override_manager.set_last_set_values(entity_id, brightness, tracked_kelvin, start=state)
+        self.override_manager.set_last_set_values(
+            entity_id, brightness, tracked_kelvin, start=state, source=self.command_source()
+        )
         self.override_manager.set_ignore_window(entity_id, IGNORE_WINDOW_SECONDS)
         task = self.hass.async_create_background_task(
             self._async_call("light", "turn_on", service_data, blocking=True),
@@ -695,11 +739,11 @@ class HCLLightController:
         if entity_id in result.updated:
             self.override_manager.set_reengaging(entity_id, duration)
 
-    def capability_for(self, entity_id: str) -> str:
+    def capability_for(self, entity_id: str) -> Capability:
         """How a light is driven (ct, xy_sim, dim, onoff)."""
         return self._get_capability(entity_id)
 
-    def _get_capability(self, entity_id: str, state_obj=None) -> str:
+    def _get_capability(self, entity_id: str, state_obj=None) -> Capability:
         """Determine how a light is driven.
 
         The native capability of a light that is on is cached together with
@@ -720,16 +764,16 @@ class HCLLightController:
                 attrs.get("min_color_temp_kelvin"),
                 attrs.get("max_color_temp_kelvin"),
             )
-            if cached is None or cached["signature"] != signature:
-                cached = {"signature": signature, **_native_capability(state)}
+            if cached is None or cached.signature != signature:
+                cached = _CachedCapability(signature, _native_capability(state))
                 self._capability_cache[entity_id] = cached
-                _LOGGER.debug("Capability of %s: %s (modes=%s)", entity_id, cached["type"], modes)
+                _LOGGER.debug("Capability of %s: %s (modes=%s)", entity_id, cached.type, modes)
         elif cached is None:
             if state is None:
                 return "onoff"  # not loaded yet
-            cached = _native_capability(state)
+            return _native_capability(state)
 
-        return cached["type"]
+        return cached.type
 
     def _needs_update(self, entity_id: str, target_b: int, target_k: int) -> bool:
         """Check if an update is needed based on thresholds."""
@@ -804,9 +848,9 @@ class HCLLightController:
         return True
 
     def _sent_kelvin(self, entity_id: str, kelvin: int) -> bool:
-        """Whether the last HCL command to the light had this colour temperature."""
-        last_set = self.override_manager.last_set(entity_id)
-        return last_set is not None and last_set[1] == kelvin
+        """Whether HCL has sent this colour temperature to the light (RM-B46: the
+        values a command aims for are not proof, it may carry no colour)."""
+        return self.override_manager.ct_sent(entity_id) == kelvin
 
     def reachable_kelvin(self, entity_id: str, kelvin: int, state_obj=None) -> int:
         """Return the colour temperature a CT light actually shows for a target.
@@ -826,54 +870,8 @@ class HCLLightController:
         return kelvin
 
     def resolve_targets(self, target_config: dict[str, Any], groups: set[str] | None = None) -> set[str]:
-        """Resolve target config to a set of light entity IDs.
-
-        Entities, devices, areas, floors and labels are resolved by Home
-        Assistant's own target resolution of the running version (the same
-        one light actions use): hidden and configuration/diagnostic lights
-        reached indirectly are skipped, a light with its own area belongs to
-        that area, disabled lights are not included, and on versions with
-        child/composite devices a device includes them. Lights given
-        directly are always used. Light groups are expanded afterwards.
-
-        groups (optional) collects the light groups that were expanded, so the
-        caller can watch their member lists.
-        """
-        selected = extract_referenced_entities(self.hass, target_config)
-        entity_ids = {
-            eid for eid in selected.referenced | selected.indirectly_referenced
-            if eid.startswith("light.")
-        }
-
-        # Expand Groups
-        final_entities = set()
-        to_process = list(entity_ids)
-        processed = set()
-
-        while to_process:
-            eid = to_process.pop() # Stack behavior (O(1)) instead of Queue (O(n))
-            
-            if eid in processed: continue
-            processed.add(eid)
-
-            state = self.hass.states.get(eid)
-            if not state:
-                if eid.startswith("light."):
-                    final_entities.add(eid)
-                continue
-
-            group_members = state.attributes.get(ATTR_ENTITY_ID)
-            if group_members and isinstance(group_members, (list, tuple, set)):
-                 to_process.extend(group_members)
-                 if groups is not None:
-                     groups.add(eid)
-            elif (state.attributes.get("is_hue_group") or state.attributes.get("lights") or state.attributes.get("hue_type")):
-                continue # Skip raw Hue groups
-            else:
-                if eid.startswith("light."):
-                    final_entities.add(eid)
-                
-        return final_entities
+        """Light entity IDs of a target (see targets.resolve_lights)."""
+        return resolve_lights(self.hass, target_config, groups)
 
     async def _apply_smart_xy_single(
         self, entity_id, x, y, brightness, transition, parent: Context | None = None
@@ -927,7 +925,10 @@ class HCLLightController:
             return False
         try:
             curr_bri = state.attributes.get("brightness") or 0
-            curr_kelvin = state.attributes.get("color_temp_kelvin") or 2700
+            # No colour temperature reported: the light is in a colour mode and
+            # gets colour temperature in any case (RM-B46, not "2700 K measured")
+            reported_kelvin = state.attributes.get("color_temp_kelvin")
+            curr_kelvin = kelvin if reported_kelvin is None else reported_kelvin
             target_bri_byte = brightness_byte(brightness)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
@@ -941,7 +942,7 @@ class HCLLightController:
                 sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
             else:
                 # Only snap color if delta is significant; colour temperature never fades (transition 0).
-                if abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
+                if reported_kelvin is None or abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
                     sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
                 sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
             return sent

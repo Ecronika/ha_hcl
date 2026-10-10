@@ -2,18 +2,16 @@
 from __future__ import annotations
 
 import logging
-import asyncio
 from typing import Any
-from datetime import timedelta
 
 from homeassistant.util import dt as dt_util
 
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import Context, HomeAssistant, callback, Event
+from homeassistant.core import Context, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.start import async_at_started
@@ -39,9 +37,12 @@ from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
+from .logic.units import brightness_pct, on_brightness
 from .entity import HCLEntity
 from .runtime import HCLConfigEntry
-from .services import action_context, async_check_lights
+from .ha_internals import action_context
+from .services import async_check_lights
+from .update_scheduler import HCLUpdateScheduler
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +95,6 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         # State
         self._attr_is_on = False
         
-        self._timer_remove_callback = None
         self._state_listener_remove_callback = None
         
         self._calculated_brightness = None
@@ -111,19 +111,11 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self.override_manager = override_manager
         self.controller = controller
 
-        # Concurrency guard: one light update at a time (periodic cycle,
-        # requested update or apply service). The timer skips a cycle while
-        # the lock is held; requested updates wait and are coalesced.
-        self._update_lock = asyncio.Lock()
-        self._update_requested = False
-        self._request_context: Context | None = None
-        # New target values (scenario, curve) end running transition
-        # protections - in request order, i.e. only when the requested update
-        # holds the lock (an older apply or cycle may still set a protection)
-        self._end_protection_requested = False
-
         options = entry.options
-        self._update_interval = int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
+        # One update at a time: periodic cycle, requested update or action (RM-T04)
+        self._scheduler = HCLUpdateScheduler(
+            hass, int(options.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)), self._run_cycle
+        )
         self._transition = float(options.get(CONF_TRANSITION, DEFAULT_TRANSITION))
         # Transition when the scenario changes (default: the update transition)
         self._scenario_transition = float(options.get(CONF_SCENARIO_TRANSITION, self._transition))
@@ -189,13 +181,12 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         """Run when entity will be removed from hass."""
         self._added = False
         self._is_on = False # Prevent further updates
+        self.controller.hcl_active = False
+        self._scheduler.stop()
         if self._group_listener_remove_callback:
             self._group_listener_remove_callback()
             self._group_listener_remove_callback = None
-        if self._timer_remove_callback:
-            self._timer_remove_callback()
-            self._timer_remove_callback = None
-            
+
         if self._state_listener_remove_callback:
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
@@ -218,7 +209,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             self._cancel_reresolve = None
 
     @callback
-    def _handle_registry_updated(self, _event) -> None:
+    def _handle_registry_updated(self, _event: Event) -> None:
         """Re-resolve the targets shortly after registry changes (debounced)."""
         if not self._is_on:
             return
@@ -236,7 +227,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self._cancel_reresolve = async_call_later(self.hass, 2, _reresolve)
 
     @callback
-    def _handle_service_call(self, event) -> None:
+    def _handle_service_call(self, event: Event) -> None:
         """Mark lights as manually controlled when HA changes them with own values.
 
         HCL's own commands carry an HCL context and are ignored. A command that
@@ -295,7 +286,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         # (after older requests), not now: an older apply or scenario update
         # that is still waiting would otherwise set its protection afterwards
         # and block this update for the length of its transition.
-        self._end_protection_requested = True
+        self._scheduler.end_protections()
         self.hass.async_create_task(self.async_request_update(context))
 
     @property
@@ -354,18 +345,11 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             # once. Transition protections from before (a long apply, scenario
             # or turn-on transition) end - in request order, like a scenario
             # change - instead of blocking the lights until they run out.
-            self._end_protection_requested = True
+            self._scheduler.end_protections()
         self._is_on = True
+        self.controller.hcl_active = True
         self.async_write_ha_state() # Ensure UI updates immediately
-        
-        # Start Timer
-        if self._timer_remove_callback is None:
-            self._timer_remove_callback = async_track_time_interval(
-                self.hass,
-                self._update_hcl, # Main Loop
-                timedelta(seconds=self._update_interval)
-            )
-        
+        self._scheduler.start()
         await self._re_evaluate_targets_and_listeners()
 
     async def _re_evaluate_targets_and_listeners(self) -> None:
@@ -405,7 +389,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             return
 
         @callback
-        def _group_changed(event: Event) -> None:
+        def _group_changed(event: Event[EventStateChangedData]) -> None:
             old = event.data.get("old_state")
             new = event.data.get("new_state")
             members = lambda st: tuple(st.attributes.get("entity_id") or ()) if st else ()  # noqa: E731
@@ -436,7 +420,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         if brightness is None:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="guest_mode")
         targets = self._checked_lights(lights)
-        async with self._update_lock:
+        async with self._scheduler.exclusive():
             if release_manual_control:
                 for eid in targets:
                     self.override_manager.reset_override(eid)
@@ -452,7 +436,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
                 return
             transition = self._transition if transition is None else float(transition)
             result = await self.controller.apply_batch(
-                active, brightness, kelvin, transition=transition, parent=context
+                active, brightness, kelvin, transition=transition, parent=context, source="apply"
             )
             # A transition longer than the update transition must not be cut
             # short by the next update cycles (like a long scenario transition);
@@ -511,13 +495,11 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         self._is_on = False
+        self.controller.hcl_active = False
+        self._scheduler.stop()
         self.async_write_ha_state() # Ensure UI updates immediately
         async_check_conflicts(self.hass)
-        
-        if self._timer_remove_callback:
-            self._timer_remove_callback()
-            self._timer_remove_callback = None
-            
+
         if self._state_listener_remove_callback:
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
@@ -528,47 +510,22 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
 
     async def async_request_update(self, context: Context | None = None) -> None:
         """Run an update now (scenario change, curve preview/revert, release of
-        manual control, targets changed, HCL switched on).
+        manual control, targets changed, HCL switched on); see HCLUpdateScheduler."""
+        await self._scheduler.request(context)
 
-        Unlike the periodic timer, a request is never dropped: if a cycle is
-        still sending, the request waits and runs afterwards. Requests that
-        arrive while waiting are combined into one cycle with the newest values.
-        """
-        if not self._is_on:
-            return
-        self._update_requested = True
-        if context is not None:
-            self._request_context = context
-        async with self._update_lock:
-            if not self._update_requested:
-                return  # a cycle that started after this request covered it
-            await self._run_cycle()
-
-    async def _update_hcl(self, now=None):
-        """Periodic HCL update (timer)."""
-        if not self._is_on:
-            return
-        # A cycle, a requested update or an apply is still sending: the next
-        # tick follows anyway, requested updates are not affected.
-        if self._update_lock.locked():
-            _LOGGER.debug("Periodic update skipped: previous update still running")
-            return
-        async with self._update_lock:
-            await self._run_cycle()
-
-    async def _run_cycle(self) -> None:
-        """One update of all lights (caller holds the update lock)."""
-        self._update_requested = False
-        parent = self._request_context
-        self._request_context = None
-        if self._end_protection_requested:
-            self._end_protection_requested = False
+    async def _run_cycle(self, parent: Context | None, end_protection: bool) -> None:
+        """One update of all lights (the scheduler holds the update lock)."""
+        if end_protection:
             self.override_manager.end_reengaging()
         if not self._is_on:
             return
         try:
-            # 1. Calculate Target Values (Delegate to Controller Priority Stack)
-            brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
+            # 1. Target values: base of curve or scenario, environmental
+            # features advanced once per cycle (RM-E01)
+            brightness, kelvin = self.controller.step_target_values(dt_util.now(), **self._cycle_lights())
+            if self.controller.environment.enabled:
+                # the target sensors show the effective values of this cycle
+                async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_environment")
             
             # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
             if brightness is None and kelvin is None:
@@ -644,7 +601,32 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         except Exception:
              _LOGGER.exception("Error in HCL update loop")
 
-    async def _handle_light_state_change(self, event: Event) -> None:
+    def _cycle_lights(self) -> dict[str, Any]:
+        """Light counts and seed of this cycle for the environmental features:
+        lights that are on, of those the manually controlled or returning ones,
+        and the mean brightness of the lights following HCL whose values came
+        from the Auto path (start seed of the daylight cap, DL-PRD-17)."""
+        lights_on = manual = 0
+        seeds: list[int] = []
+        for eid in self._resolved_targets:
+            state = self.hass.states.get(eid)
+            if state is None or state.state != STATE_ON:
+                continue
+            lights_on += 1
+            if self.override_manager.is_overridden(eid) or self.override_manager.is_reengaging(eid):
+                manual += 1
+                continue
+            pct = brightness_pct(on_brightness(state.attributes))
+            if pct is not None and self.override_manager.last_source(eid) == "auto":
+                seeds.append(pct)
+        return {
+            "lights_on": lights_on,
+            "lights_controlled": lights_on - manual,
+            "lights_manual": manual,
+            "seed_brightness": sum(seeds) / len(seeds) if seeds else None,
+        }
+
+    async def _handle_light_state_change(self, event: Event[EventStateChangedData]) -> None:
         """Handle state changes of monitored lights."""
         try:
             if not self._is_on:

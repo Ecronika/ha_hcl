@@ -219,6 +219,70 @@ async def test_rm_b43_light_that_keeps_reporting_xy_gets_no_repeated_command(has
     assert len(calls) == 1
 
 
+# ---------------------------------------------------------------- RM-B46
+@pytest.mark.usefixtures("evening")
+@pytest.mark.parametrize("kelvin", [2200, 2700, 4000])
+async def test_rm_b46_compatibility_mode_brings_a_light_back_to_colour_temperature(
+    hass, no_frontend_registration, kelvin
+):
+    """RM-B43 in the compatibility mode: a light in XY mode reports no colour
+    temperature; it must not count as 2700 K (the colour temperature is sent)."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    attrs = {**XY_CT_ATTRS, "color_mode": "xy"}
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(kelvin), **attrs)
+    entry = await setup_entry(hass, ["light.a"], SMART)
+    ctl = core(hass, entry).controller
+    calls.clear()
+    await ctl.apply_batch(["light.a"], 50, kelvin, transition=20)
+    await hass.async_block_till_done()
+    sent = [c.data for c in calls]
+    assert any(d.get("color_temp_kelvin") == max(2700, kelvin) for d in sent), sent
+    assert not any("xy_color" in d for d in sent)
+
+
+@pytest.mark.usefixtures("evening")
+async def test_rm_b46_colour_temperature_not_sent_is_not_tracked_as_sent(hass, no_frontend_registration):
+    """With colour adaptation off no colour temperature is sent: after switching
+    it on again, a light in XY mode still gets it."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    attrs = {**XY_CT_ATTRS, "color_mode": "xy"}
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(2700), **attrs)
+    entry = await setup_entry(hass, ["light.a"])
+    ctl = core(hass, entry).controller
+    ctl.adapt_color = False
+    await ctl.apply_batch(["light.a"], 60, 2200)  # brightness only
+    await hass.async_block_till_done()
+    assert calls and "color_temp_kelvin" not in calls[-1].data
+    set_light(hass, "light.a", "on", brightness=153, xy_color=_xy(2700), **attrs)  # 60 %
+    ctl.adapt_color = True
+    calls.clear()
+    await ctl.apply_batch(["light.a"], 60, 2200)
+    await hass.async_block_till_done()
+    assert [c.data.get("color_temp_kelvin") for c in calls] == [2700]
+
+
+@pytest.mark.usefixtures("evening")
+async def test_rm_b46_compatibility_mode_sends_no_command_per_cycle(hass, no_frontend_registration):
+    """A light that keeps reporting XY after the colour temperature command
+    gets no command in every cycle (before: a brightness command per cycle)."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    attrs = {**XY_CT_ATTRS, "color_mode": "xy"}
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(2200), **attrs)
+    entry = await setup_entry(hass, ["light.a"], SMART)
+    ctl = core(hass, entry).controller
+    calls.clear()
+    await ctl.apply_batch(["light.a"], 50, 2200, transition=20)
+    await hass.async_block_till_done()
+    first = len(calls)
+    assert any(c.data.get("color_temp_kelvin") == 2700 for c in calls)
+    # the light reports the values, but still in XY mode
+    set_light(hass, "light.a", "on", brightness=128, xy_color=_xy(2700), **attrs)
+    for _ in range(3):
+        await ctl.apply_batch(["light.a"], 50, 2200, transition=20)
+        await hass.async_block_till_done()
+    assert len(calls) == first
+
+
 # ---------------------------------------------------------------- B-35
 @pytest.mark.usefixtures("evening")
 @pytest.mark.parametrize("mode", ["rgbw", "rgbww"])

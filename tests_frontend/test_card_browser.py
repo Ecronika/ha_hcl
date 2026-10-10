@@ -1236,3 +1236,31 @@ async def test_rm_f05_editor_title_field(page):
     assert configs["option"] == "Küche (sensor.a_curve_data)"
     assert configs["label"] == "Titel (leer: Name der Instanz)"
     assert configs["out"][0]["title"] == "Kochen" and "title" not in configs["out"][1]
+
+
+# ---------------------------------------------------------------- RM-E01 (E01-3)
+def _environment_hass(base: str, value: str, status: str, reason: str) -> dict:
+    h = _setpoint_hass("auto", value, "4000")
+    h["states"]["sensor.tb"]["attributes"] = {
+        "base_value": float(base), "environment_status": status, "environment_reason": reason,
+    }
+    return h
+
+
+async def test_rm_e01_now_shows_base_and_effective_with_the_reason(page):
+    info = await _now_info(page, _environment_hass("80", "35", "active", "daylight_reducing"))
+    assert "80 % → 35 %" in info and "daylight" in info, info
+    info = await _now_info(page, _environment_hass("80", "35", "hold", "daylight_hold_manual_control"))
+    assert "80 % → 35 %" in info and "daylight held" in info, info
+    info = await _now_info(page, _environment_hass("80", "60", "fallback", "daylight_sensor_fallback"))
+    assert "daylight sensor without value" in info, info
+
+
+async def test_rm_e01_no_note_when_the_effective_value_is_the_base(page):
+    info = await _now_info(page, _environment_hass("80", "80", "active", "daylight_within_deadband"))
+    assert "→" not in info and "daylight" not in info and "80 %" in info, info
+
+
+async def test_rm_e01_older_backend_without_environment_attributes(page):
+    info = await _now_info(page, _setpoint_hass("auto", "55", "4000"))
+    assert "55 %" in info and "→" not in info and "daylight" not in info, info

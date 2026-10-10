@@ -41,6 +41,8 @@ async def test_a11_options_flow_validation_and_steps(hass, no_frontend_registrat
     )
     assert result["step_id"] == "scenarios"
     result = await hass.config_entries.options.async_configure(flow["flow_id"], {"focus_brightness": 90})
+    assert result["step_id"] == "daylight"
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], {"daylight_advanced": {}})
     await hass.async_block_till_done()
     assert result["type"] == "create_entry"
     assert entry.options["transition"] == 10 and entry.options["focus_brightness"] == 90
@@ -122,8 +124,10 @@ async def test_rm_r01_r03_options_gone_from_the_flow_and_the_entry(hass, no_fron
          "respect_turn_on_values": False, "advanced": {"update_interval": 27, "transition": 20}},
     )
     fields |= {str(k) for k in result["data_schema"].schema}
-    assert not fields & set(OLD_OPTIONS)
     result = await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    fields |= {str(k) for k in result["data_schema"].schema}
+    assert not fields & set(OLD_OPTIONS)
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], {"daylight_advanced": {}})
     await hass.async_block_till_done()
     assert result["type"] == "create_entry"
     assert not set(entry.options) & set(OLD_OPTIONS)
@@ -163,6 +167,7 @@ async def test_rm_r11_timing_options_in_a_collapsed_section(hass, no_frontend_re
          "respect_turn_on_values": False, "advanced": {"update_interval": 30, "transition": 25}},
     )
     result = await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], {"daylight_advanced": {}})
     await hass.async_block_till_done()
     assert (entry.options["update_interval"], entry.options["transition"]) == (30, 25)
     assert "advanced" not in entry.options  # stored flat, as before

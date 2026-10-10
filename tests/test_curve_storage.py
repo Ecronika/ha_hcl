@@ -48,9 +48,10 @@ async def _run_options_flow(hass, entry, **changes):
     }
     current.update(changes)
     result = await hass.config_entries.options.async_configure(result["flow_id"], current)
-    # Steps "behavior" and "scenarios" with their defaults
-    while result["type"] == "form" and result["step_id"] in ("behavior", "scenarios"):
-        page = {"advanced": {}} if result["step_id"] == "behavior" else {}
+    # Steps "behavior", "scenarios" and "daylight" with their defaults
+    sections = {"behavior": {"advanced": {}}, "daylight": {"daylight_advanced": {}}}
+    while result["type"] == "form" and result["step_id"] in ("behavior", "scenarios", "daylight"):
+        page = sections.get(result["step_id"], {})
         result = await hass.config_entries.options.async_configure(result["flow_id"], page)
     await hass.async_block_till_done()
     return result

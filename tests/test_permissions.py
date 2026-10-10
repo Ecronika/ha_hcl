@@ -277,3 +277,22 @@ async def test_rm_b08_light_commands_keep_the_origin(hass, no_frontend_registrat
     await hass.async_block_till_done()
     assert lights.for_light("light.a")[-1].context.parent_id == origin.id
     assert lights.for_light("light.a")[-1].context.user_id == origin.user_id
+
+
+# ---------------------------------------------------------------- RM-T06
+def test_rm_t06_action_context_reads_the_context_home_assistant_sets():
+    """action_context() reads Entity._context/_context_set (no public API): the
+    context of the current action, none for an older one."""
+    import time
+
+    from homeassistant.helpers.entity import CONTEXT_RECENT_TIME_SECONDS, Entity
+
+    from custom_components.hcl_lighting.ha_internals import action_context
+
+    entity = Entity()
+    assert action_context(entity) is None
+    context = Context(user_id="user")
+    entity.async_set_context(context)
+    assert action_context(entity) is context
+    entity._context_set = time.time() - CONTEXT_RECENT_TIME_SECONDS - 1
+    assert action_context(entity) is None

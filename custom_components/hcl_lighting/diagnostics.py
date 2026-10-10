@@ -9,7 +9,7 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_CURVE_CONFIG, CONF_TARGET
+from .const import CONF_CURVE_CONFIG, CONF_DAYLIGHT_SENSOR, CONF_TARGET
 from .runtime import loaded_runtime
 
 # Target keys and the prefix of their pseudonyms (entity IDs keep their domain)
@@ -53,6 +53,8 @@ def _settings(values: dict[str, Any], pseudo: _Pseudonyms) -> dict[str, Any]:
         out[CONF_NAME] = REDACTED
     if CONF_TARGET in out:
         out[CONF_TARGET] = pseudo.target(out[CONF_TARGET])
+    if out.get(CONF_DAYLIGHT_SENSOR):
+        out[CONF_DAYLIGHT_SENSOR] = pseudo(str(out[CONF_DAYLIGHT_SENSOR]))
     return out
 
 
@@ -114,9 +116,39 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
                 pseudo(eid): _minutes_since(iso, now)
                 for eid, iso in sorted(manager.export_overrides().items())
             },
+            "environment": _environment(controller, now),
         }
     )
     return data
+
+
+def _environment(controller, now) -> dict[str, Any] | None:
+    """Base -> modifiers -> effective of one snapshot (peek, EC §7, G6); the
+    last regular cycle in addition. None without an environmental feature."""
+    if not controller.environment.enabled:
+        return None
+
+    def snapshot(result) -> dict[str, Any] | None:
+        if result is None:
+            return None
+        return {
+            "base": {"brightness": result.base.brightness, "kelvin": result.base.kelvin},
+            "effective": {"brightness": result.effective.brightness, "kelvin": result.effective.kelvin},
+            "status": result.status,
+            "reason": result.reason,
+            "reason_codes": list(result.reason_codes),
+            "modifiers": [
+                {"key": m.key, "status": m.status, "reason": m.reason, **dict(m.details)}
+                for m in result.modifiers
+            ],
+        }
+
+    last = controller.environment.last_result
+    return {
+        "now": snapshot(controller.target_result(now)),
+        "last_cycle": snapshot(last),
+        "last_cycle_minutes_ago": None if last is None else _minutes_since(last.evaluated_at.isoformat(), now),
+    }
 
 
 def _minutes_since(iso: str, now) -> int | None:

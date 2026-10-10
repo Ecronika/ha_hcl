@@ -42,6 +42,8 @@ class Tracking(NamedTuple):
     ignore_until: datetime | None
     command_start: CommandStart | None
     own_report_open: bool
+    ct_sent: int | None  # colour temperature of the last command that carried one (RM-B46)
+    source: str | None  # auto | scenario | apply | other: who set last_set (DL-PRD-23)
 
 
 @dataclass(slots=True)
@@ -50,6 +52,12 @@ class LightState:
 
     # values of the last HCL command and the light's values at that moment
     last_set: tuple[int, int] | None = None
+    # colour temperature actually sent last (a command may carry none: colour
+    # adaptation off, compatibility mode without a colour change; RM-B46)
+    ct_sent: int | None = None
+    # where the last values came from: auto | scenario | apply | other; only
+    # values of the Auto path seed the daylight cap (DL-PRD-17/23)
+    source: str | None = None
     command_start: CommandStart | None = None
     # state reports are not checked until then (the command's transition)
     ignore_until: datetime | None = None
@@ -64,13 +72,17 @@ class LightState:
     reengage_until: datetime | None = None
 
     def tracking(self) -> Tracking:
-        return Tracking(self.last_set, self.ignore_until, self.command_start, self.own_report_open)
+        return Tracking(
+            self.last_set, self.ignore_until, self.command_start, self.own_report_open, self.ct_sent, self.source
+        )
 
     def restore(self, tracking: Tracking) -> None:
-        self.last_set, self.ignore_until, self.command_start, self.own_report_open = tracking
+        (
+            self.last_set, self.ignore_until, self.command_start, self.own_report_open, self.ct_sent, self.source
+        ) = tracking
 
 
-_NO_TRACKING = Tracking(None, None, None, False)
+_NO_TRACKING = Tracking(None, None, None, False, None, None)
 
 
 # Verdicts on a reported value compared with an HCL command (RM-B33)
@@ -200,7 +212,7 @@ class OverrideManager:
         self._light(entity_id).ignore_until = dt_util.now() + timedelta(seconds=float(seconds) + 2)  # 2 s buffer
 
     def set_last_set_values(
-        self, entity_id: str, brightness: int, kelvin: int, start: State | None = None
+        self, entity_id: str, brightness: int, kelvin: int, start: State | None = None, source: str = "other"
     ) -> None:
         """Update the last known HCL values applied to the light.
 
@@ -209,6 +221,7 @@ class OverrideManager:
         """
         light = self._light(entity_id)
         light.last_set = (brightness, kelvin)
+        light.source = source
         light.own_report_open = False
         if start is not None and start.state == "on":
             attrs = start.attributes
@@ -218,10 +231,24 @@ class OverrideManager:
         else:
             light.command_start = None
 
+    def last_source(self, entity_id: str) -> str | None:
+        """Where the last values of the light came from (auto, scenario, apply, other)."""
+        light = self._lights.get(entity_id)
+        return light.source if light else None
+
     def last_set(self, entity_id: str) -> tuple[int, int] | None:
         """Values of the last HCL command to the light (brightness, kelvin)."""
         light = self._lights.get(entity_id)
         return light.last_set if light else None
+
+    def mark_ct_sent(self, entity_id: str, kelvin: int) -> None:
+        """A command with this colour temperature is being sent to the light."""
+        self._light(entity_id).ct_sent = kelvin
+
+    def ct_sent(self, entity_id: str) -> int | None:
+        """Colour temperature of the last command that carried one (RM-B46)."""
+        light = self._lights.get(entity_id)
+        return light.ct_sent if light else None
 
     def tracking_snapshot(self, entity_id: str) -> Tracking:
         """Tracking values a command changes (last values, ignore window, start values, open report)."""
