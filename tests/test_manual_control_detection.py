@@ -663,3 +663,66 @@ async def test_b05_clamped_light_small_change_is_not_a_false_override(hass, berl
     set_light(hass, "light.ikea", "on", brightness=253, color_temp_kelvin=4000, **attrs)  # 1 % jitter
     await hass.async_block_till_done()
     assert not core(hass, entry).override_manager.is_overridden("light.ikea")
+
+
+# ---------------------------------------------------------------- RM-B49 (review 10.10.2026)
+async def _dimmed_off_on_with_hcl_context(hass, options=None):
+    """Switched on, HCL sends its values, dimmed at the wall (manual control),
+    switched off and on again - all within 5 s, so every report carries the
+    context of HCL's command."""
+    lights, om, controller = await _setup_light(hass, options)
+    target, _k = controller.calculate_target_values(dt_util.now())
+    start, user = _away(target)
+    ctx = await _switched_on_ctx(hass, lights, start)
+    target_b, target_k = om.tracking_snapshot("light.a")[0]
+    await _report(hass, ctx, target_b, target_k)
+    await _report(hass, ctx, user)  # dimmed at the wall
+    assert om.is_overridden("light.a")
+    await _report(hass, ctx, state="off")
+    lights.calls.clear()
+    await _report(hass, ctx, user, state="on")  # on again before the next update
+    return lights, om
+
+
+async def test_rm_b49_switching_off_with_hcl_context_ends_manual_control(hass, no_frontend_registration):
+    lights, om = await _dimmed_off_on_with_hcl_context(hass)
+    assert not om.is_overridden("light.a")
+    assert lights.for_light("light.a"), "switched on again: HCL sends its values (Fast-HCL)"
+
+
+async def test_rm_b49_manual_control_kept_without_reset_on_off(hass, no_frontend_registration):
+    _lights, om = await _dimmed_off_on_with_hcl_context(hass, {"override_reset_on_off": False})
+    assert om.is_overridden("light.a")
+
+
+# ---------------------------------------------------------------- RM-B50 (review 10.10.2026)
+@pytest.mark.parametrize("brightness", [0, None], ids=["brightness_0", "no_brightness"])
+async def test_rm_b50_colour_change_without_brightness_is_manual(hass, no_frontend_registration, freezer, brightness):
+    """A report without HCL's context, "on" without brightness information but
+    with another colour temperature: only the brightness comparison is skipped."""
+    _ctx, om = await _after_hcl_command(hass, freezer)
+    _b, last_k = om.last_set("light.a")
+    user_k = 2000 if last_k > 4000 else 6500
+    await _report_attrs(hass, Context(), brightness=brightness, color_temp_kelvin=user_k)
+    assert om.is_overridden("light.a")
+
+
+async def test_rm_b50_no_brightness_and_same_colour_is_no_manual_control(hass, no_frontend_registration, freezer):
+    _ctx, om = await _after_hcl_command(hass, freezer)
+    _b, last_k = om.last_set("light.a")
+    await _report_attrs(hass, Context(), brightness=0, color_temp_kelvin=last_k)
+    assert not om.is_overridden("light.a")
+
+
+async def test_rm_b49_unavailable_with_hcl_context_keeps_manual_control(hass, no_frontend_registration):
+    """Unavailable says nothing about the light (RM-B24), also with HCL's context."""
+    lights, om, controller = await _setup_light(hass)
+    target, _k = controller.calculate_target_values(dt_util.now())
+    start, user = _away(target)
+    ctx = await _switched_on_ctx(hass, lights, start)
+    target_b, target_k = om.tracking_snapshot("light.a")[0]
+    await _report(hass, ctx, target_b, target_k)
+    await _report(hass, ctx, user)  # dimmed at the wall
+    assert om.is_overridden("light.a")
+    await _report(hass, ctx, state="unavailable")
+    assert om.is_overridden("light.a")

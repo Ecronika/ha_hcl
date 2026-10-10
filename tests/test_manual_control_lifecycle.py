@@ -382,3 +382,33 @@ async def test_rm_t03_stored_manual_control_keeps_its_format(hass, hass_storage,
     om = core(hass, entry).override_manager
     assert om.is_overridden("light.a")
     assert om.export_overrides() == {"light.a": since.isoformat()}
+
+
+# ---------------------------------------------------------------- RM-B51 (review 10.10.2026)
+@pytest.mark.parametrize(
+    ("start", "minutes", "expired"),
+    [
+        ("2026-03-29 00:50:00+00:00", 15, False),  # 01:50 CET -> 03:05 CEST: 15 real minutes
+        ("2026-03-29 00:50:00+00:00", 31, True),
+        ("2026-10-25 00:50:00+00:00", 25, False),  # 02:50 CEST -> 02:15 CET
+        ("2026-10-25 00:50:00+00:00", 35, True),  # 02:50 CEST -> 02:25 CET: 35 real minutes
+        ("2026-01-15 10:00:00+00:00", 29, False),
+        ("2026-01-15 10:00:00+00:00", 31, True),
+    ],
+    ids=["spring_15", "spring_31", "autumn_25", "autumn_35", "winter_29", "winter_31"],
+)
+async def test_rm_b51_override_timeout_counts_real_minutes_over_dst(
+    hass, no_frontend_registration, freezer, start, minutes, expired
+):
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to(start)
+    async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 30})
+    await hcl_on(hass)
+    om = core(hass, entry).override_manager
+    om.set_override("light.a")
+    freezer.tick(timedelta(minutes=minutes))
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert om.is_overridden("light.a") is not expired

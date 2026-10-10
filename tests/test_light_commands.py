@@ -507,6 +507,7 @@ async def test_rm_b05_final_smart_transition_failure_is_reported(hass, no_fronte
     om = core(hass, entry).override_manager
     lights.fail = {"light.a"}
     set_light(hass, "light.a", "on", brightness=200, color_temp_kelvin=6000, **CT_ATTRS)
+    await hass.async_block_till_done()  # the report is handled before the light is handed back
     om.reset_override("light.a")
     caplog.clear()
     with pytest.raises(HomeAssistantError):  # 0.7.0b4: apply reports failed lights
@@ -535,6 +536,7 @@ async def test_rm_b05_fallback_success_counts(hass, no_frontend_registration):
 
     hass.services.async_register("light", "turn_on", fail_with_transition)
     set_light(hass, "light.a", "on", brightness=200, color_temp_kelvin=6000, **CT_ATTRS)
+    await hass.async_block_till_done()
     om.reset_override("light.a")  # the change above is no manual control here
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert om.is_reengaging("light.a")  # sent without transition by the fallback
@@ -879,3 +881,119 @@ async def test_b05_clamped_light_brightness_change_still_updates(hass, berlin, n
     await switch_entity(hass).async_turn_on()
     await hass.async_block_till_done()
     assert calls_for(calls, "light.ikea")
+
+
+# ---------------------------------------------------------------- RM-B47 (review 0.8.0b3)
+def _reject_transitions(hass, lights, reject=True):
+    """Compatibility-mode light that rejects a transition > 0: the two-step
+    command fails, the fallback without transition is accepted."""
+    async def handle(call):
+        if reject and call.data.get("transition"):
+            raise HomeAssistantError("no transition support")
+        await lights._handle(call)
+
+    hass.services.async_register("light", "turn_on", handle)
+
+
+async def _cycle_with_a_change(hass, om, brightness, freezer):
+    # a minute later the light is far from the HCL value: the update sends a command
+    freezer.tick(timedelta(seconds=60))
+    # colour temperature at the HCL value: colour unchanged, brightness with transition
+    set_light(hass, "light.a", "on", brightness=brightness, color_temp_kelvin=6000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    om.reset_override("light.a")
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+
+
+def _smart_warnings(caplog):
+    return [
+        r.getMessage() for r in caplog.records
+        if r.levelno >= logging.WARNING and "Smart transition for light.a failed" in r.getMessage()
+    ]
+
+
+async def _compat_light(hass, freezer):
+    """Noon (HCL 100 % / 6000 K), compatibility mode, transitions rejected."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-01-15 11:00:00+00:00")
+    lights = FakeLights(hass)
+    set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"smart_transition": True})
+    _reject_transitions(hass, lights)
+    await hcl_on(hass)
+    return lights, core(hass, entry).override_manager
+
+
+async def test_rm_b47_successful_fallback_is_logged_once(hass, no_frontend_registration, caplog, freezer):
+    lights, om = await _compat_light(hass, freezer)  # HCL on: the first fallback
+    lights.calls.clear()
+    for brightness in (3, 26, 3):
+        await _cycle_with_a_change(hass, om, brightness, freezer)
+    fallbacks = [c for c in lights.for_light("light.a") if {"brightness_pct", "color_temp_kelvin"} <= set(c.data)]
+    assert len(fallbacks) == 3  # the values arrive in every update
+    assert len(_smart_warnings(caplog)) == 1, _smart_warnings(caplog)  # one streak: one warning
+
+
+async def test_rm_b47_new_fallback_streak_is_reported_again(hass, no_frontend_registration, caplog, freezer):
+    lights, om = await _compat_light(hass, freezer)
+    await _cycle_with_a_change(hass, om, 26, freezer)
+    _reject_transitions(hass, lights, reject=False)  # the two-step command works again
+    await _cycle_with_a_change(hass, om, 3, freezer)
+    _reject_transitions(hass, lights)
+    caplog.clear()
+    await _cycle_with_a_change(hass, om, 26, freezer)
+    assert len(_smart_warnings(caplog)) == 1
+
+
+# ---------------------------------------------------------------- RM-B48 (review 10.10.2026)
+async def _compat_command_held(hass, freezer):
+    """Compatibility mode at noon (HCL 100 % / 6000 K), the light at 20 % /
+    3000 K: an update sends colour temperature first, then the brightness.
+    Returns (lights, override manager, cycle task, gate) with the first
+    command waiting at the gate (the device has not answered yet)."""
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-01-15 11:00:00+00:00")
+    lights = FakeLights(hass)
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"smart_transition": True})
+    await hcl_on(hass)
+    om = core(hass, entry).override_manager
+    freezer.tick(timedelta(seconds=60))
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)
+    await hass.async_block_till_done()  # no command is running yet
+    om.reset_override("light.a")
+    lights.calls.clear()
+    gate = lights.gate = asyncio.Event()
+    task = hass.async_create_task(timer_cycle(hass))
+    await lights.wait_for_calls(1)
+    first = lights.calls[0].data
+    assert "color_temp_kelvin" in first and "brightness_pct" not in first, first
+    return lights, om, task, gate
+
+
+async def _finish(hass, lights, task, gate):
+    lights.calls.clear()
+    gate.set()  # the device answers the first command
+    await task
+    await hass.async_block_till_done()
+    return [c.data for c in lights.for_light("light.a")]
+
+
+async def test_rm_b48_light_switched_off_between_the_compat_commands_stays_off(
+    hass, no_frontend_registration, freezer
+):
+    lights, _om, task, gate = await _compat_command_held(hass, freezer)
+    set_light(hass, "light.a", "off", **CT_ATTRS)  # switched off at the wall meanwhile
+    await settle()  # (block_till_done would wait for the held command)
+    assert await _finish(hass, lights, task, gate) == []  # no turn_on after the switch-off
+
+
+async def test_rm_b48_light_dimmed_between_the_compat_commands_keeps_the_users_value(
+    hass, no_frontend_registration, freezer
+):
+    lights, om, task, gate = await _compat_command_held(hass, freezer)
+    set_light(hass, "light.a", "on", brightness=26, color_temp_kelvin=3000, **CT_ATTRS)  # dimmed to 10 %
+    await settle()
+    assert om.is_overridden("light.a")
+    assert await _finish(hass, lights, task, gate) == []
