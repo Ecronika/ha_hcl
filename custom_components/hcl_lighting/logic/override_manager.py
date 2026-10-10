@@ -59,6 +59,8 @@ class LightState:
     # values of the Auto path seed the daylight cap (DL-PRD-17/23)
     source: str | None = None
     command_start: CommandStart | None = None
+    # All times are UTC: durations and comparisons in local time would use the
+    # wall clock and be off by an hour across a DST change (RM-B51).
     # state reports are not checked until then (the command's transition)
     ignore_until: datetime | None = None
     # a report with HCL's context moved back towards the start values: decided
@@ -140,7 +142,7 @@ class OverrideManager:
         """The light is manually controlled from now (or since) on."""
         details = ", ".join(reasons)
         _LOGGER.debug("Manual Override detected for %s (%s)%s", entity_id, why, f": {details}" if details else "")
-        light.manual_since = since or dt_util.now()
+        light.manual_since = since or dt_util.utcnow()
         light.reengage_until = None
         light.own_report_open = False
         self._notify()
@@ -195,7 +197,7 @@ class OverrideManager:
         (they return to HCL with a smooth transition)."""
         if self.timeout is None:
             return []
-        now = dt_util.now()
+        now = dt_util.utcnow()
         expired = [
             eid for eid, light in self._lights.items()
             if light.manual_since is not None and now - light.manual_since > self.timeout
@@ -209,7 +211,7 @@ class OverrideManager:
     # ------------------------------------------------------------ tracking of HCL commands
     def set_ignore_window(self, entity_id: str, seconds: float) -> None:
         """Set a window where state changes are ignored (to prevent self-detection)."""
-        self._light(entity_id).ignore_until = dt_util.now() + timedelta(seconds=float(seconds) + 2)  # 2 s buffer
+        self._light(entity_id).ignore_until = dt_util.utcnow() + timedelta(seconds=float(seconds) + 2)  # 2 s buffer
 
     def set_last_set_values(
         self, entity_id: str, brightness: int, kelvin: int, start: State | None = None, source: str = "other"
@@ -322,7 +324,10 @@ class OverrideManager:
         curr_b = brightness_pct(on_brightness(attrs))
         curr_k = attrs.get("color_temp_kelvin")
         reasons = []
-        delta_b = abs(curr_b - last_b)
+        # A report without brightness ("on" with brightness 0 counts as none,
+        # RM-B41) skips only the brightness comparison; the colour still
+        # counts (RM-B50)
+        delta_b = abs(curr_b - last_b) if curr_b is not None else 0
         if self.track_brightness and delta_b > OVERRIDE_BRIGHTNESS_DELTA:
             reasons.append(f"Brightness (L:{last_b}%->C:{curr_b}%, d:{delta_b}%)")
         delta_k = abs(curr_k - last_k) if curr_k and last_k else 0
@@ -349,7 +354,7 @@ class OverrideManager:
         if not state:
             return False
         light = self._light(entity_id)
-        now = dt_util.now()
+        now = dt_util.utcnow()
 
         # 0. Unavailable/unknown says nothing about the light: it is not
         # switched off and keeps its manual control (RM-B24). When it reports
@@ -381,10 +386,6 @@ class OverrideManager:
         # 3. Compare with the values HCL sent last
         if not reference or len(reference) != 2 or None in reference:
             return False  # no reference values yet (startup)
-        if on_brightness(state.attributes) is None:
-            # also "on" with brightness 0 (RM-B41)
-            _LOGGER.debug("Ignoring event for %s (no brightness reported)", entity_id)
-            return False
         reasons = self._deviations(reference, state)
         if reasons:
             self._start_manual(entity_id, light, "differs from the HCL value", reasons)
@@ -419,10 +420,20 @@ class OverrideManager:
         controlled.
         """
         light = self._lights.get(entity_id)
-        if light is None or light.manual_since is not None or not light.last_set:
+        if light is None:
             return False
         if state is None or state.state != "on":
             light.own_report_open = False
+            # Switched off within 5 s after a command: as without HCL's
+            # context, it ends manual control (configurable, RM-B49);
+            # unavailable/unknown says nothing about the light (RM-B24)
+            if (
+                state is not None and state.state not in UNREACHABLE_STATES
+                and self.reset_on_off and light.manual_since is not None
+            ):
+                self._end_manual(entity_id, light, "turned off")
+            return False
+        if light.manual_since is not None or not light.last_set:
             return False
         verdicts = self._verdicts(light.last_set, light.command_start, state, old_state)
         reasons = [text for text, verdict in verdicts if verdict == _AWAY]
@@ -470,7 +481,7 @@ class OverrideManager:
         if state is None or state.state != "on" or not light.last_set:
             light.own_report_open = False
             return False
-        if light.ignore_until is not None and dt_util.now() < light.ignore_until:
+        if light.ignore_until is not None and dt_util.utcnow() < light.ignore_until:
             return True
         reasons = [text for text, ok in self._at_target(light.last_set, state) if not ok]
         if not reasons:
@@ -497,7 +508,7 @@ class OverrideManager:
             since = old_state.last_changed  # gap started before HCL listened
         if since is None or light.manual_since is None:
             return
-        gap = dt_util.now() - since
+        gap = dt_util.utcnow() - since
         if self.reset_on_off and gap > timedelta(seconds=UNREACHABLE_GRACE_SECONDS):
             self._end_manual(entity_id, light, f"not reachable for {gap}")
         else:
@@ -509,14 +520,14 @@ class OverrideManager:
 
         Normal update cycles leave it alone until the transition has ended.
         """
-        self._light(entity_id).reengage_until = dt_util.now() + timedelta(seconds=float(seconds))
+        self._light(entity_id).reengage_until = dt_util.utcnow() + timedelta(seconds=float(seconds))
 
     def is_reengaging(self, entity_id: str) -> bool:
         """Whether a light is still in its smooth return to HCL."""
         light = self._lights.get(entity_id)
         if light is None or light.reengage_until is None:
             return False
-        if dt_util.now() < light.reengage_until:
+        if dt_util.utcnow() < light.reengage_until:
             return True
         light.reengage_until = None
         return False

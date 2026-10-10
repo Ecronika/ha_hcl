@@ -99,6 +99,9 @@ class CommandTracker:
         # Lights whose last command failed (logged once until they answer
         # again, RM-B39)
         self.failing: set[str] = set()
+        # Lights whose two-step command (compatibility mode) failed and got
+        # the values without transition (logged once per streak, RM-B47)
+        self.smart_fallback: set[str] = set()
         # Number of the command that last set the tracking values of a light
         self._latest: dict[str, int] = {}
         self._numbers = itertools.count(1)
@@ -118,6 +121,7 @@ class CommandTracker:
         for entity_id in [eid for eid in self._latest if eid not in valid_entity_ids]:
             del self._latest[entity_id]
         self.failing &= valid_entity_ids
+        self.smart_fallback &= valid_entity_ids
 
 
 # Colour modes HCL drives through the XY simulation (Home Assistant converts
@@ -873,6 +877,48 @@ class HCLLightController:
         """Light entity IDs of a target (see targets.resolve_lights)."""
         return resolve_lights(self.hass, target_config, groups)
 
+    async def _send_steps(self, entity_id: str, steps: list[dict[str, Any]], parent: Context | None) -> bool:
+        """Send the parts of a compatibility-mode command one after the other.
+
+        Each part waits for the device. A later part is only sent if the light
+        still wants it: switched off, changed by hand meanwhile (manual
+        control) - the user's decision wins over the rest of the command
+        (RM-B48). Returns True if a part was sent.
+        """
+        sent = faded = False
+        for number, data in enumerate(steps):
+            if number and not self._still_wanted(entity_id):
+                _LOGGER.debug("Rest of the command to %s dropped: switched off or changed meanwhile", entity_id)
+                break
+            if await self._async_call("light", "turn_on", data, blocking=True, parent=parent):
+                sent = True
+                faded |= bool(data.get("transition"))
+        # a part with a transition was accepted: the two-step command works again
+        if faded and entity_id in self.commands.smart_fallback:
+            self.commands.smart_fallback.discard(entity_id)
+            _LOGGER.debug("Smart transition for %s works again", entity_id)
+        return sent
+
+    def _still_wanted(self, entity_id: str) -> bool:
+        """Whether a further part of a command may go to the light (RM-B48)."""
+        state = self.hass.states.get(entity_id)
+        return (
+            state is not None and state.state == STATE_ON
+            and not self.override_manager.is_overridden(entity_id)
+        )
+
+    def _report_smart_failure(self, entity_id: str, error: BaseException) -> None:
+        """The two-step command failed: logged once per streak (RM-B47); the
+        fallback without transition follows (a final failure: RM-B39)."""
+        if entity_id in self.commands.smart_fallback:
+            _LOGGER.debug("Smart transition for %s failed again (%s)", entity_id, error)
+            return
+        self.commands.smart_fallback.add(entity_id)
+        _LOGGER.warning(
+            "Smart transition for %s failed (%s); sending the values without transition "
+            "(repeated failures are logged at debug level until it works again)", entity_id, error,
+        )
+
     async def _apply_smart_xy_single(
         self, entity_id, x, y, brightness, transition, parent: Context | None = None
     ) -> bool:
@@ -892,16 +938,20 @@ class HCLLightController:
             delta_c = xy_distance(curr_xy, (x, y)) * XY_COLOR_SENSITIVITY
 
             if delta_c > delta_b:
-                first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
-                second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": transition}, blocking=True, parent=parent)
+                steps = [
+                    {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0},
+                    {"entity_id": entity_id, "xy_color": (x, y), "transition": transition},
+                ]
             else:
-                first = await self._async_call("light", "turn_on", {"entity_id": entity_id, "xy_color": (x, y), "transition": 0}, blocking=True, parent=parent)
-                second = await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
-            return first or second
+                steps = [
+                    {"entity_id": entity_id, "xy_color": (x, y), "transition": 0},
+                    {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition},
+                ]
+            return await self._send_steps(entity_id, steps, parent)
         except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
-            # a light that keeps failing is logged once (RM-B39)
-            log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
-            log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)
+            self._report_smart_failure(entity_id, err)
+        if not self._still_wanted(entity_id):
+            return False
         return await self._async_call(
             "light", "turn_on",
             {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0},
@@ -932,24 +982,24 @@ class HCLLightController:
             target_bri_byte = brightness_byte(brightness)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
-            sent = False
-
+            colour = {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}
+            steps = []
             if delta_k > delta_b:
                 # Check if brightness change is significant enough to warrant a snap
                 if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
-                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0}, blocking=True, parent=parent)
+                    steps.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": 0})
                 # Send color without transition to avoid glitches on IKEA bulbs
-                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
+                steps.append(colour)
             else:
                 # Only snap color if delta is significant; colour temperature never fades (transition 0).
                 if reported_kelvin is None or abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
-                    sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}, blocking=True, parent=parent)
-                sent |= await self._async_call("light", "turn_on", {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition}, blocking=True, parent=parent)
-            return sent
+                    steps.append(colour)
+                steps.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": transition})
+            return await self._send_steps(entity_id, steps, parent)
         except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
-            # a light that keeps failing is logged once (RM-B39)
-            log = _LOGGER.debug if entity_id in self.commands.failing else _LOGGER.warning
-            log("Smart transition for %s failed (%s); sending the values without transition", entity_id, err)
+            self._report_smart_failure(entity_id, err)
+        if not self._still_wanted(entity_id):
+            return False
         # Fallback: send everything, no transition (safest)
         return await self._async_call(
             "light", "turn_on",

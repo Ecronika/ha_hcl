@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b4] - 2026-10-10
+Fourth pre-release (beta) of 0.8.0: fixes from the reviews of 0.8.0b3 (RM-B47 to RM-B51) before the field test. The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Compatibility mode: second command after switching off** (RM-B48): the brightness and colour commands are sent one after the other. A light that was switched off (or changed by hand) while the first command was running got the second one anyway and was switched on again (or set back to the HCL value). The rest of the command is now dropped.
+- **Switching off and on right after an HCL command kept manual control** (RM-B49): Home Assistant gives the state changes of a light the context of the last command for 5 seconds, also changes made at the device. Switching a light off in that time did not end its manual control ("Switching a light off ends manual control"), so a light dimmed by hand and switched off and on again quickly stayed paused. Switching off now counts the same with and without HCL's context.
+- **Colour change without brightness not recognised** (RM-B50): a report "on" without brightness (or with brightness 0, e.g. KNX) but with another colour temperature was not checked at all; only the brightness comparison is skipped now, a changed colour counts as manual control.
+- **Manual control timeout across a DST change** (RM-B51): the times of manual control, the ignore window after a command and the smooth return were compared in local time, so a timeout running across the change ended one hour too early (spring) or too late (autumn). They are now kept in UTC; stored manual control keeps its format (ISO time).
+- **Compatibility mode: warning in every update** (RM-B47): when the two-step command failed but the values without transition were accepted, every update logged the warning again. It is now logged once until the two-step command works again (repeats at debug level).
+
 ## [0.8.0b3] - 2026-10-10
 Third pre-release (beta) of 0.8.0: the fix from the review of 0.8.0b2 (RM-B46), the daylight compensation with an indoor lux sensor (RM-E02) on a new environmental controller (RM-E01), and internal restructuring (RM-T04, RM-T06 to RM-T08). The minimum Home Assistant version stays 2024.7.
 
