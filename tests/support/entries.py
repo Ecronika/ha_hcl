@@ -55,12 +55,13 @@ def timer_cycle(hass: HomeAssistant):
     is skipped while a cycle is running). Tests use this instead of the
     internals of the switch (RM-T24), so a change of the scheduling only
     changes this helper."""
-    return switch_entity(hass)._update_hcl()
+    return switch_entity(hass)._scheduler.tick()
 
 
 def cycle_running(hass: HomeAssistant) -> bool:
     """Whether an update cycle (or a request waiting for one) holds the switch."""
-    return switch_entity(hass)._update_lock.locked()
+    return switch_entity(hass)._scheduler.busy
+
 
 # Entity ids of an instance named "HCL"
 SWITCH = "switch.hcl_hcl_active"

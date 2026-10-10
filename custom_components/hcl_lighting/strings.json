@@ -77,6 +77,41 @@
                     "night_light_brightness": "Night light: brightness",
                     "night_light_kelvin": "Night light: colour temperature"
                 }
+            },
+            "daylight": {
+                "title": "Daylight compensation",
+                "description": "Optional: an indoor lux sensor lowers the brightness in Auto when there is enough daylight. The brightness never goes above the curve and never below the minimum brightness; the colour temperature is not changed. Choose a sensor that represents the room and is not lit directly by the lights.",
+                "data": {
+                    "daylight_enabled": "Daylight compensation",
+                    "daylight_sensor": "Lux sensor",
+                    "daylight_target_lux": "Target illuminance at the sensor"
+                },
+                "data_description": {
+                    "daylight_sensor": "Sensor with device class illuminance (lx), required when the daylight compensation is on.",
+                    "daylight_target_lux": "Lux at the sensor HCL aims for (50–2000, required when on). A control value at the sensor position, not a lighting standard value."
+                },
+                "sections": {
+                    "daylight_advanced": {
+                        "name": "Advanced: daylight control",
+                        "description": "Usually unchanged.",
+                        "data": {
+                            "daylight_deadband_lux": "Dead band",
+                            "daylight_smoothing": "Smoothing",
+                            "daylight_response_band_lux": "Response band",
+                            "daylight_max_rate": "Maximum rate",
+                            "daylight_stale_after": "Sensor stale after",
+                            "daylight_unavailable_grace": "Grace for a missing sensor value"
+                        },
+                        "data_description": {
+                            "daylight_deadband_lux": "Lux around the target without a change (empty: 5 % of the target, at least 20 lx).",
+                            "daylight_smoothing": "Time constant of the lux filter in seconds (default 60).",
+                            "daylight_response_band_lux": "Lux deviation that uses the full rate (default 300); smaller deviations change the brightness more slowly.",
+                            "daylight_max_rate": "Percent points per minute (default 11), independent of the update interval.",
+                            "daylight_stale_after": "Seconds without a report until the value counts as outdated (default 3600; 0 = no check, for sensors that report only on change).",
+                            "daylight_unavailable_grace": "Seconds the reduction is held while the sensor has no valid value (default 300); afterwards the brightness returns slowly to the curve."
+                        }
+                    }
+                }
             }
         },
         "error": {
@@ -84,7 +119,9 @@
             "transition_too_long": "The transition must be shorter than the update interval.",
             "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
             "invalid_time": "Invalid time.",
-            "no_lights": "Select at least one light, area, device, floor or label."
+            "no_lights": "Select at least one light, area, device, floor or label.",
+            "daylight_sensor_required": "Choose a lux sensor for the daylight compensation.",
+            "daylight_target_required": "Enter the target illuminance for the daylight compensation."
         }
     },
     "entity": {
@@ -218,6 +255,10 @@
         "guest_deprecated": {
             "title": "Scenario “Guest” of {instance} will be removed",
             "description": "The scenario Guest is deprecated and will be removed in version 0.9.0: it does the same as switching “HCL active” off. Switch “HCL active” off instead (also in automations with hcl_lighting.set_scenario) and select another scenario; this message disappears when {instance} leaves Guest."
+        },
+        "daylight_shared_sensor": {
+            "title": "Lux sensor used by several HCL instances",
+            "description": "{sensor} is the lux sensor of the daylight compensation of several active HCL instances ({instances}). Two control loops on one sensor work against each other when their lights reach it. Use one sensor per lighting zone that represents it, or turn the daylight compensation off in all but one instance. Ignore this message if the instances light separate rooms that the sensor does not see."
         }
     },
     "selector": {

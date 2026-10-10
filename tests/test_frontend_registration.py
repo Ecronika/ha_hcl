@@ -9,7 +9,7 @@ from pathlib import Path
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.hcl_lighting import _async_register_lovelace_resource
+from custom_components.hcl_lighting.ha_internals import async_register_lovelace_resource
 from custom_components.hcl_lighting.const import DOMAIN
 
 from .support.entries import CT_ATTRS, set_light, setup_entry
@@ -35,7 +35,7 @@ async def _register_with_storage(hass, hass_storage, items):
     assert collection.loaded is False
     hass.data["lovelace"] = MagicMock(resources=collection)
     hass.http = MagicMock(async_register_static_paths=AsyncMock())
-    await _async_register_lovelace_resource(hass)
+    await async_register_lovelace_resource(hass)
     await hass.async_block_till_done()
     hass.bus.async_fire(EVENT_HOMEASSISTANT_FINAL_WRITE)  # flush delayed store writes (as on shutdown)
     await hass.async_block_till_done()
@@ -55,7 +55,7 @@ def _notifications(hass):
 async def test_a16_frontend_registered_once(hass):
     """Static path once per run; setup of further entries and reloads only check it."""
     from unittest.mock import AsyncMock
-    from custom_components.hcl_lighting import _async_register_lovelace_resource
+    from custom_components.hcl_lighting.ha_internals import async_register_lovelace_resource
 
     from homeassistant.setup import async_setup_component
 
@@ -69,7 +69,7 @@ async def test_a16_frontend_registered_once(hass):
     second.add_to_hass(hass)
     assert await hass.config_entries.async_setup(second.entry_id)
     await hass.async_block_till_done()
-    await _async_register_lovelace_resource(hass)
+    await async_register_lovelace_resource(hass)
     assert hass.http.async_register_static_paths.await_count == 1
 
 
@@ -114,10 +114,10 @@ async def test_b52_missing_lovelace_is_retried_and_version_from_manifest(hass):
     import json
     from pathlib import Path
     from unittest.mock import AsyncMock, MagicMock
-    from custom_components.hcl_lighting import _async_register_lovelace_resource
+    from custom_components.hcl_lighting.ha_internals import async_register_lovelace_resource
 
     hass.http = MagicMock(async_register_static_paths=AsyncMock())
-    assert await _async_register_lovelace_resource(hass) is False  # no Lovelace yet
+    assert await async_register_lovelace_resource(hass) is False  # no Lovelace yet
     collection = MagicMock()
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
 
@@ -130,7 +130,7 @@ async def test_b52_missing_lovelace_is_retried_and_version_from_manifest(hass):
     collection.async_create_item = AsyncMock()
     collection.async_delete_item = AsyncMock()
     hass.data["lovelace"] = MagicMock(resources=collection)
-    assert await _async_register_lovelace_resource(hass) is True
+    assert await async_register_lovelace_resource(hass) is True
     version = json.loads((Path(__file__).parents[1] / "custom_components/hcl_lighting/manifest.json").read_text())["version"]
     collection.async_update_item.assert_awaited_once_with(
         "old", {"res_type": "module", "url": f"/hcl_lighting_static/hcl-curve-card.js?v={version}"}
@@ -143,7 +143,7 @@ async def test_b52_missing_lovelace_is_retried_and_version_from_manifest(hass):
 @pytest.mark.usefixtures("evening")
 async def test_b52_failed_registration_is_not_marked_done(hass):
     from unittest.mock import AsyncMock, MagicMock
-    from custom_components.hcl_lighting import _async_register_lovelace_resource
+    from custom_components.hcl_lighting.ha_internals import async_register_lovelace_resource
     from homeassistant.components.lovelace.resources import ResourceStorageCollection
 
     hass.http = MagicMock(async_register_static_paths=AsyncMock())
@@ -153,9 +153,9 @@ async def test_b52_failed_registration_is_not_marked_done(hass):
     collection.async_items = MagicMock(return_value=[])
     collection.async_create_item = AsyncMock(side_effect=RuntimeError("storage"))
     hass.data["lovelace"] = MagicMock(resources=collection)
-    assert await _async_register_lovelace_resource(hass) is False
+    assert await async_register_lovelace_resource(hass) is False
     collection.async_create_item = AsyncMock(return_value={"id": "new"})
-    assert await _async_register_lovelace_resource(hass) is True
+    assert await async_register_lovelace_resource(hass) is True
 
 
 # ---------------------------------------------------------------- B-14
@@ -194,4 +194,4 @@ async def test_b14_yaml_mode_resources_do_not_break_setup(hass):
     collection = ResourceYAMLCollection([{"id": "1", "type": "module", "url": "/hcl_lighting_static/hcl-curve-card.js?v=0.4.1"}])
     hass.data["lovelace"] = MagicMock(resources=collection)
     hass.http = MagicMock(async_register_static_paths=AsyncMock())
-    await _async_register_lovelace_resource(hass)  # must not raise
+    await async_register_lovelace_resource(hass)  # must not raise

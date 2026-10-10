@@ -45,6 +45,9 @@ const HCL_STRINGS = {
         mode_night_light: "Night light",
         guest_now: "HCL sends no values",
         setpoint_unavailable: "target values not available",
+        env_daylight: "daylight",
+        env_daylight_hold: "daylight held",
+        env_daylight_sensor: "daylight sensor without value",
         sleep_now: "lights off",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
@@ -114,6 +117,9 @@ const HCL_STRINGS = {
         mode_night_light: "Nachtlicht",
         guest_now: "HCL sendet keine Werte",
         setpoint_unavailable: "Sollwerte nicht verfügbar",
+        env_daylight: "Tageslicht",
+        env_daylight_hold: "Tageslicht gehalten",
+        env_daylight_sensor: "Tageslichtsensor ohne Wert",
         sleep_now: "Lichter aus",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
@@ -1260,7 +1266,16 @@ class HCLCurveCard extends HTMLElement {
         } else if (mode === "sleep") {
             parts.push(this._t("sleep_now"));
         } else if (valid(bState) && valid(kState)) {
-            parts.push(f.percent(Number(bState.state)), f.kelvin(Number(kState.state)));
+            // Base -> effective with the reason when an environmental feature
+            // changes the value (RM-E01, E01-3); older integrations without
+            // these attributes show the value alone
+            const attrs = bState.attributes || {};
+            const b = Number(bState.state);
+            const base = Number(attrs.base_value);
+            const changed = Number.isFinite(base) && Math.round(base) !== Math.round(b);
+            parts.push(changed ? `${f.percent(base)} → ${f.percent(b)}` : f.percent(b), f.kelvin(Number(kState.state)));
+            const note = this._environmentNote(attrs.environment_status, attrs.environment_reason, changed);
+            if (note) parts.push(note);
         } else if (bState || kState) {
             // The setpoint sensors exist but have no current value: no substitute
             parts.push(this._t("setpoint_unavailable"));
@@ -1289,6 +1304,15 @@ class HCLCurveCard extends HTMLElement {
                 hclSetSpoken(draftEl, "", "");
             }
         }
+    }
+
+    // Short reason of an environmental feature (daylight compensation) for the "now" line
+    _environmentNote(status, reason, changed) {
+        if (typeof reason !== "string" || !reason.startsWith("daylight_")) return null;
+        if (status === "degraded" || status === "fallback") return this._t("env_daylight_sensor");
+        if (status === "hold" && changed) return this._t("env_daylight_hold");
+        if (status === "active" && changed) return this._t("env_daylight");
+        return null;
     }
 
     // "until 07:00" (within 24 h) or "until 5.10. 07:00", in the Home Assistant time zone

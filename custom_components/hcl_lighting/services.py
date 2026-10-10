@@ -1,7 +1,6 @@
 """Services of HCL Lighting besides update_curve (F-02)."""
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -12,7 +11,6 @@ from homeassistant.core import Context, HomeAssistant, ServiceCall, ServiceRespo
 from homeassistant.exceptions import ServiceValidationError, Unauthorized, UnknownUser
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity import CONTEXT_RECENT_TIME_SECONDS, Entity
 
 from .const import (
     CONF_CURVE_CONFIG,
@@ -113,21 +111,6 @@ async def async_check_context_permissions(
     for entity_id in dict.fromkeys(e for e in entity_ids if e):
         if not user.permissions.check_entity(entity_id, policy):
             raise Unauthorized(context=context, entity_id=entity_id, permission=policy)
-
-
-def action_context(entity: Entity) -> Context | None:
-    """Context of the action an entity is handling right now, else None.
-
-    Home Assistant sets it before calling the entity (async_set_context) and
-    stops using it for state writes after CONTEXT_RECENT_TIME_SECONDS; a
-    context older than that belongs to an earlier action (e.g. the user who
-    chose a scenario, not its automatic end).
-    """
-    context = entity._context  # set by Home Assistant for the current action
-    set_at = entity._context_set
-    if context is None or set_at is None or time.time() - set_at > CONTEXT_RECENT_TIME_SECONDS:
-        return None
-    return context
 
 
 async def async_check_lights(hass: HomeAssistant, context: Context | None, runtime: HCLRuntimeData) -> None:

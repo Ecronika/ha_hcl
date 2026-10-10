@@ -13,7 +13,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🎨 Interactive Dashboard Card
 - **Visual Editor**: Edit brightness and colour temperature on an interactive, touch-friendly chart.
 - **Editing**: Drag points, add points (➕ button or double-click in the chart), delete the selected point (➖ button or Del key), enter exact values (time, %, K) and undo changes (↶ button or Ctrl+Z). Points always stay in chronological order.
-- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the active scenario with its end (e.g. "until 07:00") and the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "target values not available" while they have no value).
+- **Now marker**: A line shows the current time (in the Home Assistant time zone); below the charts the active scenario with its end (e.g. "until 07:00") and the values HCL sends now are shown (scenario and brightness limits included; from the setpoint sensors, "target values not available" while they have no value). With the daylight compensation the line shows the curve or scenario value and the effective value, e.g. "80 % → 35 % · daylight" (also "daylight held" and "daylight sensor without value").
 - **Scenario chips**: switch the scenario directly in the card. The curve can be edited in every scenario; it only applies in Auto.
 - **Views**: full (default) or compact (`view: compact`: status and scenario chips, the editor opens on demand). The card has a visual editor and adapts to narrow columns (from 240 px) and Sections dashboards. In Sections dashboards keep the height on "auto": the height of the card changes with its content (editor open or closed, hints); with a fixed height the card scrolls inside.
 - **Title**: the name of the instance (rename the entry under Settings → Devices & services, e.g. "Kitchen"), or `title:` in the card configuration.
@@ -39,6 +39,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Brightness and colour temperature separately**: Two switches per instance let HCL adapt only the colour temperature, only the brightness or both.
 - **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K).
 - **Instant-On**: Lights receive the HCL values right after they are switched on, without transition (not in Guest mode; a light switched on during Sleep counts as manual control).
+- **Daylight compensation** (optional): an indoor lux sensor lowers the brightness in Auto when there is enough daylight (see [Daylight compensation](#4-daylight-compensation-optional)).
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
 - **Services**: apply now, set or release manual control, set a scenario with a duration, read the curve (see [Services](#services)).
 - **Diagnostics and logbook**: diagnostics download on the integration page (without the instance name; entity, device, area, floor and label IDs replaced by pseudonyms such as `light.redacted_1`, manual control as its age in minutes; curve and wake/sleep times remain for troubleshooting – review the download before sharing it publicly); logbook entries and an event when a light starts or stops being under manual control.
@@ -124,6 +125,21 @@ A light that is switched on gets the values at once, without transition (the opt
 ### 3. Scenarios
 Brightness (1–100 %) and colour temperature (2000–7000 K) of **Focus** (100 % / 5500 K), **Relax** (40 % / 2700 K), **Cleaning** (100 % / 4000 K) and **Night light** (3 % / 2200 K), plus a **duration** (0–1440 min) after which Focus, Relax and Cleaning return to **Auto** (0 = until changed). Sleep and Night light always return to Auto at the next wake time; `hcl_lighting.set_scenario` with `duration: 0` keeps them until changed.
 
+### 4. Daylight compensation (optional)
+An indoor **lux sensor** lowers the brightness in **Auto** when there is enough daylight (measured closed loop). Off after an update or a new installation.
+
+*   **Lux sensor** (device class illuminance) and **target illuminance at the sensor** (50–2000 lx) are required when it is on. The target is a control value at the sensor position, not a lighting standard value (a workplace still has to be planned and measured on its own).
+*   The brightness is **never above the curve** and **never below the minimum brightness**; the **colour temperature is not changed**. HCL still never switches a light on or off.
+*   **Only in Auto**: in a scenario (Focus, Relax, Cleaning, Night light, Sleep, Guest) the scenario values apply; the reduction is kept and used again when Auto returns within 2 hours.
+*   The reduction changes **at most 11 % points per minute** (independent of the update interval), less for small deviations; a **dead band** (5 % of the target, at least 20 lx) and a **smoothing** of the sensor value (60 s) prevent small changes.
+*   **No change while it has no effect**: while all lights that are on are manually controlled (or returning to HCL), while *Adapt brightness* is off and while *HCL active* is off, the reduction is held. Lights that are off keep following the daylight, so a light switched on starts dimmed.
+*   **Sensor without a value** (unavailable, unknown, not a number, or no report for 60 min): the reduction is held for 5 minutes, then the brightness returns slowly to the curve. A single bad value changes nothing. For sensors that report only on a change, set *Sensor stale after* to 0.
+*   **Restart and reload**: the reduction is stored (at most every 5 minutes, and when Home Assistant stops) and used again if it is at most 2 hours old; otherwise HCL starts from the brightness the lights had in Auto, or from the curve. No jump to the curve after saving the options.
+*   **Sensor position**: the sensor should see the room, not the lights directly. A sensor the lights shine on strongly (e.g. 100 lx more per percent of brightness) can make the brightness swing by a few percent; a slow sensor makes this worse. One instance per lighting zone with its own sensor; a sensor used by several active instances shows a repair issue.
+*   The target sensors show the effective value; their attributes `base_value` (curve or scenario), `environment_status`, `environment_reason`, `measured_lux`, `filtered_lux`, `target_lux`, `cap_pct` and `sensor_age` explain it (not stored in the history). The card shows e.g. "80 % → 35 % · daylight".
+
+The collapsed section **Advanced: daylight control** holds dead band, smoothing, response band (300 lx: deviation that uses the full rate), maximum rate, *sensor stale after* (3600 s) and the grace for a missing sensor value (300 s).
+
 ### Notes on lights
 Some bulbs have firmware limits that HCL cannot fix, but the options can work around them:
 *   **IKEA TRÅDFRI** (and similar): enable the **compatibility mode** (see above).
@@ -143,7 +159,7 @@ Each instance is a device with these entities (IDs of new installations; existin
 | Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone (Sleep still switches lights off) |
 | Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
 | Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning, Guest (deprecated; also the chips of the card). Attribute `until`: end of a timed scenario. |
-| Target brightness | `sensor.living_room_target_brightness` | Brightness HCL sends now (%, scenario and limits included; Sleep 0 %, Guest `unknown`) |
+| Target brightness | `sensor.living_room_target_brightness` | Brightness HCL sends now (%, scenario, limits and daylight compensation included; Sleep 0 %, Guest `unknown`) |
 | Target colour temperature | `sensor.living_room_target_colour_temperature` | Colour temperature HCL sends now (K) |
 | Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last curve/scenario change). Attributes include `instance` (name of the instance, card title), `preview_active` (the lights follow an unsaved preview), `wake_time`, `sleep_time` and `default_points` (default curve for these times, used by the card's **Default curve** button). |
 
@@ -219,13 +235,14 @@ actions:
     points: "{{ curve.points }}"
 ```
 
-**Daylight (lux)**: HCL does not read light sensors. Automations can react to a lux sensor with the services above, e.g. pause lights with `set_manual_control` and switch them off while there is enough daylight, and hand them back afterwards.
+**Daylight (lux)**: the daylight compensation (*Configuration*, section 4) lowers the brightness with a lux sensor. Switching lights off when there is enough daylight stays an automation: pause them with `set_manual_control`, switch them off and hand them back afterwards.
 
 ---
 
 ## 🔧 Technical Details
 
 *   **Update Loop**: every 27 seconds by default (configurable). Only one update runs at a time: a timer tick is skipped while an update is still sending, while updates requested by a scenario change, a curve preview/revert, the release of manual control or `apply` wait for it and are then sent (several requests are combined).
+*   **Environmental controller**: the only place where the effective setpoint is derived from the curve or scenario value (base). Each regular update advances it once (`step`); the target sensors, `apply`, the card and a light switched on read it without changing it (`peek`). Rates are per time: changes use the real time since the last update, at most 60 s. An error in a feature falls back to the value without it and is logged once. Without a configured feature the values are exactly the base values.
 *   **Interpolation**: **PCHIP** (Piecewise Cubic Hermite Interpolating Polynomial) - guarantees monotonicity.
 *   **Manual Detection**: HCL sends its commands with its own context; commands with another context that change brightness or colour mark the light as manually controlled. State changes that are not caused by a Home Assistant command are compared with the thresholds above. A report "on" with brightness 0 (e.g. a KNX light whose brightness status arrives just before or after its switching status) carries no brightness and is not compared for brightness. Home Assistant assigns the context of the last command to state changes of a light within 5 seconds, also to a change on the device itself (e.g. a wall dimmer). A state report with HCL's context therefore counts as HCL's own only if it fits the command (at the HCL value or moving towards it); a change beyond the light's previous value is manual control at once, a change back towards it is decided when the command's transition has ended (a light that has not reached the HCL value by then is manually controlled).
 *   **Traffic Optimization**:

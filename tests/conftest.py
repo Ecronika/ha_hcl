@@ -17,7 +17,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 def no_frontend_registration():
     """Skip static path / Lovelace resource registration (needs a running http server)."""
     with patch(
-        "custom_components.hcl_lighting._async_register_lovelace_resource",
+        "custom_components.hcl_lighting.ha_internals.async_register_lovelace_resource",
         return_value=None,
     ):
         yield

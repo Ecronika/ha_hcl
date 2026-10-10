@@ -77,6 +77,41 @@
                     "night_light_brightness": "Nachtlicht: Helligkeit",
                     "night_light_kelvin": "Nachtlicht: Farbtemperatur"
                 }
+            },
+            "daylight": {
+                "title": "Tageslichtkompensation",
+                "description": "Optional: Ein Luxsensor im Raum senkt in Auto die Helligkeit, wenn genug Tageslicht da ist. Die Helligkeit geht nie über die Kurve und nie unter die Mindesthelligkeit; die Farbtemperatur bleibt unverändert. Wähle einen Sensor, der den Raum repräsentiert und nicht direkt von den Leuchten angestrahlt wird.",
+                "data": {
+                    "daylight_enabled": "Tageslichtkompensation",
+                    "daylight_sensor": "Luxsensor",
+                    "daylight_target_lux": "Ziel-Beleuchtungsstärke am Sensor"
+                },
+                "data_description": {
+                    "daylight_sensor": "Sensor mit Geräteklasse Beleuchtungsstärke (lx), Pflicht bei eingeschalteter Tageslichtkompensation.",
+                    "daylight_target_lux": "Lux am Sensor, die HCL anstrebt (50–2000, Pflicht bei eingeschalteter Funktion). Ein Regelwert an der Sensorposition, kein Normwert."
+                },
+                "sections": {
+                    "daylight_advanced": {
+                        "name": "Erweitert: Tageslichtregelung",
+                        "description": "Meist unverändert lassen.",
+                        "data": {
+                            "daylight_deadband_lux": "Totband",
+                            "daylight_smoothing": "Glättung",
+                            "daylight_response_band_lux": "Regelband",
+                            "daylight_max_rate": "Maximale Geschwindigkeit",
+                            "daylight_stale_after": "Sensorwert veraltet nach",
+                            "daylight_unavailable_grace": "Haltezeit bei fehlendem Sensorwert"
+                        },
+                        "data_description": {
+                            "daylight_deadband_lux": "Lux um den Zielwert ohne Änderung (leer: 5 % des Zielwerts, mindestens 20 lx).",
+                            "daylight_smoothing": "Zeitkonstante des Luxfilters in Sekunden (Standard 60).",
+                            "daylight_response_band_lux": "Abweichung in Lux, ab der die volle Geschwindigkeit gilt (Standard 300); kleinere Abweichungen ändern die Helligkeit langsamer.",
+                            "daylight_max_rate": "Prozentpunkte pro Minute (Standard 11), unabhängig vom Aktualisierungsintervall.",
+                            "daylight_stale_after": "Sekunden ohne Meldung, bis der Wert als veraltet gilt (Standard 3600; 0 = keine Prüfung, für Sensoren, die nur bei Änderung melden).",
+                            "daylight_unavailable_grace": "Sekunden, die die Absenkung bei fehlendem gültigen Sensorwert gehalten wird (Standard 300); danach geht die Helligkeit langsam zur Kurve zurück."
+                        }
+                    }
+                }
             }
         },
         "error": {
@@ -84,7 +119,9 @@
             "transition_too_long": "Die Übergangszeit muss kürzer als das Aktualisierungsintervall sein.",
             "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
             "invalid_time": "Ungültige Uhrzeit.",
-            "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen."
+            "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen.",
+            "daylight_sensor_required": "Wähle einen Luxsensor für die Tageslichtkompensation.",
+            "daylight_target_required": "Gib die Ziel-Beleuchtungsstärke für die Tageslichtkompensation an."
         }
     },
     "entity": {
@@ -218,6 +255,10 @@
         "guest_deprecated": {
             "title": "Szenario „Gast“ von {instance} entfällt",
             "description": "Das Szenario Gast ist abgekündigt und entfällt in Version 0.9.0: Es wirkt wie das Ausschalten von „HCL aktiv“. Schalte stattdessen „HCL aktiv“ aus (auch in Automationen mit hcl_lighting.set_scenario) und wähle ein anderes Szenario; diese Meldung verschwindet, sobald {instance} Gast verlässt."
+        },
+        "daylight_shared_sensor": {
+            "title": "Luxsensor in mehreren HCL-Instanzen",
+            "description": "{sensor} ist der Luxsensor der Tageslichtkompensation mehrerer aktiver HCL-Instanzen ({instances}). Zwei Regelkreise an einem Sensor arbeiten gegeneinander, wenn ihre Leuchten ihn erreichen. Verwende je Lichtzone einen eigenen, repräsentativen Sensor oder schalte die Tageslichtkompensation in allen Instanzen bis auf eine aus. Ignoriere diese Meldung, wenn die Instanzen getrennte Räume beleuchten, die der Sensor nicht sieht."
         }
     },
     "selector": {

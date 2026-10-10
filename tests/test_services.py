@@ -12,7 +12,7 @@ from pathlib import Path
 from pytest_homeassistant_custom_component.common import async_fire_time_changed, async_mock_service
 
 from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, DOMAIN
-from custom_components.hcl_lighting.logic import light_controller
+from custom_components.hcl_lighting.logic import targets as light_targets
 
 from .support.entries import CT_ATTRS, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, timer_cycle
 from .support.lights import FakeLights
@@ -230,8 +230,8 @@ def test_rm_b19_service_call_keeps_the_target_with_both_signatures(monkeypatch):
     target = {"area_id": ["living"], "entity_id": ["light.a"]}
     for cls in (_OldServiceCall, _NewServiceCall):
         # imported at module level since 0.7.0b12 (RM-T16)
-        monkeypatch.setattr(light_controller, "ServiceCall", cls)
-        call = light_controller._service_call(object(), target)
+        monkeypatch.setattr(light_targets, "ServiceCall", cls)
+        call = light_targets._service_call(object(), target)
         assert isinstance(call, cls)
         assert (call.domain, call.service, call.data) == ("light", "turn_on", target), cls.__name__
 

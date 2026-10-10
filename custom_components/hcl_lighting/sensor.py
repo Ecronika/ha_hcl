@@ -23,6 +23,7 @@ from .const import (
     CONF_SLEEP_TIME,
     anchor_time,
 )
+from .logic.daylight_compensation import DAYLIGHT_KEY
 from .logic.hcl_math import HCLCalculator, default_points
 from .entity import HCLEntity
 from .runtime import HCLConfigEntry
@@ -199,6 +200,11 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
 
     _attr_should_poll = False
     _attr_suggested_display_precision = 0
+    # Environmental details change with every cycle: live only (EC §14, E01-8)
+    _unrecorded_attributes = frozenset({
+        "base_value", "environment_status", "environment_reason", "reason_codes",
+        "measured_lux", "filtered_lux", "target_lux", "cap_pct", "sensor_age",
+    })
 
     def __init__(self, entry: ConfigEntry, controller, kind: str) -> None:
         key = "target_brightness" if kind == "brightness" else "target_color_temp"
@@ -215,6 +221,12 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
                 self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._handle_update
             )
         )
+        # after every update cycle with environmental features (RM-E01)
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass, f"{DOMAIN}_{self._entry.entry_id}_environment", self._handle_update
+            )
+        )
         self.async_on_remove(
             async_track_time_interval(self.hass, self._handle_update, SETPOINT_UPDATE_INTERVAL)
         )
@@ -226,5 +238,27 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
         self.async_write_ha_state()
 
     def _refresh(self) -> None:
-        brightness, kelvin = self._controller.calculate_target_values(dt_util.now())
-        self._attr_native_value = brightness if self._kind == "brightness" else kelvin
+        now = dt_util.now()
+        result = self._controller.target_result(now)
+        if result is None:  # no environmental feature (or Guest): the base
+            brightness, kelvin = self._controller.calculate_target_values(now)
+            self._attr_native_value = brightness if self._kind == "brightness" else kelvin
+            self._attr_extra_state_attributes = {}
+            return
+        brightness = self._kind == "brightness"
+        dim = "brightness" if brightness else "kelvin"
+        self._attr_native_value = getattr(result.effective, dim)
+        attrs = {
+            "base_value": getattr(result.base, dim),
+            "environment_status": result.status,
+            "environment_reason": result.reason,
+        }
+        if brightness:
+            attrs["reason_codes"] = list(result.reason_codes)
+            daylight = result.modifier(DAYLIGHT_KEY)
+            if daylight is not None:
+                attrs.update({
+                    key: daylight.details.get(key)
+                    for key in ("measured_lux", "filtered_lux", "target_lux", "cap_pct", "sensor_age")
+                })
+        self._attr_extra_state_attributes = attrs

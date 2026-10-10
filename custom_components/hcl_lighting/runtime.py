@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 
 if TYPE_CHECKING:
+    from .logic.environmental_controller import EnvironmentalController
     from .logic.hcl_math import HCLCalculator
     from .logic.light_controller import HCLLightController
     from .logic.override_manager import OverrideManager
@@ -37,6 +38,7 @@ class HCLRuntimeData:
     controller: HCLLightController
     override_manager: OverrideManager
     applied_config: AppliedConfig
+    environment: EnvironmentalController  # RM-E01 (also controller.environment)
     # set by the platforms (also for a disabled entity: see HCLSwitch.is_added, RM-B38)
     switch: HCLSwitch | None = None
     mode_select: HCLModeSelect | None = None

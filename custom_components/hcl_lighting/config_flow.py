@@ -27,6 +27,11 @@ from .const import (
     DEFAULT_RESPECT_TURN_ON_VALUES, DEFAULT_SCENARIO_DURATION,
     SCENARIO_DEFAULTS, CONFIGURABLE_SCENARIOS, scenario_option_keys,
     CONF_SCENARIO_TRANSITION,
+    CONF_DAYLIGHT_ENABLED, CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX,
+    CONF_DAYLIGHT_SMOOTHING, CONF_DAYLIGHT_RESPONSE_BAND_LUX, CONF_DAYLIGHT_MAX_RATE,
+    CONF_DAYLIGHT_STALE_AFTER, CONF_DAYLIGHT_UNAVAILABLE_GRACE,
+    DEFAULT_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX, DEFAULT_DAYLIGHT_MAX_RATE,
+    DEFAULT_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE, DAYLIGHT_TARGET_LUX_RANGE,
 )
 
 from homeassistant.const import CONF_NAME
@@ -37,6 +42,10 @@ _LOGGER = logging.getLogger(__name__)
 MIN_ACTIVE_SPAN_MINUTES = 360
 # Collapsible section of the timing options (RM-R11)
 SECTION_ADVANCED = "advanced"
+# Collapsible section of the daylight parameters (RM-E02, E02-7)
+SECTION_DAYLIGHT_ADVANCED = "daylight_advanced"
+# Daylight options that may be empty (removed from the options when cleared)
+_DAYLIGHT_OPTIONAL = (CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX)
 
 
 def _anchor_errors(values: dict[str, Any]) -> dict[str, str]:
@@ -142,6 +151,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """
         entry = self.config_entry_proxy
         new_options = {**entry.options, **user_input}
+        for key in [k for k, v in new_options.items() if v is None]:
+            del new_options[key]  # an optional field that was cleared
         for key in ANCHOR_DEFAULTS:
             old = anchor_time(entry.options, key)
             new = anchor_time(user_input, key)
@@ -236,7 +247,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Values of the fixed scenarios and their duration."""
         if user_input is not None:
             self._pending.update(user_input)
-            return self.async_create_entry(title="", data=self._merged_options(self._pending))
+            return await self.async_step_daylight()
 
         current = self._current()
         fields = {}
@@ -246,3 +257,55 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             fields[vol.Required(key_k, default=current.get(key_k, SCENARIO_DEFAULTS[mode]["kelvin"]))] = _number(2000, 7000, step=50, unit="K")
         fields[vol.Required(CONF_SCENARIO_DURATION, default=current.get(CONF_SCENARIO_DURATION, DEFAULT_SCENARIO_DURATION))] = _number(0, 1440, unit="min")
         return self.async_show_form(step_id="scenarios", data_schema=vol.Schema(fields))
+
+    async def async_step_daylight(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Daylight compensation (RM-E02): lux sensor and target, opt-in."""
+        errors: dict[str, str] = {}
+        flat: dict[str, Any] = {}
+        if user_input is not None:
+            flat = {k: v for k, v in user_input.items() if k != SECTION_DAYLIGHT_ADVANCED}
+            flat.update(user_input.get(SECTION_DAYLIGHT_ADVANCED) or {})
+            for key in _DAYLIGHT_OPTIONAL:
+                flat.setdefault(key, None)  # cleared field: removed from the options
+            if flat.get(CONF_DAYLIGHT_ENABLED):
+                if not flat.get(CONF_DAYLIGHT_SENSOR):
+                    errors[CONF_DAYLIGHT_SENSOR] = "daylight_sensor_required"
+                if not flat.get(CONF_DAYLIGHT_TARGET_LUX):
+                    errors[CONF_DAYLIGHT_TARGET_LUX] = "daylight_target_required"
+            if not errors:
+                self._pending.update(flat)
+                return self.async_create_entry(title="", data=self._merged_options(self._pending))
+
+        current = {**self._current(), **flat}
+        advanced = vol.Schema(
+            {
+                vol.Optional(CONF_DAYLIGHT_DEADBAND_LUX): _number(1, 1000, unit="lx"),
+                vol.Required(CONF_DAYLIGHT_SMOOTHING, default=current.get(CONF_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_SMOOTHING)): _number(0, 600, unit="s"),
+                vol.Required(CONF_DAYLIGHT_RESPONSE_BAND_LUX, default=current.get(CONF_DAYLIGHT_RESPONSE_BAND_LUX, DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX)): _number(10, 5000, unit="lx"),
+                vol.Required(CONF_DAYLIGHT_MAX_RATE, default=current.get(CONF_DAYLIGHT_MAX_RATE, DEFAULT_DAYLIGHT_MAX_RATE)): _number(1, 100, unit="%/min"),
+                vol.Required(CONF_DAYLIGHT_STALE_AFTER, default=current.get(CONF_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_STALE_AFTER)): _number(0, 86400, unit="s"),
+                vol.Required(CONF_DAYLIGHT_UNAVAILABLE_GRACE, default=current.get(CONF_DAYLIGHT_UNAVAILABLE_GRACE, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE)): _number(0, 3600, unit="s"),
+            }
+        )
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_DAYLIGHT_ENABLED, default=bool(current.get(CONF_DAYLIGHT_ENABLED, False))): selector.BooleanSelector(),
+                vol.Optional(CONF_DAYLIGHT_SENSOR): selector.EntitySelector(
+                    {"domain": "sensor", "device_class": "illuminance"}
+                ),
+                vol.Optional(CONF_DAYLIGHT_TARGET_LUX): _number(*DAYLIGHT_TARGET_LUX_RANGE, unit="lx"),
+                vol.Required(SECTION_DAYLIGHT_ADVANCED): section(advanced, {"collapsed": True}),
+            }
+        )
+        suggested = {
+            key: current[key] for key in _DAYLIGHT_OPTIONAL if current.get(key) is not None
+        }
+        if CONF_DAYLIGHT_DEADBAND_LUX in suggested:
+            suggested[SECTION_DAYLIGHT_ADVANCED] = {CONF_DAYLIGHT_DEADBAND_LUX: suggested.pop(CONF_DAYLIGHT_DEADBAND_LUX)}
+        return self.async_show_form(
+            step_id="daylight",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),
+            errors=errors,
+        )

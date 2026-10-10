@@ -116,6 +116,23 @@ EVENT_MANUAL_CONTROL = f"{DOMAIN}_manual_control"
 
 # v0.7.0 Options
 CONF_SCENARIO_TRANSITION = "scenario_transition"    # seconds, transition when the scenario changes
+# Daylight compensation (RM-E02, spec DL v1.5): measured closed loop
+CONF_DAYLIGHT_ENABLED = "daylight_enabled"
+CONF_DAYLIGHT_SENSOR = "daylight_sensor"                   # sensor with device class illuminance (lx)
+CONF_DAYLIGHT_TARGET_LUX = "daylight_target_lux"           # 50-2000 lx at the sensor, no default
+CONF_DAYLIGHT_DEADBAND_LUX = "daylight_deadband_lux"       # optional; default max(20 lx, 5 % of the target)
+CONF_DAYLIGHT_SMOOTHING = "daylight_smoothing"             # s, time constant of the lux filter
+CONF_DAYLIGHT_RESPONSE_BAND_LUX = "daylight_response_band_lux"  # lx error that uses the full rate
+CONF_DAYLIGHT_MAX_RATE = "daylight_max_rate"               # percent points per minute
+CONF_DAYLIGHT_STALE_AFTER = "daylight_stale_after"         # s without a report; 0 = no check
+CONF_DAYLIGHT_UNAVAILABLE_GRACE = "daylight_unavailable_grace"  # s the cap is held for a missing sensor
+DEFAULT_DAYLIGHT_SMOOTHING = 60
+DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX = 300
+DEFAULT_DAYLIGHT_MAX_RATE = 11
+DEFAULT_DAYLIGHT_STALE_AFTER = 3600
+DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE = 300
+DAYLIGHT_TARGET_LUX_RANGE = (50, 2000)
+
 # Settings removed by the migration to entry version 1.2 (0.8.0): options of
 # 0.7.0 betas that are fixed behaviour now (brightness scaling, scenario
 # limits, night modes ending at the wake time), the midday anchor (RM-R07)
