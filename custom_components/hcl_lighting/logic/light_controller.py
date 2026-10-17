@@ -11,7 +11,7 @@ from typing import Any, Literal, NamedTuple
 
 import time
 
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import Context, HomeAssistant, State
 from homeassistant.components.light import (
     ATTR_SUPPORTED_COLOR_MODES,
     ATTR_COLOR_TEMP_KELVIN,
@@ -36,7 +36,6 @@ from ..const import (
     KELVIN_RANGE,
     MODE_AUTO,
     MODE_GUEST,
-    MODE_SLEEP,
     SCENARIO_DEFAULTS,
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
@@ -176,6 +175,9 @@ class HCLLightController:
         self.active_mode = MODE_AUTO
         # Set when the scenario changed; the next update uses the scenario transition
         self._mode_change_pending = False
+        # Bumped when HCL is switched off or unloaded and on a scenario change:
+        # the rest of a running compatibility-mode command is dropped (RM-B53)
+        self._generation = 0
 
         # Adaptation switches (brightness / colour temperature)
         self._adapt_brightness = True
@@ -310,6 +312,7 @@ class HCLLightController:
             return
             
         self.active_mode = mode
+        self.drop_running_commands()
         if announce:
             self._mode_change_pending = True
         _LOGGER.debug("HCL Mode changed to: %s", mode)
@@ -379,10 +382,7 @@ class HCLLightController:
 
         # 2. FIXED SCENARIOS
         if self.active_mode in SCENARIO_DEFAULTS:
-            # Special Handling: Sleep (Off)
-            if self.active_mode == MODE_SLEEP:
-                return 0, 2000 # Off, but pre-heat to 2000K
-                
+            # Sleep: brightness 0 (off) from the scenario table (RM-T30)
             return self.scenario_setpoint(self.active_mode)
 
         # 3. AUTO MODE (Curve)
@@ -476,6 +476,8 @@ class HCLLightController:
         smart_transition = self.config_entry.options.get(CONF_SMART_TRANSITION, False)
         bulk = transition_val == 0 or not smart_transition
         xy = kelvin_to_xy(kelvin)
+        # a compatibility-mode command stops when this changes (RM-B53)
+        generation = self._generation
 
         # tracking before the command and the number of the command
         previous: dict[str, tuple[Tracking, int]] = {}
@@ -497,14 +499,18 @@ class HCLLightController:
                 data["color_temp_kelvin"] = tracked_kelvin
                 job = (
                     self._async_call("light", "turn_on", data, blocking=True, parent=parent)
-                    if bulk else self._apply_smart_ct_single(entity_id, tracked_kelvin, brightness, transition_val, parent)
+                    if bulk else self._apply_smart_ct_single(
+                        entity_id, tracked_kelvin, brightness, transition_val, parent, generation
+                    )
                 )
             elif cap_type == "xy_sim":
                 tracked_kelvin = kelvin
                 data["xy_color"] = xy
                 job = (
                     self._async_call("light", "turn_on", data, blocking=True, parent=parent)
-                    if bulk else self._apply_smart_xy_single(entity_id, xy[0], xy[1], brightness, transition_val, parent)
+                    if bulk else self._apply_smart_xy_single(
+                        entity_id, xy[0], xy[1], brightness, transition_val, parent, generation
+                    )
                 )
             elif cap_type == "dim":
                 tracked_kelvin = kelvin
@@ -799,8 +805,14 @@ class HCLLightController:
         if self._is_group(entity_id):
             return False
 
-        # Only the adapted attributes count (brightness 0 = Sleep switches off)
-        check_b = self._adapt_brightness or target_b == 0
+        # Brightness 0 (Sleep) switches a light that is on off, however dim it
+        # is: a very dim light reads as 0-1 % and stays within the thresholds
+        # (RM-B52). Lights that are off are not in the batch.
+        if target_b == 0:
+            return True
+
+        # Only the adapted attributes count
+        check_b = self._adapt_brightness
         check_k = self._adapt_color
         if not check_b and not check_k:
             return False
@@ -877,18 +889,46 @@ class HCLLightController:
         """Light entity IDs of a target (see targets.resolve_lights)."""
         return resolve_lights(self.hass, target_config, groups)
 
-    async def _send_steps(self, entity_id: str, steps: list[dict[str, Any]], parent: Context | None) -> bool:
+    async def _send_compat(
+        self,
+        entity_id: str,
+        build_steps: Callable[[State], list[dict[str, Any]]],
+        values: dict[str, Any],
+        parent: Context | None,
+        generation: int | None,
+    ) -> bool:
+        """Send a compatibility-mode command (RM-T28): the parts from
+        build_steps one after the other; if that fails, the values once
+        without transition. If the fallback fails too, the error is raised
+        to apply_batch (RM-B39).
+        """
+        state = self.hass.states.get(entity_id)
+        if not state:
+            return False
+        try:
+            return await self._send_steps(entity_id, build_steps(state), parent, generation)
+        except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
+            self._report_smart_failure(entity_id, err)
+        if not self._still_wanted(entity_id, generation):
+            return False
+        return await self._async_call(
+            "light", "turn_on", {"entity_id": entity_id, **values, "transition": 0},
+            blocking=True, parent=parent,
+        )
+
+    async def _send_steps(
+        self, entity_id: str, steps: list[dict[str, Any]], parent: Context | None, generation: int | None
+    ) -> bool:
         """Send the parts of a compatibility-mode command one after the other.
 
         Each part waits for the device. A later part is only sent if the light
-        still wants it: switched off, changed by hand meanwhile (manual
-        control) - the user's decision wins over the rest of the command
-        (RM-B48). Returns True if a part was sent.
+        still wants it (see _still_wanted): the user's decision wins over the
+        rest of the command (RM-B48, RM-B53). Returns True if a part was sent.
         """
         sent = faded = False
         for number, data in enumerate(steps):
-            if number and not self._still_wanted(entity_id):
-                _LOGGER.debug("Rest of the command to %s dropped: switched off or changed meanwhile", entity_id)
+            if number and not self._still_wanted(entity_id, generation):
+                _LOGGER.debug("Rest of the command to %s dropped: no longer wanted", entity_id)
                 break
             if await self._async_call("light", "turn_on", data, blocking=True, parent=parent):
                 sent = True
@@ -899,13 +939,23 @@ class HCLLightController:
             _LOGGER.debug("Smart transition for %s works again", entity_id)
         return sent
 
-    def _still_wanted(self, entity_id: str) -> bool:
-        """Whether a further part of a command may go to the light (RM-B48)."""
+    def _still_wanted(self, entity_id: str, generation: int | None = None) -> bool:
+        """Whether a further part of a command may go to the light: it is still
+        on and not under manual control (RM-B48), and HCL was not switched off
+        or unloaded and the scenario did not change since the command was
+        started (generation, RM-B53)."""
+        if generation is not None and generation != self._generation:
+            return False
         state = self.hass.states.get(entity_id)
         return (
             state is not None and state.state == STATE_ON
             and not self.override_manager.is_overridden(entity_id)
         )
+
+    def drop_running_commands(self) -> None:
+        """The rest of the compatibility-mode commands running now is not sent
+        (HCL switched off or unloaded, scenario changed; RM-B53)."""
+        self._generation += 1
 
     def _report_smart_failure(self, entity_id: str, error: BaseException) -> None:
         """The two-step command failed: logged once per streak (RM-B47); the
@@ -920,60 +970,44 @@ class HCLLightController:
         )
 
     async def _apply_smart_xy_single(
-        self, entity_id, x, y, brightness, transition, parent: Context | None = None
+        self, entity_id, x, y, brightness, transition, parent: Context | None = None,
+        generation: int | None = None,
     ) -> bool:
-        """Colour and brightness in two steps; the larger change gets the transition.
+        """Colour and brightness in two steps; the larger change gets the transition."""
 
-        If the two-step command fails, the values are sent once without
-        transition. If that fails too, the error is raised to apply_batch.
-        """
-        state = self.hass.states.get(entity_id)
-        if not state:
-            return False
-        try:
+        def steps(state: State) -> list[dict[str, Any]]:
             curr_bri = state.attributes.get("brightness") or 0
             curr_xy = state.attributes.get("xy_color") or (x, y)
             target_bri_byte = brightness_byte(brightness)
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_c = xy_distance(curr_xy, (x, y)) * XY_COLOR_SENSITIVITY
-
             if delta_c > delta_b:
-                steps = [
+                return [
                     {"entity_id": entity_id, "brightness_pct": brightness, "transition": 0},
                     {"entity_id": entity_id, "xy_color": (x, y), "transition": transition},
                 ]
-            else:
-                steps = [
-                    {"entity_id": entity_id, "xy_color": (x, y), "transition": 0},
-                    {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition},
-                ]
-            return await self._send_steps(entity_id, steps, parent)
-        except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
-            self._report_smart_failure(entity_id, err)
-        if not self._still_wanted(entity_id):
-            return False
-        return await self._async_call(
-            "light", "turn_on",
-            {"entity_id": entity_id, "brightness_pct": brightness, "xy_color": (x, y), "transition": 0},
-            blocking=True, parent=parent,
+            return [
+                {"entity_id": entity_id, "xy_color": (x, y), "transition": 0},
+                {"entity_id": entity_id, "brightness_pct": brightness, "transition": transition},
+            ]
+
+        return await self._send_compat(
+            entity_id, steps, {"brightness_pct": brightness, "xy_color": (x, y)}, parent, generation
         )
 
     async def _apply_smart_ct_single(
-        self, entity_id, kelvin, brightness, transition, parent: Context | None = None
+        self, entity_id, kelvin, brightness, transition, parent: Context | None = None,
+        generation: int | None = None,
     ) -> bool:
         """Colour temperature without transition, brightness with it (IKEA-safe).
 
         "Without transition" is sent as transition 0: a command without it gets
         a default transition (light profile, setting of the integration) and
         the colour would fade after all (RM-B42).
-        kelvin is already limited to the light's range. If the command fails,
-        the values are sent once without transition; if that fails too, the
-        error is raised to apply_batch.
+        kelvin is already limited to the light's range.
         """
-        state = self.hass.states.get(entity_id)
-        if not state:
-            return False
-        try:
+
+        def steps(state: State) -> list[dict[str, Any]]:
             curr_bri = state.attributes.get("brightness") or 0
             # No colour temperature reported: the light is in a colour mode and
             # gets colour temperature in any case (RM-B46, not "2700 K measured")
@@ -983,28 +1017,22 @@ class HCLLightController:
             delta_b = abs(curr_bri - target_bri_byte) / 255.0
             delta_k = abs(curr_kelvin - kelvin) / KELVIN_RANGE
             colour = {"entity_id": entity_id, "color_temp_kelvin": kelvin, "transition": 0}
-            steps = []
+            parts = []
             if delta_k > delta_b:
                 # Check if brightness change is significant enough to warrant a snap
                 if abs(curr_bri - target_bri_byte) > (BRIGHTNESS_THRESHOLD / 100.0 * 255):
-                    steps.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": 0})
+                    parts.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": 0})
                 # Send color without transition to avoid glitches on IKEA bulbs
-                steps.append(colour)
+                parts.append(colour)
             else:
                 # Only snap color if delta is significant; colour temperature never fades (transition 0).
                 if reported_kelvin is None or abs(curr_kelvin - kelvin) > KELVIN_THRESHOLD:
-                    steps.append(colour)
-                steps.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": transition})
-            return await self._send_steps(entity_id, steps, parent)
-        except Exception as err:  # noqa: BLE001 - the fallback below reports a final failure
-            self._report_smart_failure(entity_id, err)
-        if not self._still_wanted(entity_id):
-            return False
-        # Fallback: send everything, no transition (safest)
-        return await self._async_call(
-            "light", "turn_on",
-            {"entity_id": entity_id, "brightness_pct": brightness, "color_temp_kelvin": kelvin, "transition": 0},
-            blocking=True, parent=parent,
+                    parts.append(colour)
+                parts.append({"entity_id": entity_id, "brightness_pct": brightness, "transition": transition})
+            return parts
+
+        return await self._send_compat(
+            entity_id, steps, {"brightness_pct": brightness, "color_temp_kelvin": kelvin}, parent, generation
         )
 
     def _is_group(self, entity_id: str, state_obj=None) -> bool:

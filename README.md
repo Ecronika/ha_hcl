@@ -181,7 +181,7 @@ HCL pauses a light (only this light; the HCL switch stays on) when
 
 Changes of an attribute that HCL does not adapt (see the two adapt switches) do not pause the light. A light that is unavailable or unknown for up to 5 minutes (restart, radio dropout, bridge restart) stays paused; a longer gap counts as switched off.
 
-A paused light returns to HCL when it is switched off and on again (with "Switching a light off ends manual control", the default), or automatically after the configured time (default 4 hours) if it is still on, with a smooth 3-minute transition during which the normal updates leave the light alone (a scenario change, a curve change or switching the light off end it early); HCL never switches a light on. Paused lights stay paused when the curve or the options are saved, and optionally across restarts.
+A paused light returns to HCL when it is switched off and on again (with "Switching a light off ends manual control", the default), or automatically after the configured time (default 4 hours, counted from the last change by hand; reports of the light without a change, e.g. link quality, do not restart it) if it is still on, with a smooth 3-minute transition during which the normal updates leave the light alone (a scenario change, a curve change or switching the light off end it early); HCL never switches a light on. Paused lights stay paused when the curve or the options are saved, and optionally across restarts.
 
 By default a light that is switched on receives the HCL values immediately, even if the turn-on command contained its own values. Enable **Keep values of turn-on commands** to keep them instead.
 

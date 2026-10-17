@@ -70,14 +70,8 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
         await super().async_added_to_hass()
         
         # Resolve Select Entity ID for Frontend
-        ent_reg = er.async_get(self.hass)
-        entries = er.async_entries_for_config_entry(ent_reg, self._entry.entry_id)
-        self._mode_entity_id = None
-        for e in entries:
-            if e.domain == "select":
-                self._mode_entity_id = e.entity_id
-                break
-        
+        self._mode_entity_id = self._resolve_mode_entity_id()
+
         # The mode select can be registered after this sensor (new entry) or be
         # renamed later; keep mode_entity_id (used by the card) in sync.
         self.async_on_remove(
@@ -98,14 +92,18 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
         # Initial Update
         self._update_attributes()
 
+    def _resolve_mode_entity_id(self) -> str | None:
+        """Entity ID of the scenario select of this entry (by its unique ID, RM-T30)."""
+        return er.async_get(self.hass).async_get_entity_id(
+            "select", DOMAIN, f"{self._entry.entry_id}_mode"
+        )
+
     @callback
     def _handle_registry_update(self, event) -> None:
         """Re-resolve the mode select when a select entity is added, renamed or removed."""
         if not str(event.data.get("entity_id", "")).startswith("select."):
             return
-        mode_entity_id = er.async_get(self.hass).async_get_entity_id(
-            "select", DOMAIN, f"{self._entry.entry_id}_mode"
-        )
+        mode_entity_id = self._resolve_mode_entity_id()
         if mode_entity_id != self._mode_entity_id:
             self._mode_entity_id = mode_entity_id
             self._update_attributes()
@@ -116,13 +114,8 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
         """Handle signal from switch/service."""
         # Retry finding Mode Entity if logic failed during startup (Race Condition)
         if not self._mode_entity_id:
-             ent_reg = er.async_get(self.hass)
-             entries = er.async_entries_for_config_entry(ent_reg, self._entry.entry_id)
-             for e in entries:
-                if e.domain == "select":
-                    self._mode_entity_id = e.entity_id
-                    break
-        
+            self._mode_entity_id = self._resolve_mode_entity_id()
+
         self._update_attributes()
         # Update state to trigger push
         self._attr_native_value = dt_util.utcnow()

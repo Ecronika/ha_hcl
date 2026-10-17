@@ -412,3 +412,65 @@ async def test_rm_b51_override_timeout_counts_real_minutes_over_dst(
     await timer_cycle(hass)
     await hass.async_block_till_done()
     assert om.is_overridden("light.a") is not expired
+
+
+# ---------------------------------------------------------------- RM-B54 (review 17.10.2026)
+async def test_rm_b54_reports_without_a_change_do_not_restart_the_timeout(hass, noon, no_frontend_registration):
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 1})
+    await hcl_on(hass)
+    om = core(hass, entry).override_manager
+    noon.tick(timedelta(seconds=60))
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)  # 20 % / 3000 K by hand
+    await hass.async_block_till_done()
+    assert om.is_overridden("light.a")
+    for n in range(1, 5):  # the device reports an unrelated attribute every 40 s
+        noon.tick(timedelta(seconds=40))
+        set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, linkquality=100 + n, **CT_ATTRS)
+        await hass.async_block_till_done()
+    calls.clear()
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert not om.is_overridden("light.a")  # 220 s after the manual change, timeout 60 s
+
+
+async def test_rm_b54_a_new_change_by_hand_restarts_the_timeout(hass, noon, no_frontend_registration):
+    async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 1})
+    await hcl_on(hass)
+    om = core(hass, entry).override_manager
+    noon.tick(timedelta(seconds=60))
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    noon.tick(timedelta(seconds=50))
+    set_light(hass, "light.a", "on", brightness=150, color_temp_kelvin=3000, **CT_ATTRS)  # dimmed again by hand
+    await hass.async_block_till_done()
+    noon.tick(timedelta(seconds=30))  # 80 s after the first, 30 s after the second change
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert om.is_overridden("light.a")
+    noon.tick(timedelta(seconds=40))
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert not om.is_overridden("light.a")
+
+
+async def test_rm_b54_slow_dimming_in_small_steps_restarts_the_timeout(hass, noon, no_frontend_registration):
+    async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"override_timeout": 1})
+    await hcl_on(hass)
+    om = core(hass, entry).override_manager
+    noon.tick(timedelta(seconds=60))
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    for n in range(1, 4):  # a dimmer reports steps below the 2 % threshold
+        noon.tick(timedelta(seconds=40))
+        set_light(hass, "light.a", "on", brightness=51 + 2 * n, color_temp_kelvin=3000, **CT_ATTRS)
+        await hass.async_block_till_done()
+    noon.tick(timedelta(seconds=30))  # 150 s after the first, 30 s after the last step
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert om.is_overridden("light.a")

@@ -13,6 +13,7 @@ from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    MIN_ACTIVE_SPAN_MINUTES,
     DOMAIN, CONF_TARGET, CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS,
@@ -38,8 +39,6 @@ from homeassistant.const import CONF_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
-# The curve needs more than 6 hours between wake and sleep time
-MIN_ACTIVE_SPAN_MINUTES = 360
 # Collapsible section of the timing options (RM-R11)
 SECTION_ADVANCED = "advanced"
 # Collapsible section of the daylight parameters (RM-E02, E02-7)

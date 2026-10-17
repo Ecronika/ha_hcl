@@ -182,6 +182,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self._added = False
         self._is_on = False # Prevent further updates
         self.controller.hcl_active = False
+        self.controller.drop_running_commands()  # RM-B53
         self._scheduler.stop()
         if self._group_listener_remove_callback:
             self._group_listener_remove_callback()
@@ -496,6 +497,8 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         """Turn the switch off."""
         self._is_on = False
         self.controller.hcl_active = False
+        # the rest of a running compatibility-mode command is not sent (RM-B53)
+        self.controller.drop_running_commands()
         self._scheduler.stop()
         self.async_write_ha_state() # Ensure UI updates immediately
         async_check_conflicts(self.hass)

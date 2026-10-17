@@ -997,3 +997,39 @@ async def test_rm_b48_light_dimmed_between_the_compat_commands_keeps_the_users_v
     await settle()
     assert om.is_overridden("light.a")
     assert await _finish(hass, lights, task, gate) == []
+
+
+# ---------------------------------------------------------------- RM-B53 (review 17.10.2026)
+async def test_rm_b53_hcl_switched_off_between_the_compat_commands(hass, no_frontend_registration, freezer):
+    lights, _om, task, gate = await _compat_command_held(hass, freezer)
+    off = hass.async_create_task(
+        hass.services.async_call("switch", "turn_off", {"entity_id": SWITCH}, blocking=True)
+    )
+    await settle()
+    assert hass.states.get(SWITCH).state == "off"
+    assert await _finish(hass, lights, task, gate) == []  # no further part after HCL off
+    await off
+
+
+async def test_rm_b53_scenario_change_drops_the_rest_of_the_old_command(hass, no_frontend_registration, freezer):
+    lights, _om, task, gate = await _compat_command_held(hass, freezer)
+    change = start_select(hass, "sleep")  # waits for the running update
+    await settle()
+    sent = await _finish(hass, lights, task, gate)
+    await change
+    await hass.async_block_till_done()
+    sent += [c.data for c in lights.for_light("light.a")]
+    assert not [d for d in sent if d.get("brightness_pct") == 100], sent  # no old brightness part
+    assert any(d.get("brightness_pct") == 0 for d in sent), sent  # Sleep switches off
+
+
+async def test_rm_b53_apply_while_hcl_is_off_still_sends_both_parts(hass, no_frontend_registration, freezer):
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    freezer.move_to("2026-01-15 11:00:00+00:00")
+    lights = FakeLights(hass)
+    set_light(hass, "light.a", "on", brightness=51, color_temp_kelvin=3000, **CT_ATTRS)
+    await setup_entry(hass, ["light.a"], options={"smart_transition": True})
+    lights.calls.clear()
+    await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 5}, blocking=True)
+    sent = [c.data for c in lights.for_light("light.a")]
+    assert any("color_temp_kelvin" in d for d in sent) and any("brightness_pct" in d for d in sent), sent

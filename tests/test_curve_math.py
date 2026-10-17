@@ -206,3 +206,14 @@ def test_b09_default_curve_unchanged():
     calc = HCLCalculator()
     got = [calc.get_hcl_values(datetime(2026, 1, 1, h, 0), 3, 100) for h in (0, 3, 6, 9, 12, 15, 18, 21)]
     assert got == [(5, 2200), (5, 2200), (5, 2200), (100, 5396), (100, 6000), (100, 5500), (100, 5000), (43, 2926)]
+
+
+# ---------------------------------------------------------------- RM-T30 (review 17.10.2026)
+def test_rm_t30_minimum_day_span_is_shared_with_the_config_flow():
+    from custom_components.hcl_lighting.const import MIN_ACTIVE_SPAN_MINUTES
+
+    fallback = default_points("07:00", "22:00")
+    assert MIN_ACTIVE_SPAN_MINUTES == 360
+    assert default_points("07:00", "13:00") == fallback  # 360 min: too short
+    assert default_points("07:00", "13:01") != fallback  # 361 min: used
+    assert default_points("22:00", "04:00") == fallback  # over midnight, 360 min
