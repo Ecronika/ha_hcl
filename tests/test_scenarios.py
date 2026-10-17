@@ -10,9 +10,9 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import async_fire_time_changed, async_mock_service, mock_restore_cache, mock_restore_cache_with_extra_data
 
-from custom_components.hcl_lighting.const import DOMAIN
+from custom_components.hcl_lighting.const import DOMAIN, MODE_SLEEP, SCENARIO_DEFAULTS
 
-from .support.entries import CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
+from .support.entries import ADAPT, CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -304,3 +304,53 @@ async def test_rm_r12_guest_restored_after_a_restart_shows_the_issue(hass, no_fr
     entry = await setup_entry(hass, ["light.a"])
     assert hass.states.get(SELECT).state == "guest"
     assert _guest_issue(hass, entry) is not None
+
+
+# ---------------------------------------------------------------- RM-B52 (review 17.10.2026)
+@pytest.mark.parametrize("byte", [1, 3, 4])
+async def test_rm_b52_sleep_switches_off_a_very_dim_light(hass, no_frontend_registration, byte):
+    """Sleep (0 %) must switch off a light that is on, also at 1 % (brightness byte <= 3)."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=byte, color_temp_kelvin=2000, **CT_ATTRS)
+    await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    set_light(hass, "light.a", "on", brightness=byte, color_temp_kelvin=2000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    calls.clear()
+    await select_scenario(hass, "sleep")
+    sent = [c.data for c in calls_for(calls, "light.a")]
+    assert any(d.get("brightness_pct") == 0 for d in sent), sent
+
+
+async def test_rm_b52_sleep_switches_off_a_dim_light_without_brightness_adaptation(hass, no_frontend_registration):
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=2, supported_color_modes=["brightness"], color_mode="brightness")
+    await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    await hass.services.async_call("switch", "turn_off", {"entity_id": ADAPT}, blocking=True)
+    set_light(hass, "light.a", "on", brightness=2, supported_color_modes=["brightness"], color_mode="brightness")
+    await hass.async_block_till_done()
+    calls.clear()
+    await select_scenario(hass, "sleep")
+    assert [c.data.get("brightness_pct") for c in calls_for(calls, "light.a")] == [0]
+
+
+async def test_rm_b52_sleep_leaves_a_manually_controlled_dim_light_alone(hass, no_frontend_registration):
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    core(hass, entry).override_manager.set_override("light.a")
+    calls.clear()
+    await select_scenario(hass, "sleep")
+    assert calls_for(calls, "light.a") == []
+
+
+# ---------------------------------------------------------------- RM-T30 (review 17.10.2026)
+async def test_rm_t30_sleep_values_come_from_the_scenario_table(hass, no_frontend_registration):
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"])
+    controller = core(hass, entry).controller
+    await select_scenario(hass, "sleep")
+    expected = (SCENARIO_DEFAULTS[MODE_SLEEP]["brightness"], SCENARIO_DEFAULTS[MODE_SLEEP]["kelvin"])
+    assert controller.calculate_base_values(dt_util.now()) == expected

@@ -9,6 +9,7 @@ from ..const import (
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_WAKE_TIME,
     DEFAULT_SLEEP_TIME,
+    MIN_ACTIVE_SPAN_MINUTES,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -314,7 +315,7 @@ def default_points(wake_str: str | None, sleep_str: str | None) -> List[HCLPoint
     wake = _minutes(wake_str, DEFAULT_WAKE_TIME)
     sleep = _minutes(sleep_str, DEFAULT_SLEEP_TIME)
     span = (sleep - wake) % 1440
-    if span <= 360:  # rejected by the config flow; old or invalid data
+    if span <= MIN_ACTIVE_SPAN_MINUTES:  # rejected by the config flow; old or invalid data
         _LOGGER.warning("Wake-sleep span (%d min) too short; using 07:00-22:00", span)
         wake, sleep = _minutes(_FALLBACK[0], DEFAULT_WAKE_TIME), _minutes(_FALLBACK[1], DEFAULT_SLEEP_TIME)
         span = (sleep - wake) % 1440

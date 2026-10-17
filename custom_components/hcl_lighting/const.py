@@ -33,6 +33,9 @@ CONF_SLEEP_TIME = "sleep_time"
 
 DEFAULT_WAKE_TIME = "07:00"
 DEFAULT_SLEEP_TIME = "22:00"
+# The curve needs more than 6 hours between wake and sleep time (config
+# flow; the curve falls back to 07:00-22:00 for older data, RM-T30)
+MIN_ACTIVE_SPAN_MINUTES = 360
 
 # v0.4.0 Interactive UI
 SERVICE_UPDATE_CURVE = "update_curve"
@@ -76,7 +79,7 @@ SCENARIO_DEFAULTS = {
     MODE_RELAX: {"brightness": 40, "kelvin": 2700},
     # 4000K is neutral white, good for cleaning visibility
     MODE_CLEANING: {"brightness": 100, "kelvin": 4000},
-    # Sleep logic handles the "0", but we define it data-model wise
+    # Brightness 0: Sleep switches the lights off (colour 2000 K for the data model)
     MODE_SLEEP: {"brightness": 0, "kelvin": 2000}, 
     # Dim warm light for the night; never switches lights on or off
     MODE_NIGHT_LIGHT: {"brightness": 3, "kelvin": 2200},

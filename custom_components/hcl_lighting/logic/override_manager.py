@@ -5,7 +5,7 @@ import logging
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import State
@@ -44,6 +44,11 @@ class Tracking(NamedTuple):
     own_report_open: bool
     ct_sent: int | None  # colour temperature of the last command that carried one (RM-B46)
     source: str | None  # auto | scenario | apply | other: who set last_set (DL-PRD-23)
+
+
+def _as_tuple(value: Any) -> tuple | None:
+    """A reported list or tuple as a tuple (None stays None)."""
+    return tuple(value) if value else None
 
 
 @dataclass(slots=True)
@@ -387,10 +392,34 @@ class OverrideManager:
         if not reference or len(reference) != 2 or None in reference:
             return False  # no reference values yet (startup)
         reasons = self._deviations(reference, state)
-        if reasons:
-            self._start_manual(entity_id, light, "differs from the HCL value", reasons)
+        if not reasons:
+            return False
+        # Already manually controlled: only a new change by hand restarts the
+        # timeout, not every report of the device (link quality, power,
+        # periodic reports; RM-B54)
+        if light.manual_since is not None and not self._changed_since(state, old_state):
             return True
-        return False
+        self._start_manual(entity_id, light, "differs from the HCL value", reasons)
+        return True
+
+    def _changed_since(self, state: State, old_state: State | None) -> bool:
+        """Whether a report switched the light on or changed an adapted value
+        compared to the report before. Any change counts (not only one above
+        the thresholds): a slow dimming by hand reports small steps."""
+        if old_state is None or old_state.state != "on":
+            return True
+        attrs, old = state.attributes, old_state.attributes
+
+        def changed(curr: Any, before: Any) -> bool:
+            # an unknown value ("on" with brightness 0, RM-B41) is no change
+            return curr is not None and before is not None and curr != before
+
+        if self.track_brightness and changed(on_brightness(attrs), on_brightness(old)):
+            return True
+        return self.track_color and (
+            changed(attrs.get("color_temp_kelvin"), old.get("color_temp_kelvin"))
+            or changed(_as_tuple(attrs.get("xy_color")), _as_tuple(old.get("xy_color")))
+        )
 
     def _moved_away(
         self, entity_id: str, reference: tuple[int, int] | None, state: State, old_state: State | None

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b5] - 2026-10-17
+Fifth pre-release (beta) of 0.8.0: fixes from the reviews of 0.8.0b4 (RM-B52 to RM-B54) and small cleanups (RM-T28, RM-T30) before the end of the field test. The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Sleep left very dim lights on** (RM-B52): a light at 1–2 % reads as 0–1 % and stayed within the thresholds, so selecting Sleep did not switch it off (with or without *Adapt brightness*). Sleep now switches off every light that is on and not manually controlled.
+- **Compatibility mode: rest of an old command after HCL off or a scenario change** (RM-B53): when *HCL active* was switched off, the instance unloaded or the scenario changed while the first part of a two-step command was running, the second part was still sent (e.g. the old brightness after selecting Sleep). The rest of such a command is now dropped; `hcl_lighting.apply` while HCL is off still sends both parts.
+- **Manual control timeout restarted by every report** (RM-B54): a light under manual control that reports regularly (link quality, power, periodic state reports) restarted the timeout with each report and never returned to HCL. The timeout now counts from the last change by hand (brightness, colour temperature or colour, or switching on); any change counts, also a slow dimming in small steps.
+
+### Internal
+- Compatibility-mode commands share one helper for the two parts and the fallback (RM-T28).
+- The minimum span between wake and sleep time is one constant for the config flow and the curve; Sleep takes its values from the scenario table; the card finds the scenario select by its unique ID (RM-T30).
+
 ## [0.8.0b4] - 2026-10-10
 Fourth pre-release (beta) of 0.8.0: fixes from the reviews of 0.8.0b3 (RM-B47 to RM-B51) before the field test. The minimum Home Assistant version stays 2024.7.
 
