@@ -1,11 +1,13 @@
 """The dashboard card computes the same curve as the integration (B-41, Ä-05).
 
 Runs the curve maths of hcl-curve-card.js in Node.js and compares every
-minute of the day with HCLCalculator. Skipped when Node.js is not installed.
+minute of the day with HCLCalculator. Skipped when Node.js is not installed,
+unless HCL_TEST_REQUIRE_NODE=1 is set (CI), then a missing Node.js is an error.
 """
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -52,8 +54,11 @@ console.log(JSON.stringify(out));
     return json.loads(result.stdout)
 
 
-@pytest.mark.skipif(NODE is None, reason="Node.js not installed")
+@pytest.mark.skipif(
+    NODE is None and os.environ.get("HCL_TEST_REQUIRE_NODE") != "1", reason="Node.js not installed"
+)
 def test_card_and_integration_compute_the_same_curve():
+    assert NODE is not None, "Node.js is required (HCL_TEST_REQUIRE_NODE=1)"
     curves = _curves()
     default = HCLCalculator().active_curve
     curves["default"] = [dict(p) for p in default]

@@ -131,6 +131,8 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         """Run when entity about to be added."""
         await super().async_added_to_hass()
         self._added = True
+        # readers of the setpoint start like the next cycle (RM-B56)
+        self.controller.seed_provider = lambda: self._cycle_lights()["seed_brightness"]
 
         # Restore State: timer and listeners start at once, the first update
         # runs in the background - the setup (also a reload) does not wait
@@ -183,6 +185,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self._is_on = False # Prevent further updates
         self.controller.hcl_active = False
         self.controller.drop_running_commands()  # RM-B53
+        self.controller.seed_provider = None
         self._scheduler.stop()
         if self._group_listener_remove_callback:
             self._group_listener_remove_callback()

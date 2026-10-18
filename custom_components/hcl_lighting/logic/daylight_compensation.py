@@ -228,25 +228,30 @@ class DaylightModifier:
         if cap is not None and new.last_auto is not None and time.monotonic - new.last_auto > PERSISTED_CAP_MAX_AGE:
             cap = None
         start_reason = None
+        observed = new  # state before a start: kept while paused or held (RM-B55)
         if cap is None:
             cap, start_reason, new = self._start_cap(new, ctx, base, min_b, time)
         cur = min(cap, base)
         if not ctx.hcl_active:
             # no step while HCL is off (EC-PRD-27); peek shows the frozen value
-            return done(STATUS_HOLD, "daylight_controller_paused", replace(current, brightness=cur), new)
+            return done(STATUS_HOLD, "daylight_controller_paused", replace(current, brightness=cur), observed)
 
         hold = None
         if not ctx.adapt_brightness:
             hold = "daylight_hold_adapt_off"
         elif ctx.lights_on and not ctx.lights_controlled:
             hold = "daylight_hold_manual_control"
+        # 1. Anti-windup first (DL-PRD-09/18): the stored cap does not move; a
+        # curve below it only limits the output, and a start after 2 h is
+        # taken over when the loop resumes (RM-B55)
+        if hold:
+            if start_reason:
+                details["start"] = start_reason
+            return done(STATUS_HOLD, hold, replace(current, brightness=cur), observed)
         rate = cfg.max_rate_pct_per_min * time.dt_control / 60.0
         invalid_age = None if valid else time.monotonic - (new.invalid_since if new.invalid_since is not None else time.monotonic)
-        # 1. Anti-windup first (DL-PRD-09/18): the cap does not move
-        if hold:
-            status, reason, cap = STATUS_HOLD, hold, cur
         # 2. Temporarily invalid source: grace with the cap held, then softly to the base
-        elif not valid and invalid_age <= cfg.grace_s:
+        if not valid and invalid_age <= cfg.grace_s:
             status, reason, cap = STATUS_DEGRADED, f"daylight_sensor_{reading.problem}", cur
         elif not valid:
             status, reason, cap = STATUS_FALLBACK, "daylight_sensor_fallback", min(base, cur + rate)
@@ -267,10 +272,10 @@ class DaylightModifier:
             if ctx.lights_on == 0:
                 reason = "daylight_lights_off_observe"
             status = STATUS_ACTIVE
-        if start_reason and status in (STATUS_ACTIVE, STATUS_HOLD):
+        if start_reason and status == STATUS_ACTIVE:
             details["start"] = start_reason
         effective = min(base, cap)
-        new = replace(new, cap_pct=cap, last_auto=new.last_auto if hold else time.monotonic)
+        new = replace(new, cap_pct=cap, last_auto=time.monotonic)
         return done(status, reason, replace(current, brightness=effective), new)
 
     def _observe(self, state: DaylightState, reading: LuxReading, time: StepTime) -> DaylightState:

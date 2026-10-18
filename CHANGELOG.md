@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b6] - 2026-10-18
+Sixth pre-release (beta) of 0.8.0: fixes from the review of the daylight compensation (RM-B55, RM-B56, RM-D07) and test/CI work (RM-T25, RM-T26, RM-H02). The minimum Home Assistant version stays 2024.7.
+
+### Fixed
+- **Daylight compensation: held reduction changed during the hold** (RM-B55): while the reduction is held (all lights that are on manually controlled, *Adapt brightness* off), a curve that fell below the reduction pulled the stored reduction down with it, so after the hold the lights could stay darker than before (e.g. 30 % → 10 %). The stored reduction now stays as it was; the curve only limits the value sent meanwhile. After more than 2 hours the hold counts like a start (as before); the start is now taken over when the control resumes.
+- **Daylight compensation: target sensors and `apply` after a long pause** (RM-B56): after more than 2 hours without an update cycle (e.g. *HCL active* off), the target sensors, the card, `hcl_lighting.apply` and the values sent when a light is switched on started from the curve, while the next update cycle started from the brightness the lights had in Auto. Both now use the same start value.
+
+### Documentation
+- README: the daylight compensation controls the total illuminance at the sensor (it also dims when the lights alone exceed the target; the target is not always reached); "at most 11 % points per minute" holds for update intervals up to 60 s (longer intervals: at most 11 % points per update); a hold of more than 2 hours starts again like a restart (RM-D07). The help text of *Maximum rate* says the same.
+
+### Internal
+- Card tests: one Chromium for the whole run, a new browser context per test, waiting for the expected state instead of fixed times (23 fixed waits → 1 that checks that nothing happens); 87 tests in about 45 s instead of 150 s (RM-T25).
+- CI: pytest, pytest-asyncio and Playwright pinned; Node.js installed explicitly and the curve parity test fails instead of being skipped without it; a Playwright trace of each failed card test is uploaded (RM-T26).
+- Config flow typing: `ConfigFlowResult` instead of `FlowResult` (RM-H02).
+
 ## [0.8.0b5] - 2026-10-17
 Fifth pre-release (beta) of 0.8.0: fixes from the reviews of 0.8.0b4 (RM-B52 to RM-B54) and small cleanups (RM-T28, RM-T30) before the end of the field test. The minimum Home Assistant version stays 2024.7.
 

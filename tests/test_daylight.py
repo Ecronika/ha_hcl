@@ -400,3 +400,32 @@ async def test_rm_e02_diagnostics_show_one_snapshot_without_ids(hass, noon, no_f
     assert diag["options"]["daylight_sensor"].startswith("sensor.redacted_")
     assert LUX_SENSOR not in str(diag)
 
+
+
+# ---------------------------------------------------------------- RM-B56 (review 18.10.2026)
+async def test_rm_b56_after_a_long_pause_readers_start_like_the_cycle(hass, noon, no_frontend_registration):
+    """After more than 2 h without a cycle the cap counts like a start (E02-29):
+    target sensors, apply and Fast-HCL use the same start value (the Auto
+    brightness of the lights) as the next cycle, not the curve."""
+    from custom_components.hcl_lighting.logic.units import brightness_byte
+
+    fake, entry = await _daylight(hass, lux=3000)
+    await _cycles(hass, noon, 20)
+    _lux(hass, 500)  # at the target: the cycle does not move the cap
+    await _cycles(hass, noon, 15)
+    seed = _sent_brightness(fake)
+    assert seed < 100
+    # the light reports the value HCL sent (no manual control)
+    set_light(hass, "light.a", "on", **{**ON, "brightness": brightness_byte(seed)})
+    await hass.async_block_till_done()
+    assert not core(hass, entry).override_manager.is_overridden("light.a")
+    await hass.services.async_call("switch", "turn_off", {"entity_id": SWITCH}, blocking=True)
+    noon.tick(timedelta(hours=3))
+    _lux(hass, 500)
+    await hass.async_block_till_done()
+    ctl = core(hass, entry).controller
+    shown = ctl.calculate_target_values(dt_util.now())[0]
+    await hcl_on(hass)
+    cycle = ctl.calculate_target_values(dt_util.now())[0]
+    assert cycle == seed
+    assert shown == cycle

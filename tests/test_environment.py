@@ -434,3 +434,52 @@ def test_rm_e02_error_halves_in_reasonable_time():
     first_error = abs(after[0][1] - 500)
     halved = next(t for t, lux in after if abs(lux - 500) <= first_error / 2)
     assert halved - 1800 <= 30 * 60
+
+
+# ---------------------------------------------------------------- RM-B55 (review 18.10.2026)
+HOLDS = {
+    "adapt_off": dict(adapt_brightness=False),
+    "manual": dict(lights_on=1, lights_controlled=0, lights_manual=1),
+}
+
+
+def _reduced(loop: Loop, below: float = 50) -> float:
+    while loop.cap is None or loop.cap > below:
+        loop.step()
+    return loop.cap
+
+
+@pytest.mark.parametrize("hold", HOLDS.values(), ids=HOLDS.keys())
+def test_rm_b55_hold_keeps_the_cap_when_the_curve_dips(hold):
+    """DL-PRD-09/18: a hold freezes the cap; a curve below the cap limits the
+    output, not the stored cap."""
+    loop = Loop(lux=2000)
+    cap = _reduced(loop)
+    for _ in range(5):
+        result = loop.step(base=10, **hold)
+        assert result.effective.brightness == 10
+    result = loop.step(base=80, **hold)
+    assert result.status == STATUS_HOLD
+    assert loop.cap == cap
+    assert result.effective.brightness == round(cap)
+
+
+def test_rm_b55_long_hold_counts_like_a_start():
+    """E02-29 (by design, review 18.10.2026): after 2 h of manual control the
+    loop starts again - the output shows the start value (no seed while all
+    lights are manual: the curve), the stored state is not changed, and the
+    loop resumes with the seed of that moment."""
+    loop = Loop(lux=2000)
+    cap = _reduced(loop)
+    manual = HOLDS["manual"]
+    for _ in range(int(3 * 3600 / 27)):
+        result = loop.step(**manual)
+        assert loop.cap == cap
+    assert result.effective.brightness == 80
+    assert result.modifier("daylight").details.get("start") == "daylight_seed_fallback"
+    loop.lux = 500  # within the dead band: the start value stays
+    for _ in range(10):
+        loop.step(**manual)
+    result = loop.step(seed_brightness=40)
+    assert result.modifier("daylight").details.get("start") == "daylight_seed"
+    assert result.effective.brightness == 40
