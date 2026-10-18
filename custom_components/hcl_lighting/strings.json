@@ -106,7 +106,7 @@
                             "daylight_deadband_lux": "Lux around the target without a change (empty: 5 % of the target, at least 20 lx).",
                             "daylight_smoothing": "Time constant of the lux filter in seconds (default 60).",
                             "daylight_response_band_lux": "Lux deviation that uses the full rate (default 300); smaller deviations change the brightness more slowly.",
-                            "daylight_max_rate": "Percent points per minute (default 11), independent of the update interval.",
+                            "daylight_max_rate": "Percent points per minute (default 11), independent of the update interval up to 60 s (longer intervals: at most this value per update).",
                             "daylight_stale_after": "Seconds without a report until the value counts as outdated (default 3600; 0 = no check, for sensors that report only on change).",
                             "daylight_unavailable_grace": "Seconds the reduction is held while the sensor has no valid value (default 300); afterwards the brightness returns slowly to the curve."
                         }

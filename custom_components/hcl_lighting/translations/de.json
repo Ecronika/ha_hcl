@@ -106,7 +106,7 @@
                             "daylight_deadband_lux": "Lux um den Zielwert ohne Änderung (leer: 5 % des Zielwerts, mindestens 20 lx).",
                             "daylight_smoothing": "Zeitkonstante des Luxfilters in Sekunden (Standard 60).",
                             "daylight_response_band_lux": "Abweichung in Lux, ab der die volle Geschwindigkeit gilt (Standard 300); kleinere Abweichungen ändern die Helligkeit langsamer.",
-                            "daylight_max_rate": "Prozentpunkte pro Minute (Standard 11), unabhängig vom Aktualisierungsintervall.",
+                            "daylight_max_rate": "Prozentpunkte pro Minute (Standard 11), unabhängig vom Aktualisierungsintervall bis 60 s (längere Intervalle: höchstens dieser Wert je Aktualisierung).",
                             "daylight_stale_after": "Sekunden ohne Meldung, bis der Wert als veraltet gilt (Standard 3600; 0 = keine Prüfung, für Sensoren, die nur bei Änderung melden).",
                             "daylight_unavailable_grace": "Sekunden, die die Absenkung bei fehlendem gültigen Sensorwert gehalten wird (Standard 300); danach geht die Helligkeit langsam zur Kurve zurück."
                         }

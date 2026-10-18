@@ -203,6 +203,9 @@ class HCLLightController:
         self.hcl_active = False
         # light counts of the last cycle: peek() shows the same hold as the cycle
         self._cycle_lights: dict[str, Any] = {}
+        # start seed of the daylight cap now (set by the switch): readers start
+        # like the next cycle after a long pause (RM-B56)
+        self.seed_provider: Callable[[], float | None] | None = None
 
     @property
     def adapt_brightness(self) -> bool:
@@ -333,7 +336,10 @@ class HCLLightController:
         brightness, kelvin = self.calculate_base_values(now)
         if not self.environment.enabled or brightness is None:
             return None
-        lights = {k: v for k, v in self._cycle_lights.items() if k != "seed_brightness"}
+        # light counts of the last cycle (the same hold as the cycle); the start
+        # seed as the next cycle would see it now (RM-B56)
+        lights = dict(self._cycle_lights)
+        lights["seed_brightness"] = self.seed_provider() if self.seed_provider is not None else None
         return self.environment.peek(now, HCLSetpoint(brightness, kelvin), self.environment_context(**lights))
 
     def step_target_values(self, now, **lights: Any) -> tuple[int | None, int | None]:

@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 
 if os.environ.get("HCL_TEST_REQUIRE_BROWSER") == "1":
     import playwright.async_api as playwright_api
@@ -21,6 +22,8 @@ else:
 
 FRONTEND = Path(__file__).parents[1] / "custom_components" / "hcl_lighting" / "frontend"
 CHROMIUM = os.environ.get("HCL_TEST_CHROMIUM", "/opt/pw-browsers/chromium")
+# HCL_RELEASE_DELAY of the card (1000 ms) plus a margin: a check that nothing happens
+RELEASE_WAIT_MS = 1500
 
 POINTS = [
     {"t": 420, "k": 2700, "b": 30}, {"t": 540, "k": 4500, "b": 50}, {"t": 570, "k": 5500, "b": 75},
@@ -64,38 +67,73 @@ def _hass(
     }
 
 
-@pytest.fixture
-async def page():
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def browser():
+    """One Chromium for all tests (a start costs seconds); every test gets its
+    own browser context (T25)."""
     async with playwright_api.async_playwright() as pw:
         try:
-            browser = await pw.chromium.launch(
-                executable_path=CHROMIUM if Path(CHROMIUM).exists() else None
-            )
+            chromium = await pw.chromium.launch(executable_path=CHROMIUM if Path(CHROMIUM).exists() else None)
         except Exception as err:  # noqa: BLE001 - no browser installed
             if os.environ.get("HCL_TEST_REQUIRE_BROWSER") == "1":
                 raise
             pytest.skip(f"Chromium not available: {err}")
-        pg = await browser.new_page(viewport={"width": 900, "height": 900})
-        errors: list[str] = []
-        pg.on("pageerror", lambda e: errors.append(str(e)))
-        # Standards mode like Home Assistant (quirks mode resolves percentage heights differently)
-        await pg.set_content("<!DOCTYPE html><html><body></body></html>")
-        await pg.add_script_tag(content=(FRONTEND / "chart.js").read_text(encoding="utf-8"))
-        # The card is a JavaScript module (Lovelace resource type "module")
-        await pg.add_script_tag(content=(FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8"), type="module")
-        await pg.wait_for_function("() => !!customElements.get('hcl-curve-card')")
-        await pg.evaluate(
-            """() => {
-                window.__calls = [];
-                window.card = document.createElement('hcl-curve-card');
-                card.setConfig({entity: 'sensor.hcl_curve_data'});
-                document.body.appendChild(card);
-            }"""
-        )
-        await pg.wait_for_timeout(300)
-        pg.errors = errors
-        yield pg
-        await browser.close()
+        yield chromium
+        await chromium.close()
+
+
+TRACE_DIR = os.environ.get("HCL_TEST_TRACE_DIR")
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def context(browser, request):
+    ctx = await browser.new_context(viewport={"width": 900, "height": 900})
+    if TRACE_DIR:
+        await ctx.tracing.start(screenshots=True, snapshots=True, sources=False)
+    yield ctx
+    if TRACE_DIR:
+        # keep the trace of a failed test only (T26)
+        failed = getattr(request.node, "failed_call", False)
+        name = "".join(c if c.isalnum() or c in "-_" else "_" for c in request.node.name)
+        if failed:
+            Path(TRACE_DIR).mkdir(parents=True, exist_ok=True)
+        await ctx.tracing.stop(path=Path(TRACE_DIR) / f"{name}.zip" if failed else None)
+    await ctx.close()
+
+
+async def frames(page, count: int = 2) -> None:
+    """Wait until the card has rendered: set hass renders at once, theme,
+    charts and resize handling follow in the next animation frames (T25:
+    instead of fixed waits)."""
+    await page.evaluate(
+        "(n) => new Promise(done => { const tick = k => k ? requestAnimationFrame(() => tick(k - 1)) : done(); tick(n); })",
+        count,
+    )
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def page(context):
+    pg = await context.new_page()
+    errors: list[str] = []
+    pg.on("pageerror", lambda e: errors.append(str(e)))
+    # Standards mode like Home Assistant (quirks mode resolves percentage heights differently)
+    await pg.set_content("<!DOCTYPE html><html><body></body></html>")
+    await pg.add_script_tag(content=(FRONTEND / "chart.js").read_text(encoding="utf-8"))
+    # The card is a JavaScript module (Lovelace resource type "module")
+    await pg.add_script_tag(content=(FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8"), type="module")
+    await pg.wait_for_function("() => !!customElements.get('hcl-curve-card')")
+    await pg.evaluate(
+        """() => {
+            window.__calls = [];
+            window.card = document.createElement('hcl-curve-card');
+            card.setConfig({entity: 'sensor.hcl_curve_data'});
+            document.body.appendChild(card);
+        }"""
+    )
+    await pg.wait_for_function("() => card._initialized")
+    await frames(pg)
+    pg.errors = errors
+    yield pg
 
 
 async def _set_hass(page, mode: str, **kwargs) -> None:
@@ -103,7 +141,7 @@ async def _set_hass(page, mode: str, **kwargs) -> None:
         "(h) => { h.callService = (...a) => window.__calls.push(a); card.hass = h; }",
         _hass(mode, **kwargs),
     )
-    await page.wait_for_timeout(200)
+    await frames(page)
 
 
 async def _active_chips(page) -> list[str]:
@@ -190,7 +228,7 @@ async def test_a09_chart_colours_follow_theme(page):
     await _set_hass(page, "auto")
     await page.evaluate("() => { card.style.setProperty('--divider-color', 'rgb(1, 2, 3)'); card.style.setProperty('--primary-text-color', 'rgb(4, 5, 6)'); }")
     await _set_hass(page, "auto", dark=True)  # theme change
-    await page.wait_for_timeout(100)
+    await frames(page)
     grid, ticks = await page.evaluate("() => [card._chartB.options.scales.y.grid.color, card._chartK.options.scales.y.ticks.color]")
     assert grid == "rgb(1, 2, 3)" and ticks == "rgb(4, 5, 6)"
     assert page.errors == []
@@ -390,7 +428,7 @@ async def _set_points(page, points, **kwargs):
         "(h) => { h.callService = card._hass.callService; card.hass = h; }",
         _hass("auto", extra={"control_points": points, **kwargs.pop("extra", {})}, **kwargs),
     )
-    await page.wait_for_timeout(100)
+    await frames(page)
 
 
 async def test_b40_server_update_does_not_overwrite_a_newer_draft(page):
@@ -472,7 +510,7 @@ async def test_b43_failed_mode_change_is_reported_and_not_shown_active(page):
     await _set_hass(page, "auto")
     await page.evaluate("""() => { card._hass.callService = () => Promise.reject(new Error('not allowed'));
         card.shadowRoot.querySelector('.chip[data-mode=focus]').click(); }""")
-    await page.wait_for_timeout(100)
+    await frames(page)
     assert await _active_chips(page) == ["auto"]
     assert await page.evaluate("() => card.shadowRoot.querySelector('.chip.pending')") is None
     status = await _status(page)
@@ -485,18 +523,18 @@ async def test_b44_missing_unavailable_or_invalid_entity_is_shown(page):
     h = _hass("auto")
     del h["states"]["sensor.hcl_curve_data"]
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(100)
+    await frames(page)
     assert await page.evaluate("() => card.shadowRoot.querySelectorAll('.handle').length") == 0
     assert await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent") == ""
     assert "not found" in (await _status(page))["text"]
     h = _hass("auto")
     h["states"]["sensor.hcl_curve_data"] = {"state": "unavailable", "attributes": {}}
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(100)
+    await frames(page)
     assert "unavailable" in (await _status(page))["text"]
     h = _hass("auto", extra={"control_points": "bogus"})
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(100)
+    await frames(page)
     assert "not an HCL curve sensor" in (await _status(page))["text"]
     await _set_hass(page, "auto")  # data is back
     assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
@@ -506,7 +544,7 @@ async def test_b44_missing_unavailable_or_invalid_entity_is_shown(page):
 async def test_b44_entity_change_resets_the_card(page):
     await _set_hass(page, "auto")
     await page.evaluate("() => { card._points[0].b = 1; card._markChanged(); card.setConfig({entity: 'sensor.other'}); }")
-    await page.wait_for_timeout(100)
+    await frames(page)
     assert await page.evaluate("() => [card._points.length, card._isDirty, card._undo.length]") == [0, False, 0]
     assert "sensor.other" in (await _status(page))["text"]
 
@@ -546,7 +584,7 @@ async def test_b47_narrow_cards_do_not_cut_off_content(page):
     for width in (240, 288):
         await page.evaluate("(w) => { card.style.display = 'block'; card.style.width = w + 'px'; }", width)
         await _set_hass(page, "auto")
-        await page.wait_for_timeout(200)
+        await frames(page, 3)  # resize observer, then a frame for the charts
         right = await page.evaluate("""() => { const host = card.getBoundingClientRect(); let maxR = 0;
             card.shadowRoot.querySelectorAll('ha-card *').forEach(e => { const r = e.getBoundingClientRect();
               if (r.width && !e.classList.contains('handle') && !e.closest('.handle')) maxR = Math.max(maxR, r.right); });
@@ -571,7 +609,7 @@ async def test_b49_now_shows_the_active_setpoint(page):
     h["states"]["sensor.tb"] = {"state": "80", "attributes": {}}
     h["states"]["sensor.tk"] = {"state": "5000", "attributes": {}}
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(150)
+    await frames(page)
     info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
     assert "Focus" in info and "80 %" in info and "5,000 K" in info
     await _set_hass(page, "guest", extra=extra)
@@ -602,10 +640,10 @@ async def test_b53_card_removed_while_loading_does_not_initialise(browser_page_f
     page, _requests = await browser_page_factory(foreign_chart=False, delay_chart=True, attach=False)
     await page.evaluate("""() => { window.card = document.createElement('hcl-curve-card');
         card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card); card.remove(); }""")
-    await page.wait_for_timeout(1500)
+    await page.wait_for_function("() => card._initPromise === null")  # Chart.js has loaded
     assert await page.evaluate("() => [card._initialized, card._chartB, card._nowTimer]") == [False, None, None]
     await page.evaluate("() => document.body.appendChild(card)")
-    await page.wait_for_timeout(500)
+    await page.wait_for_function("() => card._initialized && !!card._chartB")
     assert await page.evaluate("() => card._initialized && !!card._chartB") is True
     assert page.errors == []
 
@@ -614,7 +652,7 @@ async def test_k5_semantics_keyboard_and_formats(page):
     h = _hass("relax")
     h["locale"] = {"language": "en", "time_format": "12", "number_format": "decimal_comma"}
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(150)
+    await frames(page)
     pressed = await page.evaluate("() => [...card.shadowRoot.querySelectorAll('.chip')].map(c => [c.dataset.mode, c.getAttribute('aria-pressed')])")
     assert ["relax", "true"] in pressed and ["auto", "false"] in pressed
     assert "Brightness over the day" in await page.evaluate("() => card.shadowRoot.getElementById('chartB').getAttribute('aria-label')")
@@ -655,7 +693,7 @@ async def test_k3_compact_view_hides_the_editor_until_opened(page):
     assert await page.evaluate("() => card.shadowRoot.getElementById('editor-section').hidden") is True
     assert await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent") != ""
     await page.evaluate("() => card.shadowRoot.getElementById('btn-toggle-editor').click()")
-    await page.wait_for_timeout(200)
+    await frames(page)
     assert await page.evaluate("() => card.shadowRoot.getElementById('editor-section').hidden") is False
     assert await page.evaluate("() => card.shadowRoot.querySelectorAll('#handles-b .handle').length") == len(POINTS)
 
@@ -671,51 +709,42 @@ async def test_k7_night_light_chip_and_clipped_effective_curve(page):
     assert page.errors == []
 
 
-@pytest.fixture
-async def browser_page_factory():
+@pytest_asyncio.fixture(loop_scope="session")
+async def browser_page_factory(context):
     """Page served from a fake HA origin (module URLs, versioned Chart.js)."""
-    async with playwright_api.async_playwright() as pw:
-        try:
-            browser = await pw.chromium.launch(executable_path=CHROMIUM if Path(CHROMIUM).exists() else None)
-        except Exception as err:  # noqa: BLE001
-            if os.environ.get("HCL_TEST_REQUIRE_BROWSER") == "1":
-                raise
-            pytest.skip(f"Chromium not available: {err}")
+    async def make(foreign_chart=False, delay_chart=False, attach=True):
+        page = await context.new_page()
+        page.errors = []
+        page.on("pageerror", lambda e: page.errors.append(str(e)))
+        requests: list[str] = []
+        page.on("request", lambda r: requests.append(r.url))
+        chart = (FRONTEND / "chart.js").read_text(encoding="utf-8")
+        card = (FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8")
+        foreign = "<script>window.Chart = {version: '2.9.4'};</script>" if foreign_chart else ""
+        html = f"<html><body>{foreign}<script type='module' src='/hcl_lighting_static/hcl-curve-card.js?v=9.9.9'></script></body></html>"
 
-        async def make(foreign_chart=False, delay_chart=False, attach=True):
-            page = await browser.new_page()
-            page.errors = []
-            page.on("pageerror", lambda e: page.errors.append(str(e)))
-            requests: list[str] = []
-            page.on("request", lambda r: requests.append(r.url))
-            chart = (FRONTEND / "chart.js").read_text(encoding="utf-8")
-            card = (FRONTEND / "hcl-curve-card.js").read_text(encoding="utf-8")
-            foreign = "<script>window.Chart = {version: '2.9.4'};</script>" if foreign_chart else ""
-            html = f"<html><body>{foreign}<script type='module' src='/hcl_lighting_static/hcl-curve-card.js?v=9.9.9'></script></body></html>"
+        async def route(r):
+            url = r.request.url
+            if "chart.js" in url:
+                if delay_chart:
+                    await asyncio.sleep(1)
+                await r.fulfill(body=chart, content_type="application/javascript")
+            elif "hcl-curve-card.js" in url:
+                await r.fulfill(body=card, content_type="application/javascript")
+            else:
+                await r.fulfill(body=html, content_type="text/html")
 
-            async def route(r):
-                url = r.request.url
-                if "chart.js" in url:
-                    if delay_chart:
-                        await asyncio.sleep(1)
-                    await r.fulfill(body=chart, content_type="application/javascript")
-                elif "hcl-curve-card.js" in url:
-                    await r.fulfill(body=card, content_type="application/javascript")
-                else:
-                    await r.fulfill(body=html, content_type="text/html")
+        await page.route("http://hcl.test/**", route)
+        await page.goto("http://hcl.test/lovelace")
+        await page.wait_for_function("() => !!customElements.get('hcl-curve-card')")
+        if attach:
+            await page.evaluate("""(h) => { window.card = document.createElement('hcl-curve-card');
+                card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card);
+                h.callService = () => 0; card.hass = h; }""", _hass("auto"))
+            await page.wait_for_function("() => card._initialized")
+        return page, requests
 
-            await page.route("http://hcl.test/**", route)
-            await page.goto("http://hcl.test/lovelace")
-            await page.wait_for_function("() => !!customElements.get('hcl-curve-card')")
-            if attach:
-                await page.evaluate("""(h) => { window.card = document.createElement('hcl-curve-card');
-                    card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card);
-                    h.callService = () => 0; card.hass = h; }""", _hass("auto"))
-                await page.wait_for_function("() => card._initialized")
-            return page, requests
-
-        yield make
-        await browser.close()
+    yield make
 
 
 async def test_b53_card_moved_while_loading_initialises(browser_page_factory):
@@ -725,7 +754,7 @@ async def test_b53_card_moved_while_loading_initialises(browser_page_factory):
         card.setConfig({entity: 'sensor.hcl_curve_data'}); document.body.appendChild(card);
         const column = document.createElement('div'); document.body.appendChild(column);
         card.remove(); column.appendChild(card); }""")
-    await page.wait_for_timeout(1800)
+    await page.wait_for_function("() => card._initialized && !!card._chartB", timeout=10000)
     assert await page.evaluate("() => card._initialized && !!card._chartB") is True
     assert page.errors == []
 
@@ -743,7 +772,7 @@ async def _set_curve(page, curve: dict | None, mode: str = "auto") -> None:
     else:
         h["states"]["sensor.hcl_curve_data"] = curve
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(100)
+    await frames(page)
 
 
 @pytest.mark.parametrize("gap", ["missing", "unavailable", "unknown", "invalid"])
@@ -799,7 +828,7 @@ def _setpoint_hass(mode: str, tb: str | None, tk: str | None) -> dict:
 
 async def _now_info(page, h) -> str:
     await page.evaluate("(h) => { h.callService = () => 0; card.hass = h; }", h)
-    await page.wait_for_timeout(100)
+    await frames(page)
     return await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
 
 
@@ -839,8 +868,7 @@ async def test_b55_removed_cards_release_their_charts(page):
             tmp.setConfig({entity: 'sensor.hcl_curve_data'}); tmp.hass = card._hass; document.body.appendChild(tmp); }""")
         await page.wait_for_function("() => tmp._initialized && !!tmp._chartB")
         await page.evaluate("() => tmp.remove()")
-    await page.wait_for_timeout(1500)
-    assert await page.evaluate("() => Object.keys(card._Chart.instances).length") == before
+    await page.wait_for_function("(n) => Object.keys(card._Chart.instances).length === n", arg=before, timeout=10000)
     assert page.errors == []
 
 
@@ -849,12 +877,11 @@ async def test_b55_card_moved_in_the_dashboard_keeps_working(page):
     await page.evaluate("() => { card._pushUndo(); card._points[0].b = 55; card._markChanged(); }")
     # quick move (masonry): charts are kept
     chart = await page.evaluate("() => { window.__c = card._chartB; card.remove(); document.body.appendChild(card); return 1; }")
-    await page.wait_for_timeout(1500)
+    await page.wait_for_timeout(RELEASE_WAIT_MS)  # nothing may happen: longer than the release delay
     assert chart == 1 and await page.evaluate("() => card._chartB === window.__c")
     # long detach: charts are released and rebuilt on the next attach, the draft stays
     await page.evaluate("() => card.remove()")
-    await page.wait_for_timeout(1500)
-    assert await page.evaluate("() => card._chartB === null") is True
+    await page.wait_for_function("() => card._chartB === null", timeout=10000)
     await page.evaluate("() => document.body.appendChild(card)")
     await page.wait_for_function("() => card._initialized && !!card._chartB")
     assert await page.evaluate("() => card._points[0].b") == 55
@@ -897,7 +924,7 @@ async def _ha_like(page, h: dict) -> None:
         }""",
         h,
     )
-    await page.wait_for_timeout(150)
+    await frames(page)
 
 
 async def test_rm_f03_foreign_state_changes_cost_no_dom_work(page):
@@ -1070,7 +1097,7 @@ async def _in_cell(page, height: str) -> None:
         }""",
         height,
     )
-    await page.wait_for_timeout(300)
+    await frames(page, 3)  # resize observer, then a frame for the charts
 
 
 @pytest.mark.parametrize("height", ["300px", "auto"])

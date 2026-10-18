@@ -70,6 +70,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      # Node.js for the curve parity test (card maths = integration maths);
+      # explicit, not from the runner image
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Install Home Assistant test environment
         env:
           PHCC: ${{ matrix.phcc }}
@@ -81,6 +87,8 @@ jobs:
           python -c "import homeassistant.const as c; print('Home Assistant', c.__version__)"
 
       - name: Run tests
+        env:
+          HCL_TEST_REQUIRE_NODE: "1"  # fail instead of skipping the parity test without Node.js
         run: pytest tests -p no:cacheprovider
 
   frontend:
@@ -96,11 +104,21 @@ jobs:
       - name: Install Playwright and Chromium
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio playwright
+          # Fixed versions: a new release must not turn the build red by itself
+          pip install "pytest==9.1.1" "pytest-asyncio==1.4.0" "playwright==1.63.0"
           python -m playwright install --with-deps chromium
 
       - name: Run card tests
         env:
           HCL_TEST_CHROMIUM: /nonexistent  # use the Playwright-managed Chromium
           HCL_TEST_REQUIRE_BROWSER: "1"    # fail instead of skipping without a browser
+          HCL_TEST_TRACE_DIR: playwright-traces  # a trace per failed test
         run: pytest tests_frontend -p no:cacheprovider
+
+      - name: Upload traces of failed card tests
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: playwright-traces/
+          if-no-files-found: ignore

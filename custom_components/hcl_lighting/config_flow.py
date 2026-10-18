@@ -7,8 +7,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult, section
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
 
@@ -99,7 +100,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         errors = {}
         if user_input is not None:
@@ -162,7 +163,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Manage the options."""
         errors = {}
         if user_input is not None:
@@ -205,7 +206,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_behavior(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Update timing and manual-control behaviour."""
         errors = {}
         flat: dict[str, Any] = {}
@@ -242,7 +243,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_scenarios(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Values of the fixed scenarios and their duration."""
         if user_input is not None:
             self._pending.update(user_input)
@@ -259,7 +260,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_daylight(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Daylight compensation (RM-E02): lux sensor and target, opt-in."""
         errors: dict[str, str] = {}
         flat: dict[str, Any] = {}
