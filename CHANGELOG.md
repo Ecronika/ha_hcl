@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-25
+Summary of all changes since 0.7.1; the details are in the entries of the pre-releases 0.8.0b1 to 0.8.0b7 below (RM-… numbers refer to the roadmap). The minimum Home Assistant version stays 2024.7.
+
+### Upgrade notes – behaviour that changes from 0.7.1
+- **New default curve** (RM-R06, RM-R07) for instances without a curve saved in the card: quick morning rise, 100 % during the day without a midday dip, down to 10 % / 2200 K before sleep time and a dim, warm night (5 % / 2200 K). A curve saved in the card is not changed.
+- **Midday time removed** (RM-R07): the curve is generated from the wake and sleep time; `midday_time` is gone from the response of `hcl_lighting.get_curve`.
+- **Minimum brightness 3 %** for new instances (RM-R06); existing instances keep theirs.
+- **Turn-on transition removed** (RM-R10): a light that is switched on gets the HCL values at once.
+- **Timing options in a collapsed section** "Advanced: timing" (RM-R11); update interval 15–300 s (stored values outside are moved to the limit).
+- **Lights with colour temperature stay in colour temperature mode** (RM-R09), limited to their range; lights without colour temperature keep the XY simulation.
+- **Card: "Default curve" instead of presets** (RM-R08).
+- **Scenario Guest deprecated** (RM-R12): it still works, logs a warning and shows a repair issue; it will be removed in 0.9.0. Switch *HCL active* off instead.
+- **Sleep switches off every light that is on** and not manually controlled, also very dim ones (RM-B52).
+- **The return to HCL after manual control counts from the last change by hand** (RM-B54), not from the last report of the light.
+- **Entity icons** come from `icons.json`; the state attribute `icon` of the HCL entities is gone (RM-T21).
+- **Config entry version 1.2**: all settings are stored in the options; the migration runs once at the first start.
+
+### Added
+- **Daylight compensation** (RM-E01, RM-E02, optional, off by default): an indoor lux sensor lowers the brightness in Auto when the room is bright enough (measured closed loop on the illuminance at the sensor). Options step *Daylight compensation* with lux sensor, target (50–2000 lx) and a collapsed section *Advanced: daylight control*; the response band follows the target (50–300 lx) unless a value is entered (RM-E02-31). Never above the curve or below the minimum brightness, colour temperature unchanged, never switches a light on or off; held during manual control and while *Adapt brightness* or *HCL active* is off; the reduction survives a restart (up to 2 hours). Target sensors, card and diagnostics show curve value, effective value and the reason.
+
+### Fixed
+- Compatibility mode: colour temperature not sent to lights in a colour mode (RM-B46), a warning in every update after a successful fallback (RM-B47), a second command sent after the light was switched off or changed by hand (RM-B48), the rest of an old command after *HCL active* off or a scenario change (RM-B53).
+- Manual control: switching off and on right after an HCL command kept manual control (RM-B49), a colour change without brightness was not recognised (RM-B50), the timeout was off by one hour across a DST change (RM-B51) and restarted by every report of the light (RM-B54), a failed command could hide a change at the device (RM-B45).
+- A light with colour temperature stayed in a colour mode (RM-B43); actions used an outdated list of lights while HCL was off (RM-B44); Sleep left very dim lights on (RM-B52).
+- See the entries of the pre-releases for details and for fixes of the daylight compensation found during the beta (RM-B55 to RM-B57).
+
+### Internal
+- Runtime data in `entry.runtime_data` (RM-T01, RM-T02), typed state and events (RM-T03, RM-T07), update scheduling in its own class (RM-T04), Home Assistant internals in one module (RM-T06), target resolution in `logic/targets.py` (RM-T08), no silent exception handling (RM-T19), shared conversions and helpers (RM-T22, RM-T28, RM-T30), `ConfigFlowResult` (RM-H02).
+- Tests organised by responsibility (RM-T23, RM-T24); faster and more robust card tests (RM-T25); CI with pinned test tools, explicit Node.js and Playwright traces (RM-T26).
+
 ## [0.8.0b7] - 2026-10-25
 Seventh pre-release (beta) of 0.8.0: the response band of the daylight compensation follows the target (RM-E02-31, from the field test) and a fix for the daylight options on Home Assistant 2024.7 (RM-B57). The minimum Home Assistant version stays 2024.7.
 
