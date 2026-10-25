@@ -125,12 +125,14 @@ CONF_DAYLIGHT_SENSOR = "daylight_sensor"                   # sensor with device 
 CONF_DAYLIGHT_TARGET_LUX = "daylight_target_lux"           # 50-2000 lx at the sensor, no default
 CONF_DAYLIGHT_DEADBAND_LUX = "daylight_deadband_lux"       # optional; default max(20 lx, 5 % of the target)
 CONF_DAYLIGHT_SMOOTHING = "daylight_smoothing"             # s, time constant of the lux filter
-CONF_DAYLIGHT_RESPONSE_BAND_LUX = "daylight_response_band_lux"  # lx error that uses the full rate
+CONF_DAYLIGHT_RESPONSE_BAND_LUX = "daylight_response_band_lux"  # optional; lx error that uses the full rate (default: the target, 50-300 lx)
 CONF_DAYLIGHT_MAX_RATE = "daylight_max_rate"               # percent points per minute
 CONF_DAYLIGHT_STALE_AFTER = "daylight_stale_after"         # s without a report; 0 = no check
 CONF_DAYLIGHT_UNAVAILABLE_GRACE = "daylight_unavailable_grace"  # s the cap is held for a missing sensor
 DEFAULT_DAYLIGHT_SMOOTHING = 60
-DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX = 300
+# Response band without a value of the user: the target, within these limits
+# (300 lx was the fixed default before 0.8.0b7; RM-E02-31)
+DAYLIGHT_RESPONSE_BAND_RANGE = (50, 300)
 DEFAULT_DAYLIGHT_MAX_RATE = 11
 DEFAULT_DAYLIGHT_STALE_AFTER = 3600
 DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE = 300

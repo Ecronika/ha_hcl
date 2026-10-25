@@ -429,3 +429,74 @@ async def test_rm_b56_after_a_long_pause_readers_start_like_the_cycle(hass, noon
     cycle = ctl.calculate_target_values(dt_util.now())[0]
     assert cycle == seed
     assert shown == cycle
+
+
+# ---------------------------------------------------------------- RM-E02-31 (Praxistest L14, 25.10.2026)
+async def _daylight_step(hass, entry):
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    base = {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00",
+            "sleep_time": "22:00:00", "smart_transition": False, "min_brightness": 3, "max_brightness": 100}
+    await hass.config_entries.options.async_configure(flow["flow_id"], base)
+    await hass.config_entries.options.async_configure(
+        flow["flow_id"], {"override_timeout": 240, "override_reset_on_off": True, "persist_overrides": False,
+                          "respect_turn_on_values": False, "advanced": {"update_interval": 27, "transition": 20}},
+    )
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], {})
+    assert result["step_id"] == "daylight"
+    return flow, result
+
+
+async def test_rm_e02_31_response_band_is_optional_and_coupled_when_empty(hass, no_frontend_registration):
+    """The response band is empty by default (coupled to the target); an
+    entered value is stored and shown; clearing it couples it again."""
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    _lux(hass, 100)
+    entry = await setup_entry(hass, ["light.a"], options=daylight_options(daylight_target_lux=120))
+    on = {"daylight_enabled": True, "daylight_sensor": LUX_SENSOR, "daylight_target_lux": 120}
+    flow, _ = await _daylight_step(hass, entry)
+    result = await hass.config_entries.options.async_configure(flow["flow_id"], {**on, "daylight_advanced": {}})
+    await hass.async_block_till_done()
+    assert result["type"] == "create_entry"
+    assert "daylight_response_band_lux" not in entry.options
+    assert config_of(hass, entry).response_band_lux == 120
+    # a value entered by the user
+    flow, _ = await _daylight_step(hass, entry)
+    await hass.config_entries.options.async_configure(
+        flow["flow_id"], {**on, "daylight_advanced": {"daylight_response_band_lux": 100}}
+    )
+    await hass.async_block_till_done()
+    assert entry.options["daylight_response_band_lux"] == 100
+    assert config_of(hass, entry).response_band_lux == 100
+    flow, result = await _daylight_step(hass, entry)
+    section = {str(k): k for k in result["data_schema"].schema}["daylight_advanced"]
+    shown = {str(k): k for k in result["data_schema"].schema[section].schema.schema}
+    assert shown["daylight_response_band_lux"].description == {"suggested_value": 100}
+    # cleared again: coupled
+    await hass.config_entries.options.async_configure(flow["flow_id"], {**on, "daylight_advanced": {}})
+    await hass.async_block_till_done()
+    assert "daylight_response_band_lux" not in entry.options
+    assert config_of(hass, entry).response_band_lux == 120
+
+
+def config_of(hass, entry):
+    from custom_components.hcl_lighting.logic.daylight_compensation import DaylightConfig
+
+    return DaylightConfig.from_options(entry.options)
+
+
+# ---------------------------------------------------------------- RM-B57 (found with RM-E02-31, 25.10.2026)
+async def test_rm_b57_stored_advanced_daylight_values_are_shown(hass, no_frontend_registration):
+    """The collapsed section shows the stored dead band and response band on
+    every supported Home Assistant version (2024.7 does not fill sections from
+    suggested values); otherwise saving the form would clear them."""
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    _lux(hass, 100)
+    entry = await setup_entry(
+        hass, ["light.a"],
+        options=daylight_options(daylight_target_lux=120, daylight_deadband_lux=40, daylight_response_band_lux=100),
+    )
+    _flow, result = await _daylight_step(hass, entry)
+    section = {str(k): k for k in result["data_schema"].schema}["daylight_advanced"]
+    shown = {str(k): k for k in result["data_schema"].schema[section].schema.schema}
+    assert shown["daylight_deadband_lux"].description == {"suggested_value": 40}
+    assert shown["daylight_response_band_lux"].description == {"suggested_value": 100}

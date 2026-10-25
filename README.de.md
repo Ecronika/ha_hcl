@@ -87,7 +87,7 @@ Ein eingeschaltetes Licht bekommt die Werte sofort, ohne Übergang (die Option �
 - **Sensorposition**: Der Sensor soll den Raum sehen, nicht direkt die Leuchten. Ein Sensor, den die Leuchten stark anstrahlen (z. B. 100 lx mehr je Prozent Helligkeit), kann die Helligkeit um einige Prozent pendeln lassen; ein träger Sensor verstärkt das. Je Lichtzone eine Instanz mit eigenem Sensor; nutzen mehrere aktive Instanzen denselben Sensor, erscheint eine Reparaturmeldung.
 - Die Sollwert-Sensoren zeigen den wirksamen Wert; ihre Attribute `base_value` (Kurve oder Szenario), `environment_status`, `environment_reason`, `measured_lux`, `filtered_lux`, `target_lux`, `cap_pct` und `sensor_age` erklären ihn (nicht im Verlauf). Die Karte zeigt z. B. „80 % → 35 % · Tageslicht“.
 
-Im eingeklappten Abschnitt **Erweitert: Tageslichtregelung**: Totband, Glättung, Regelband (300 lx: Abweichung mit voller Geschwindigkeit), maximale Geschwindigkeit, „Sensorwert veraltet nach“ (3600 s) und Haltezeit bei fehlendem Sensorwert (300 s).
+Im eingeklappten Abschnitt **Erweitert: Tageslichtregelung**: Totband, Glättung, Regelband (Abweichung mit voller Geschwindigkeit; leer: der Zielwert, mindestens 50 und höchstens 300 lx – ein eingetragener Wert gilt stattdessen), maximale Geschwindigkeit, „Sensorwert veraltet nach“ (3600 s) und Haltezeit bei fehlendem Sensorwert (300 s).
 
 **Hinweise zu Leuchtmitteln**: Manche Leuchtmittel haben Firmware-Grenzen, die HCL nicht beheben kann; die Optionen helfen dabei:
 - **IKEA TRÅDFRI** (und ähnliche): **Kompatibilitätsmodus** einschalten (siehe oben).
