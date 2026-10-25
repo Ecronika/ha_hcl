@@ -483,3 +483,23 @@ def test_rm_b55_long_hold_counts_like_a_start():
     result = loop.step(seed_brightness=40)
     assert result.modifier("daylight").details.get("start") == "daylight_seed"
     assert result.effective.brightness == 40
+
+
+# ---------------------------------------------------------------- RM-E02-31 (Praxistest L14, 25.10.2026)
+@pytest.mark.parametrize(
+    ("target", "band", "expected"),
+    [
+        (120, None, 120),  # coupled to the target
+        (40, None, 50),  # at least 50 lx
+        (500, None, 300),  # at most 300 lx (the former fixed default)
+        (120, 100, 100),  # a value entered by the user wins
+        (500, 300, 300),
+    ],
+)
+def test_rm_e02_31_response_band_follows_the_target_unless_set(target, band, expected):
+    from custom_components.hcl_lighting.logic.daylight_compensation import DaylightConfig
+
+    options = {"daylight_enabled": True, "daylight_sensor": "sensor.lux", "daylight_target_lux": target}
+    if band is not None:
+        options["daylight_response_band_lux"] = band
+    assert DaylightConfig.from_options(options).response_band_lux == expected

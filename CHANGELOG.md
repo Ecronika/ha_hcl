@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0b7] - 2026-10-25
+Seventh pre-release (beta) of 0.8.0: the response band of the daylight compensation follows the target (RM-E02-31, from the field test) and a fix for the daylight options on Home Assistant 2024.7 (RM-B57). The minimum Home Assistant version stays 2024.7.
+
+### Changed
+- **Daylight compensation: response band follows the target** (RM-E02-31): the field *Response band* in *Advanced: daylight control* is optional now. Empty, it is the target illuminance, at least 50 and at most 300 lx (before: always 300 lx, which made the return to the curve slow for low targets – in the field test with 120 lx 40–165 min instead of 20–30 min). A value entered there is used instead; clearing the field couples it again. Targets from 300 lx on behave as before.
+- **Note for beta testers:** options saved with 0.8.0b3 to 0.8.0b6 contain the former default 300 lx as an entered value and keep it. To use the coupling, clear the field in the options.
+
+### Fixed
+- **Daylight options lost the dead band on Home Assistant 2024.7** (RM-B57): the collapsed section *Advanced: daylight control* did not show a stored dead band on older Home Assistant versions (they do not fill sections from suggested values), so saving the options cleared it. The stored values of dead band and response band are now shown on every supported version.
+
 ## [0.8.0b6] - 2026-10-18
 Sixth pre-release (beta) of 0.8.0: fixes from the review of the daylight compensation (RM-B55, RM-B56, RM-D07) and test/CI work (RM-T25, RM-T26, RM-H02). The minimum Home Assistant version stays 2024.7.
 

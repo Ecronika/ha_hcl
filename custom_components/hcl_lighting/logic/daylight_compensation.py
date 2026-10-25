@@ -32,7 +32,7 @@ from ..const import (
     CONF_DAYLIGHT_TARGET_LUX,
     CONF_DAYLIGHT_UNAVAILABLE_GRACE,
     DEFAULT_DAYLIGHT_MAX_RATE,
-    DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX,
+    DAYLIGHT_RESPONSE_BAND_RANGE,
     DEFAULT_DAYLIGHT_SMOOTHING,
     DEFAULT_DAYLIGHT_STALE_AFTER,
     DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE,
@@ -87,12 +87,15 @@ class DaylightConfig:
             return None
         target = float(target)
         deadband = options.get(CONF_DAYLIGHT_DEADBAND_LUX)
+        band = options.get(CONF_DAYLIGHT_RESPONSE_BAND_LUX)
+        low, high = DAYLIGHT_RESPONSE_BAND_RANGE
         return cls(
             sensor=sensor,
             target_lux=target,
             deadband_lux=float(deadband) if deadband else max(20.0, 0.05 * target),
             smoothing_s=float(options.get(CONF_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_SMOOTHING)),
-            response_band_lux=float(options.get(CONF_DAYLIGHT_RESPONSE_BAND_LUX, DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX)),
+            # without a value of the user coupled to the target (RM-E02-31)
+            response_band_lux=float(band) if band else min(float(high), max(float(low), target)),
             max_rate_pct_per_min=float(options.get(CONF_DAYLIGHT_MAX_RATE, DEFAULT_DAYLIGHT_MAX_RATE)),
             stale_after_s=float(options.get(CONF_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_STALE_AFTER)),
             grace_s=float(options.get(CONF_DAYLIGHT_UNAVAILABLE_GRACE, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE)),

@@ -32,7 +32,7 @@ from .const import (
     CONF_DAYLIGHT_ENABLED, CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX,
     CONF_DAYLIGHT_SMOOTHING, CONF_DAYLIGHT_RESPONSE_BAND_LUX, CONF_DAYLIGHT_MAX_RATE,
     CONF_DAYLIGHT_STALE_AFTER, CONF_DAYLIGHT_UNAVAILABLE_GRACE,
-    DEFAULT_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX, DEFAULT_DAYLIGHT_MAX_RATE,
+    DEFAULT_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_MAX_RATE,
     DEFAULT_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE, DAYLIGHT_TARGET_LUX_RANGE,
 )
 
@@ -45,7 +45,19 @@ SECTION_ADVANCED = "advanced"
 # Collapsible section of the daylight parameters (RM-E02, E02-7)
 SECTION_DAYLIGHT_ADVANCED = "daylight_advanced"
 # Daylight options that may be empty (removed from the options when cleared)
-_DAYLIGHT_OPTIONAL = (CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX)
+_DAYLIGHT_OPTIONAL = (
+    CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX, CONF_DAYLIGHT_RESPONSE_BAND_LUX,
+)
+# of those, the ones in the collapsed section
+_DAYLIGHT_ADVANCED_OPTIONAL = (CONF_DAYLIGHT_DEADBAND_LUX, CONF_DAYLIGHT_RESPONSE_BAND_LUX)
+
+
+def _optional(key: str, current: dict[str, Any]) -> vol.Optional:
+    """An optional field in a section that shows the stored value: Home
+    Assistant 2024.7 does not fill sections from suggested values, saving the
+    form would clear the field (RM-B57)."""
+    value = current.get(key)
+    return vol.Optional(key) if value is None else vol.Optional(key, description={"suggested_value": value})
 
 
 def _anchor_errors(values: dict[str, Any]) -> dict[str, str]:
@@ -281,9 +293,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current = {**self._current(), **flat}
         advanced = vol.Schema(
             {
-                vol.Optional(CONF_DAYLIGHT_DEADBAND_LUX): _number(1, 1000, unit="lx"),
+                _optional(CONF_DAYLIGHT_DEADBAND_LUX, current): _number(1, 1000, unit="lx"),
                 vol.Required(CONF_DAYLIGHT_SMOOTHING, default=current.get(CONF_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_SMOOTHING)): _number(0, 600, unit="s"),
-                vol.Required(CONF_DAYLIGHT_RESPONSE_BAND_LUX, default=current.get(CONF_DAYLIGHT_RESPONSE_BAND_LUX, DEFAULT_DAYLIGHT_RESPONSE_BAND_LUX)): _number(10, 5000, unit="lx"),
+                _optional(CONF_DAYLIGHT_RESPONSE_BAND_LUX, current): _number(10, 5000, unit="lx"),
                 vol.Required(CONF_DAYLIGHT_MAX_RATE, default=current.get(CONF_DAYLIGHT_MAX_RATE, DEFAULT_DAYLIGHT_MAX_RATE)): _number(1, 100, unit="%/min"),
                 vol.Required(CONF_DAYLIGHT_STALE_AFTER, default=current.get(CONF_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_STALE_AFTER)): _number(0, 86400, unit="s"),
                 vol.Required(CONF_DAYLIGHT_UNAVAILABLE_GRACE, default=current.get(CONF_DAYLIGHT_UNAVAILABLE_GRACE, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE)): _number(0, 3600, unit="s"),
@@ -299,11 +311,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(SECTION_DAYLIGHT_ADVANCED): section(advanced, {"collapsed": True}),
             }
         )
+        # the optional fields of the section carry their value themselves (_optional)
         suggested = {
-            key: current[key] for key in _DAYLIGHT_OPTIONAL if current.get(key) is not None
+            key: current[key] for key in _DAYLIGHT_OPTIONAL
+            if key not in _DAYLIGHT_ADVANCED_OPTIONAL and current.get(key) is not None
         }
-        if CONF_DAYLIGHT_DEADBAND_LUX in suggested:
-            suggested[SECTION_DAYLIGHT_ADVANCED] = {CONF_DAYLIGHT_DEADBAND_LUX: suggested.pop(CONF_DAYLIGHT_DEADBAND_LUX)}
         return self.async_show_form(
             step_id="daylight",
             data_schema=self.add_suggested_values_to_schema(schema, suggested),

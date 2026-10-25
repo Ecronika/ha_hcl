@@ -138,7 +138,7 @@ An indoor **lux sensor** lowers the brightness in **Auto** when there is enough 
 *   **Sensor position**: the sensor should see the room, not the lights directly. A sensor the lights shine on strongly (e.g. 100 lx more per percent of brightness) can make the brightness swing by a few percent; a slow sensor makes this worse. One instance per lighting zone with its own sensor; a sensor used by several active instances shows a repair issue.
 *   The target sensors show the effective value; their attributes `base_value` (curve or scenario), `environment_status`, `environment_reason`, `measured_lux`, `filtered_lux`, `target_lux`, `cap_pct` and `sensor_age` explain it (not stored in the history). The card shows e.g. "80 % → 35 % · daylight".
 
-The collapsed section **Advanced: daylight control** holds dead band, smoothing, response band (300 lx: deviation that uses the full rate), maximum rate, *sensor stale after* (3600 s) and the grace for a missing sensor value (300 s).
+The collapsed section **Advanced: daylight control** holds dead band, smoothing, response band (deviation that uses the full rate; empty: the target, at least 50 and at most 300 lx – an entered value is used instead), maximum rate, *sensor stale after* (3600 s) and the grace for a missing sensor value (300 s).
 
 ### Notes on lights
 Some bulbs have firmware limits that HCL cannot fix, but the options can work around them:
