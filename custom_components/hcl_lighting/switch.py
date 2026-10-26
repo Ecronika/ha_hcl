@@ -92,15 +92,11 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         super().__init__(entry, None)
         self.hass = hass
 
-        # State
-        self._attr_is_on = False
-        
         self._state_listener_remove_callback = None
         
         self._calculated_brightness = None
         self._calculated_kelvin = None
         
-        self._is_on = False # Internal state for update loop control
         # Set while the entity is added to Home Assistant; a disabled main
         # switch is never added and the instance does nothing (RM-B38)
         self._added = False
@@ -182,8 +178,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity will be removed from hass."""
         self._added = False
-        self._is_on = False # Prevent further updates
-        self.controller.hcl_active = False
+        self.controller.hcl_active = False  # prevent further updates
         self.controller.drop_running_commands()  # RM-B53
         self.controller.seed_provider = None
         self._scheduler.stop()
@@ -197,7 +192,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
 
     async def _async_hass_started(self, _hass: HomeAssistant) -> None:
         """Re-resolve targets after HA startup (groups are expanded only when loaded)."""
-        if not self._is_on:
+        if not self.is_on:
             return
         await self._re_evaluate_targets_and_listeners()
         await self.async_request_update()
@@ -215,13 +210,13 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     @callback
     def _handle_registry_updated(self, _event: Event) -> None:
         """Re-resolve the targets shortly after registry changes (debounced)."""
-        if not self._is_on:
+        if not self.is_on:
             return
         self._cancel_pending_reresolve()
 
         async def _reresolve(_now) -> None:
             self._cancel_reresolve = None
-            if not self._is_on:
+            if not self.is_on:
                 return
             old_targets = set(self._resolved_targets)
             await self._re_evaluate_targets_and_listeners()
@@ -239,7 +234,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         (only for the attributes HCL adapts). A turn-on command with own values
         for a light that is off is respected only if configured.
         """
-        if not self._is_on:
+        if not self.is_on:
             return
         data = event.data
         if data.get("domain") != "light" or data.get("service") not in ("turn_on", "toggle"):
@@ -295,8 +290,8 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return true if switch is on."""
-        return self._is_on
+        """Return true if switch is on (the controller holds the state, RM-T29)."""
+        return self.controller.hcl_active
 
     @property
     def resolved_targets(self) -> set[str]:
@@ -344,13 +339,12 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
 
     async def _async_start(self) -> None:
         """Switch the update loop on: timer, targets and listeners."""
-        if not self._is_on:
+        if not self.is_on:
             # Switched on (or set up again): HCL takes its lights back at
             # once. Transition protections from before (a long apply, scenario
             # or turn-on transition) end - in request order, like a scenario
             # change - instead of blocking the lights until they run out.
             self._scheduler.end_protections()
-        self._is_on = True
         self.controller.hcl_active = True
         self.async_write_ha_state() # Ensure UI updates immediately
         self._scheduler.start()
@@ -498,7 +492,6 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        self._is_on = False
         self.controller.hcl_active = False
         # the rest of a running compatibility-mode command is not sent (RM-B53)
         self.controller.drop_running_commands()
@@ -523,7 +516,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         """One update of all lights (the scheduler holds the update lock)."""
         if end_protection:
             self.override_manager.end_reengaging()
-        if not self._is_on:
+        if not self.is_on:
             return
         try:
             # 1. Target values: base of curve or scenario, environmental
@@ -635,7 +628,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
     async def _handle_light_state_change(self, event: Event[EventStateChangedData]) -> None:
         """Handle state changes of monitored lights."""
         try:
-            if not self._is_on:
+            if not self.is_on:
                 return
             
             entity_id = event.data.get("entity_id")

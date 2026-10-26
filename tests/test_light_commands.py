@@ -18,7 +18,7 @@ from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, DOMAIN
 from custom_components.hcl_lighting.logic import light_controller as lc
 from custom_components.hcl_lighting.logic.units import kelvin_to_xy
 
-from .support.entries import COLOR_ATTRS, CT_ATTRS, SWITCH, WARM_CT, calls_for, core, cycle_running, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity, timer_cycle
+from .support.entries import COLOR_ATTRS, CT_ATTRS, SWITCH, WARM_CT, calls_for, core, cycle_running, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity, timer_cycle, wait_until
 from .support.lights import FakeLights
 
 
@@ -59,8 +59,7 @@ async def _switch_on_hanging(hass, lights, fail_late=False):
         lights.fail_late.add("light.a")
     lights.calls.clear()
     set_light(hass, "light.a", "on", brightness=3, color_temp_kelvin=2000, **CT_ATTRS)
-    await settle()
-    assert lights.for_light("light.a"), "Fast-HCL must send the values"
+    await wait_until(lambda: lights.for_light("light.a"), "Fast-HCL must send the values")
     return event
 
 
@@ -681,13 +680,11 @@ async def test_rm_b23_hanging_light_does_not_hold_the_update(hass, no_frontend_r
     lights, entry = await setup_two_dim_lights(hass)
     lights.hang["light.a"] = asyncio.Event()
     start_select(hass, "focus")
-    await settle()
     # both commands were sent at once; light.b has its values, light.a hangs
-    assert lights.for_light("light.a") and lights.for_light("light.b")
+    await wait_until(lambda: lights.for_light("light.a") and lights.for_light("light.b"))
     assert cycle_running(hass)  # waiting for light.a
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
-    await settle()
-    assert not cycle_running(hass)  # goes on without light.a
+    await wait_until(lambda: not cycle_running(hass))  # goes on without light.a
     # the next scenario reaches light.b at once; light.a gets no second command
     lights.calls.clear()
     start_select(hass, "relax")
@@ -706,8 +703,7 @@ async def test_rm_b23_light_gets_commands_again_after_its_late_answer(hass, no_f
     start_select(hass, "focus")
     await settle()
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
-    await settle()
-    assert not cycle_running(hass)
+    await wait_until(lambda: not cycle_running(hass))
     focus = om.tracking_snapshot("light.a")[0]
     # late success: the values arrived, the tracking stays
     lights.hang["light.a"].set()
@@ -716,8 +712,7 @@ async def test_rm_b23_light_gets_commands_again_after_its_late_answer(hass, no_f
     lights.calls.clear()
     del lights.hang["light.a"]
     start_select(hass, "relax")
-    await settle()
-    assert lights.for_light("light.a")  # no longer busy
+    await wait_until(lambda: lights.for_light("light.a"))  # no longer busy
 
 
 async def test_rm_b23_late_error_restores_the_tracking(hass, no_frontend_registration, freezer):
@@ -727,11 +722,9 @@ async def test_rm_b23_late_error_restores_the_tracking(hass, no_frontend_registr
     lights.hang["light.a"] = asyncio.Event()
     lights.fail_late.add("light.a")
     start_select(hass, "focus")
-    await settle()
-    assert om.tracking_snapshot("light.a") != before  # set before sending
+    await wait_until(lambda: om.tracking_snapshot("light.a") != before)  # set before sending
     freezer.tick(timedelta(seconds=COMMAND_TIMEOUT_SECONDS + 1))
-    await settle()
-    assert not cycle_running(hass)
+    await wait_until(lambda: not cycle_running(hass))
     lights.release()
     await settle()
     assert om.tracking_snapshot("light.a") == before  # like a failed command (RM-B14)
@@ -745,8 +738,7 @@ async def test_rm_b23_update_cancelled_while_waiting_handles_results(hass, no_fr
     lights.hang["light.a"] = asyncio.Event()
     lights.fail_late.add("light.a")
     update = hass.async_create_task(switch_entity(hass).async_request_update())
-    await settle()
-    assert lights.for_light("light.a")
+    await wait_until(lambda: lights.for_light("light.a"))
     update.cancel()
     await settle()
     lights.release()
@@ -994,8 +986,7 @@ async def test_rm_b48_light_dimmed_between_the_compat_commands_keeps_the_users_v
 ):
     lights, om, task, gate = await _compat_command_held(hass, freezer)
     set_light(hass, "light.a", "on", brightness=26, color_temp_kelvin=3000, **CT_ATTRS)  # dimmed to 10 %
-    await settle()
-    assert om.is_overridden("light.a")
+    await wait_until(lambda: om.is_overridden("light.a"))
     assert await _finish(hass, lights, task, gate) == []
 
 
@@ -1005,8 +996,7 @@ async def test_rm_b53_hcl_switched_off_between_the_compat_commands(hass, no_fron
     off = hass.async_create_task(
         hass.services.async_call("switch", "turn_off", {"entity_id": SWITCH}, blocking=True)
     )
-    await settle()
-    assert hass.states.get(SWITCH).state == "off"
+    await wait_until(lambda: hass.states.get(SWITCH).state == "off")
     assert await _finish(hass, lights, task, gate) == []  # no further part after HCL off
     await off
 

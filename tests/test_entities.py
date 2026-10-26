@@ -7,13 +7,13 @@ from datetime import timedelta
 from homeassistant.core import callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed, async_mock_service
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.hcl_lighting.const import CONF_MAX_BRIGHTNESS, CONF_MIN_BRIGHTNESS, DOMAIN
 from custom_components.hcl_lighting.logic.hcl_math import default_points
 from custom_components.hcl_lighting.sensor import HCLLightingCurveSensor
 
-from .support.entries import CT_ATTRS, SELECT, SENSOR, SWITCH, calls_for, hcl_on, select_scenario, set_light, setup_entry, switch_entity
+from .support.entries import CT_ATTRS, SELECT, SENSOR, SWITCH, calls_for, hcl_on, light_on, select_scenario, set_light, setup_entry, switch_entity
 from .support.lights import FakeLights
 
 
@@ -35,14 +35,6 @@ TARGET_B = "sensor.hcl_target_brightness"
 
 
 TARGET_K = "sensor.hcl_target_colour_temperature"
-
-
-async def _light_on(hass, options=None):
-    calls = async_mock_service(hass, "light", "turn_on")
-    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"], options=options)
-    await hcl_on(hass)
-    return calls, entry
 
 
 UNRECORDED = {"calculated_brightness", "calculated_color_temp", "target_entities", "manual_control"}
@@ -109,7 +101,7 @@ async def test_a14_curve_sensor_timestamp_and_recorder(hass, no_frontend_registr
 # ---------------------------------------------------------------- F-01
 @pytest.mark.usefixtures("evening")
 async def test_f01_setpoint_sensors_equal_the_sent_values(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass)
+    calls, _entry = await light_on(hass)
     sent = calls_for(calls, "light.a")[-1].data
     assert hass.states.get(TARGET_B).state == str(sent["brightness_pct"])
     assert hass.states.get(TARGET_K).state == str(sent["color_temp_kelvin"])
@@ -120,7 +112,7 @@ async def test_f01_setpoint_sensors_equal_the_sent_values(hass, no_frontend_regi
 
 @pytest.mark.usefixtures("evening")
 async def test_f01_setpoint_sensors_follow_scenarios(hass, no_frontend_registration):
-    await _light_on(hass)
+    await light_on(hass)
     await select_scenario(hass, "focus")
     assert (hass.states.get(TARGET_B).state, hass.states.get(TARGET_K).state) == ("100", "5500")
     await select_scenario(hass, "guest")
@@ -131,7 +123,7 @@ async def test_f01_setpoint_sensors_follow_scenarios(hass, no_frontend_registrat
 
 @pytest.mark.usefixtures("evening")
 async def test_f01_setpoint_sensors_update_over_time(hass, no_frontend_registration, freezer):
-    await _light_on(hass)
+    await light_on(hass)
     before = hass.states.get(TARGET_B).state
     freezer.tick(timedelta(hours=1))  # 21:00, dimmer
     async_fire_time_changed(hass)

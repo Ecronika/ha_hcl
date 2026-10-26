@@ -14,19 +14,11 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, DOMAIN
 from custom_components.hcl_lighting.logic import targets as light_targets
 
-from .support.entries import CT_ATTRS, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, timer_cycle
+from .support.entries import CT_ATTRS, SELECT, SWITCH, calls_for, core, hcl_on, light_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, timer_cycle
 from .support.lights import FakeLights
 
 
 COMPONENT = Path(__file__).parent.parent / "custom_components" / "hcl_lighting"
-
-
-async def _light_on(hass, options=None):
-    calls = async_mock_service(hass, "light", "turn_on")
-    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"], options=options)
-    await hcl_on(hass)
-    return calls, entry
 
 
 async def _apply(hass, **data):
@@ -83,7 +75,7 @@ async def test_f02_apply_sends_now_and_never_switches_on(hass, no_frontend_regis
 @pytest.mark.usefixtures("evening")
 async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_registration, freezer):
     """0.7.0b2 (B-58): the next update cycles leave a light alone during a long apply transition."""
-    calls, entry = await _light_on(hass)
+    calls, entry = await light_on(hass)
     om = core(hass, entry).override_manager
     calls.clear()
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
@@ -114,14 +106,14 @@ async def test_b58_long_apply_transition_is_not_cut_short(hass, no_frontend_regi
 
 @pytest.mark.usefixtures("evening")
 async def test_b58_short_apply_transition_sets_no_protection(hass, no_frontend_registration):
-    calls, entry = await _light_on(hass)
+    calls, entry = await light_on(hass)
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 5}, blocking=True)
     assert not core(hass, entry).override_manager.is_reengaging("light.a")
 
 
 @pytest.mark.usefixtures("evening")
 async def test_b58_scenario_change_ends_the_apply_protection(hass, no_frontend_registration):
-    calls, entry = await _light_on(hass)
+    calls, entry = await light_on(hass)
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 120}, blocking=True)
     assert core(hass, entry).override_manager.is_reengaging("light.a")
     calls.clear()
@@ -131,7 +123,7 @@ async def test_b58_scenario_change_ends_the_apply_protection(hass, no_frontend_r
 
 @pytest.mark.usefixtures("evening")
 async def test_f02_apply_skips_or_releases_manual_control(hass, no_frontend_registration):
-    calls, entry = await _light_on(hass)
+    calls, entry = await light_on(hass)
     om = core(hass, entry).override_manager
     om.set_override("light.a")
     calls.clear()
@@ -148,7 +140,7 @@ async def test_f02_apply_skips_or_releases_manual_control(hass, no_frontend_regi
 async def test_f02_apply_rejects_foreign_lights_and_guest_mode(hass, no_frontend_registration):
     from homeassistant.exceptions import ServiceValidationError
 
-    await _light_on(hass)
+    await light_on(hass)
     # ServiceNotFound is a ServiceValidationError too: check the messages
     with pytest.raises(ServiceValidationError, match="Not controlled by this HCL instance: light.other"):
         await hass.services.async_call(
@@ -163,7 +155,7 @@ async def test_f02_apply_rejects_foreign_lights_and_guest_mode(hass, no_frontend
 
 @pytest.mark.usefixtures("evening")
 async def test_f02_set_manual_control(hass, no_frontend_registration):
-    calls, entry = await _light_on(hass)
+    calls, entry = await light_on(hass)
     om = core(hass, entry).override_manager
     await hass.services.async_call(
         DOMAIN, "set_manual_control", {"entity_id": SWITCH, "lights": ["light.a"]}, blocking=True
@@ -182,7 +174,7 @@ async def test_f02_set_manual_control(hass, no_frontend_registration):
 
 @pytest.mark.usefixtures("evening")
 async def test_f02_set_scenario_with_duration(hass, no_frontend_registration, freezer):
-    await _light_on(hass)
+    await light_on(hass)
     await hass.services.async_call(
         DOMAIN, "set_scenario", {"entity_id": SWITCH, "scenario": "focus", "duration": 30}, blocking=True
     )

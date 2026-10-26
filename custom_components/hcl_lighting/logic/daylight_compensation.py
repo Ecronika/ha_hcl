@@ -61,6 +61,8 @@ LUX_KEY = "indoor_lux"
 PERSISTED_CAP_MAX_AGE = 7200.0
 PERSIST_DELAY = 300.0  # s, coalesced store writes (DL-PRD-21/22)
 STORE_VERSION = 1
+# A reduction this soon after a raise counts as an overshoot of that raise (RM-E02-32)
+OVERSHOOT_WINDOW = 600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,6 +170,9 @@ class DaylightState:
     cap_pct: float | None = None
     invalid_since: float | None = None  # monotonic; also counted during a hold (DL-PRD-24)
     last_auto: float | None = None  # monotonic time of the last regular step without hold/bypass
+    raised_from: float | None = None  # cap before the current raise (RM-E02-32)
+    raised_at: float | None = None  # monotonic time of the last raising step
+    ceiling: float | None = None  # raising just below the target overshot from here (RM-E02-32)
     persisted_cap: float | None = None  # from the store, used once at the start
     persisted_at: datetime | None = None
 
@@ -261,17 +266,36 @@ class DaylightModifier:
         else:
             lux = new.filtered_lux
             band = max(1.0, cfg.response_band_lux)
+            low = cfg.target_lux - cfg.deadband_lux
+            # Dead band only above the target (RM-E02-32): below it the light
+            # is raised again, too dark being worse than a little too bright.
+            # A raise just below the target that overshot the dead band (a
+            # sensor that sees the lights strongly) is not repeated until the
+            # light falls clearly below the target, so it does not swing.
+            ceiling = None if lux < low else new.ceiling
             if lux > cfg.target_lux + cfg.deadband_lux:
                 excess = lux - (cfg.target_lux + cfg.deadband_lux)
                 cap = max(min_b, cur - rate * min(1.0, excess / band))
                 reason = "daylight_reducing"
-            elif lux < cfg.target_lux - cfg.deadband_lux and cur < base:
-                deficit = (cfg.target_lux - cfg.deadband_lux) - lux
+                if cap < cur and new.raised_from is not None:
+                    overshoot = time.monotonic - new.raised_at <= OVERSHOOT_WINDOW
+                    new = replace(new, raised_from=None, ceiling=new.raised_from if overshoot else None)
+            elif lux < cfg.target_lux and cur < base and (ceiling is None or cur < ceiling):
+                deficit = cfg.target_lux - lux
                 cap = min(base, cur + rate * min(1.0, deficit / band))
+                if ceiling is not None:
+                    cap = min(cap, ceiling)
                 reason = "daylight_raising"
+                start = cur if new.raised_from is None else new.raised_from
+                new = replace(new, raised_from=start, raised_at=time.monotonic, ceiling=ceiling)
             else:
                 cap = cur
-                reason = "daylight_within_deadband" if cur < base else "daylight_at_base"
+                if cur >= base:
+                    reason = "daylight_at_base"
+                elif lux < cfg.target_lux:
+                    reason = "daylight_overshoot_limit"
+                else:
+                    reason = "daylight_within_deadband"
             if ctx.lights_on == 0:
                 reason = "daylight_lights_off_observe"
             status = STATUS_ACTIVE
@@ -307,7 +331,8 @@ class DaylightModifier:
         persisted cap, else the brightness the Auto path set last (never a
         scenario value, DL-PRD-17), else the base."""
         persisted, persisted_at = state.persisted_cap, state.persisted_at
-        state = replace(state, persisted_cap=None, persisted_at=None)  # used once
+        # the persisted cap is used once; an overshoot limit is not carried over
+        state = replace(state, persisted_cap=None, persisted_at=None, raised_from=None, raised_at=None, ceiling=None)
         if persisted is not None and persisted_at is not None:
             age = (time.now - persisted_at).total_seconds()
             if 0 <= age <= PERSISTED_CAP_MAX_AGE:

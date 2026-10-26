@@ -14,7 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry, async_
 from custom_components.hcl_lighting import DATA_OVERRIDE_MANAGERS
 from custom_components.hcl_lighting.const import COMMAND_TIMEOUT_SECONDS, CONF_MAX_BRIGHTNESS, DOMAIN
 
-from .support.entries import CT_ATTRS, DIM, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity
+from .support.entries import CT_ATTRS, DIM, SELECT, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, settle, setup_entry, setup_two_dim_lights, start_select, switch_entity, wait_until
 from .support.lights import FakeLights
 
 
@@ -219,12 +219,10 @@ async def test_rm_t14_hanging_fast_mode_command_is_a_background_task(
     lights.hang["light.a"] = asyncio.Event()
     result = await controller.apply_batch(["light.a"], 50, 3000, transition=0, fast_mode=True)
     assert result.updated == ["light.a"]
-    await settle()
-    assert lights.for_light("light.a")
+    await wait_until(lambda: lights.for_light("light.a"))
     # Home Assistant does not wait for it (start, stop, block_till_done)
     waiting = hass.async_create_task(hass.async_block_till_done())
-    await settle()
-    assert waiting.done()
+    await wait_until(waiting.done)
     lights.release()
     await hass.async_block_till_done(wait_background_tasks=True)
 
@@ -238,7 +236,7 @@ async def test_rm_t14_fast_mode_command_with_context_of_a_reloaded_instance(
     om = core(hass, entry).override_manager
     event = lights.hang["light.a"] = asyncio.Event()
     await controller.apply_batch(["light.a"], 50, 3000, transition=30, fast_mode=True)
-    await settle()
+    await wait_until(lambda: lights.for_light("light.a"))
     command = lights.for_light("light.a")[-1]
     await _reload(hass, entry, freezer)
     assert core(hass, entry).controller is not controller
@@ -273,15 +271,12 @@ async def test_rm_b37_setup_does_not_wait_for_light_commands(hass, no_frontend_r
     done = task.done()
     # the first update runs in the background and sends at once (RM-B22);
     # its command still hangs
-    for _ in range(20):
-        if lights.for_light("light.a"):
-            break
-        await settle()
-    sent = bool(lights.for_light("light.a"))
-    lights.release()
+    try:
+        await wait_until(lambda: lights.for_light("light.a"), "the first update must send at once (RM-B22)")
+    finally:
+        lights.release()
     assert await task
     assert done, "setup waited for the light command"
-    assert sent
     assert hass.states.get(SWITCH).state == "on"
     await hass.async_block_till_done(wait_background_tasks=True)
 

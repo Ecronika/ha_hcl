@@ -11,7 +11,7 @@ from pytest_homeassistant_custom_component.common import async_mock_service
 from custom_components.hcl_lighting import DATA_OVERRIDE_MANAGERS
 from custom_components.hcl_lighting.const import REENGAGE_TRANSITION_SECONDS, UNREACHABLE_GRACE_SECONDS
 
-from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
+from .support.entries import CT_ATTRS, SWITCH, calls_for, core, hcl_on, light_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
@@ -38,14 +38,6 @@ async def noon(hass: HomeAssistant, freezer):
     await hass.config.async_set_time_zone("Europe/Berlin")
     freezer.move_to("2026-01-15 11:00:00+00:00")
     return freezer
-
-
-async def _light_on(hass, options=None):
-    calls = async_mock_service(hass, "light", "turn_on")
-    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"], options=options)
-    await hcl_on(hass)
-    return calls, entry
 
 
 ON = {"brightness": 128, "color_temp_kelvin": 4000, **CT_ATTRS}  # 50 %, not the HCL value
@@ -212,7 +204,7 @@ async def test_f07_manual_control_fires_events(hass, no_frontend_registration):
     # @callback: runs in the event loop in order (a plain function would run in
     # the executor, where the order of two events is not guaranteed)
     hass.bus.async_listen("hcl_lighting_manual_control", callback(lambda event: events.append(event)))
-    _calls, entry = await _light_on(hass)
+    _calls, entry = await light_on(hass)
     om = core(hass, entry).override_manager
     om.set_override("light.a")
     om.set_override("light.a")  # no second event without change

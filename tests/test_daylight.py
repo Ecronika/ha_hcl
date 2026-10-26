@@ -265,7 +265,6 @@ async def test_rm_e02_early_turn_on_after_start_uses_the_persisted_cap(hass, has
     await hass.async_block_till_done()
     sw = switch_entity(hass)
     sw.controller.hcl_active = True  # switched on, before its first cycle
-    sw._is_on = True
     await sw._re_evaluate_targets_and_listeners()
     set_light(hass, "light.a", "on", **ON)
     await hass.async_block_till_done()

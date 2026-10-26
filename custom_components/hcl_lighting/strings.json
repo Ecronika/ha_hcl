@@ -103,7 +103,7 @@
                             "daylight_unavailable_grace": "Grace for a missing sensor value"
                         },
                         "data_description": {
-                            "daylight_deadband_lux": "Lux around the target without a change (empty: 5 % of the target, at least 20 lx).",
+                            "daylight_deadband_lux": "Lux above the target without a reduction; below the target the light is raised again (empty: 5 % of the target, at least 20 lx).",
                             "daylight_smoothing": "Time constant of the lux filter in seconds (default 60).",
                             "daylight_response_band_lux": "Lux deviation that uses the full rate (empty: the target, 50–300 lx); smaller deviations change the brightness more slowly.",
                             "daylight_max_rate": "Percent points per minute (default 11), independent of the update interval up to 60 s (longer intervals: at most this value per update).",
