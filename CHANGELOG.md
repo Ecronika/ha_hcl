@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1b1] - 2026-10-25
+First pre-release (beta) of 0.8.1: the daylight compensation raises the light again as soon as the room is below the target (RM-E02-32, from the field test), plus internal clean-up (RM-T25, RM-T27, RM-T29, RM-T31). The minimum Home Assistant version stays 2024.7.
+
+### Changed
+- **Daylight compensation: dead band only above the target** (RM-E02-32): below the target the brightness is raised again at once (before: only below target − dead band, e.g. below 100 lx with a target of 120 lx). In the field test the kitchen stayed at 34 % instead of 70 % for about 75 minutes at 109 lx with a target of 120 lx. Above the target the dead band still prevents small reductions, so the room now settles between the target and target + dead band. For a sensor that sees the lights strongly (one percent of brightness changes the reading by more than the dead band), a raise just below the target that makes the room too bright at once is not repeated until the room is clearly darker (below target − dead band) – the light does not swing by one step. The help text of *Dead band* says this now. No new option.
+
+### Internal
+- The scenario after a restart or reload is read with one rule for the first light command and the mode select (RM-T27); a damaged stored end time no longer keeps the mode select from loading.
+- *HCL active* is held in one place (the controller) instead of two (RM-T29).
+- Tests: one helper for "light on, HCL on" instead of five copies, waiting for the expected event instead of a fixed number of rounds where that is unambiguous (RM-T31); the card tests are split by topic into four files with shared fixtures and helpers (RM-T25).
+
 ## [0.8.0] - 2026-10-25
 Summary of all changes since 0.7.1; the details are in the entries of the pre-releases 0.8.0b1 to 0.8.0b7 below (RM-… numbers refer to the roadmap). The minimum Home Assistant version stays 2024.7.
 

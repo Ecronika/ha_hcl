@@ -6,20 +6,11 @@ import pytest
 
 from datetime import timedelta
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_mock_service
 
 from custom_components.hcl_lighting.const import DOMAIN
 
-from .support.entries import CT_ATTRS, DIM, core, hcl_on, set_light, setup_entry, switch_entity
+from .support.entries import DIM, core, light_on, set_light, switch_entity
 from .support.lights import FakeLights
-
-
-async def _light_on(hass, options=None):
-    calls = async_mock_service(hass, "light", "turn_on")
-    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"], options=options)
-    await hcl_on(hass)
-    return calls, entry
 
 
 # ---------------------------------------------------------------- F-07 event, logbook, diagnostics
@@ -27,7 +18,7 @@ async def _light_on(hass, options=None):
 async def test_f07_diagnostics(hass, no_frontend_registration):
     from custom_components.hcl_lighting.diagnostics import async_get_config_entry_diagnostics
 
-    _calls, entry = await _light_on(hass)
+    _calls, entry = await light_on(hass)
     diag = await async_get_config_entry_diagnostics(hass, entry)
     assert diag["targets"] == ["light.redacted_1"]  # 0.7.0b12: pseudonyms (RM-B32)
     assert diag["lights"]["light.redacted_1"]["capability"] == "ct"

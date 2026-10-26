@@ -503,3 +503,101 @@ def test_rm_e02_31_response_band_follows_the_target_unless_set(target, band, exp
     if band is not None:
         options["daylight_response_band_lux"] = band
     assert DaylightConfig.from_options(options).response_band_lux == expected
+
+
+# ---------------------------------------------------------------- RM-E02-32 (Praxistest 25.10.2026)
+@pytest.mark.parametrize(
+    ("lux", "reason", "direction"),
+    [
+        (490, "daylight_raising", 1),  # below the target, within the former lower dead band
+        (470, "daylight_raising", 1),
+        (500, "daylight_within_deadband", 0),  # at the target: no change
+        (520, "daylight_within_deadband", 0),  # dead band only above the target
+        (530, "daylight_reducing", -1),
+    ],
+)
+def test_rm_e02_32_dead_band_only_above_the_target(lux, reason, direction):
+    """Asymmetric dead band: below the target the light is raised again (too
+    dark is the main reason to switch daylight control off); above the target
+    the dead band still prevents small reductions."""
+    loop = Loop(lux=2000)
+    cap = _reduced(loop)
+    loop.lux = lux
+    for _ in range(20):  # let the 60-s filter follow the new value
+        loop.step()
+    before = loop.cap
+    result = loop.step()
+    assert result.modifier("daylight").reason == reason
+    change = loop.cap - before
+    assert (change > 0) - (change < 0) == direction, (cap, before, loop.cap)
+
+
+def test_rm_e02_32_raising_is_proportional_to_the_deficit():
+    """The rate grows with the distance to the target (response band), so a
+    small deficit gives a small step."""
+    steps = {}
+    for lux in (490, 350):
+        loop = Loop(lux=2000)
+        _reduced(loop)
+        loop.lux = lux
+        for _ in range(20):
+            loop.step()
+        before = loop.cap
+        loop.step()
+        steps[lux] = loop.cap - before
+    rate = 11.0 * 27 / 60
+    assert steps[490] == pytest.approx(rate * 10 / 300, rel=0.05)
+    assert steps[350] == pytest.approx(rate * 150 / 300, rel=0.05)
+
+
+def test_rm_e02_32_room_model_returns_to_the_target_from_just_below():
+    """Praxistest 25.10.2026: the daylight falls so that the room ends up just
+    below the target (within the former lower dead band) - the light is raised
+    until the target is reached instead of staying too dark for hours."""
+    run = _room(2, 60, hours=3, daylight=lambda t: 600.0 if t < 3600 else 485.0)
+    assert min(c for t, _lux, c in run if t < 3600) == 3  # fully reduced first
+    last_hour = [lux for t, lux, _c in run if t > run[-1][0] - 3600]
+    assert min(last_hour) >= 495  # 0.8.0: about 491 lx for good
+
+
+@pytest.mark.parametrize("k", [35, 45, 60])
+@pytest.mark.parametrize("sensor_period", [5, 60])
+def test_rm_e02_32_strongly_lit_sensor_does_not_swing_by_one_step(k, sensor_period):
+    """A sensor that sees the lights strongly (one percent of brightness more
+    than the dead band): raising just below the target overshoots once, then
+    the loop stays below the target instead of swinging by one step every few
+    minutes (same as 0.8.0)."""
+    for daylight in range(0, 500, 20):
+        run = _room(k, sensor_period, hours=3, daylight=lambda t, d=daylight: float(d))
+        commands = [c for t, _lux, c in run if t > run[-1][0] - 3600]
+        assert _direction_changes(commands) <= 2, (daylight, min(commands), max(commands))
+
+
+def _settle(loop: Loop, lux: float, steps: int = 20):
+    loop.lux = lux
+    for _ in range(steps):
+        result = loop.step()
+    return result
+
+
+@pytest.mark.parametrize(("pause", "reason"), [(3, "daylight_overshoot_limit"), (30, "daylight_raising")])
+def test_rm_e02_32_only_a_reduction_right_after_a_raise_limits_raising(pause, reason):
+    """A reduction within 10 min of a raise counts as its overshoot: just below
+    the target the light is then raised only up to where that raise began. A
+    later reduction (more daylight) does not limit the next raise."""
+    loop = Loop(cfg=config(smoothing_s=0), lux=2000)  # no filter lag
+    _reduced(loop)
+    _settle(loop, 490, steps=3)  # raising
+    start = loop.state.raised_from
+    assert start is not None
+    _settle(loop, 510, steps=pause)  # within the dead band
+    _settle(loop, 700, steps=3)  # reducing
+    assert loop.cap < start
+    result = _settle(loop, 490, steps=80)
+    assert result.modifier("daylight").reason == reason
+    if reason == "daylight_overshoot_limit":
+        assert loop.cap == start  # back to where the overshooting raise began
+    else:
+        assert loop.cap > start
+    result = _settle(loop, 400, steps=1)  # clearly below the target: raised in any case
+    assert result.modifier("daylight").reason == "daylight_raising"

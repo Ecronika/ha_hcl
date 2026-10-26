@@ -103,7 +103,7 @@
                             "daylight_unavailable_grace": "Haltezeit bei fehlendem Sensorwert"
                         },
                         "data_description": {
-                            "daylight_deadband_lux": "Lux um den Zielwert ohne Änderung (leer: 5 % des Zielwerts, mindestens 20 lx).",
+                            "daylight_deadband_lux": "Lux über dem Zielwert ohne Absenkung; unter dem Zielwert wird wieder angehoben (leer: 5 % des Zielwerts, mindestens 20 lx).",
                             "daylight_smoothing": "Zeitkonstante des Luxfilters in Sekunden (Standard 60).",
                             "daylight_response_band_lux": "Abweichung in Lux, ab der die volle Geschwindigkeit gilt (leer: der Zielwert, 50–300 lx); kleinere Abweichungen ändern die Helligkeit langsamer.",
                             "daylight_max_rate": "Prozentpunkte pro Minute (Standard 11), unabhängig vom Aktualisierungsintervall bis 60 s (längere Intervalle: höchstens dieser Wert je Aktualisierung).",

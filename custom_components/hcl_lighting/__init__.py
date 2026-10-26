@@ -19,7 +19,6 @@ from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.restore_state import async_get as async_get_restore_state
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
-from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -42,7 +41,6 @@ from .const import (
     DEFAULT_OVERRIDE_TIMEOUT,
     DEFAULT_OVERRIDE_RESET_ON_OFF,
     DEFAULT_PERSIST_OVERRIDES,
-    HCL_MODES,
     MODE_AUTO,
     EVENT_MANUAL_CONTROL,
     SERVICE_UPDATE_CURVE,
@@ -61,6 +59,7 @@ from .logic.daylight_compensation import DaylightCapStore, DaylightConfig, Dayli
 from .logic.environmental_controller import EnvironmentalController
 from .logic.light_controller import CommandTracker, HCLLightController
 from .runtime import AppliedConfig, HCLConfigEntry, HCLRuntimeData, loaded_runtime
+from .select import restored_scenario
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -129,22 +128,18 @@ def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) ->
 def _restored_mode(hass: HomeAssistant, entry: ConfigEntry) -> str:
     """Last scenario of the mode select (Auto if unknown or a timed scenario has ended).
 
-    Mirrors HCLModeSelect's own restore so the controller already has the right
-    scenario when the HCL switch sends its first update (e.g. no light command
-    in Guest mode after a reload).
+    Read with HCLModeSelect's rule (restored_scenario) so the controller already
+    has the right scenario when the HCL switch sends its first update (e.g. no
+    light command in Guest mode after a reload).
     """
     entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
     if entity_id is None:
         return MODE_AUTO
     stored = async_get_restore_state(hass).last_states.get(entity_id)
-    if stored is None or stored.state.state not in HCL_MODES:
+    if stored is None:
         return MODE_AUTO
-    extra = stored.extra_data.as_dict() if stored.extra_data is not None else {}
-    until_iso = extra.get("until")
-    until = dt_util.parse_datetime(until_iso) if isinstance(until_iso, str) else None
-    if until is not None and until <= dt_util.utcnow():
-        return MODE_AUTO
-    return stored.state.state
+    extra = stored.extra_data.as_dict() if stored.extra_data is not None else None
+    return restored_scenario(stored.state, extra)[0]
 
 
 _POINT_SCHEMA = vol.Schema(

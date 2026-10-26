@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraData, RestoreEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -44,6 +45,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_ad
     entry.runtime_data.mode_select = select
     async_add_entities([select])
 
+def restored_scenario(state: State | None, extra: Mapping[str, Any] | None) -> tuple[str, datetime | None]:
+    """Scenario and end time from the stored state of the mode select: Auto if
+    unknown or the timed scenario has ended; an end time that is not a time is
+    ignored. The only rule for both the mode select and the first light command
+    after a setup (RM-T27, see _restored_mode in __init__)."""
+    if state is None or state.state not in HCL_MODES:
+        return MODE_AUTO, None
+    until_iso = (extra or {}).get("until")
+    until = dt_util.parse_datetime(until_iso) if isinstance(until_iso, str) else None
+    if until is not None and until <= dt_util.utcnow():
+        # The timed scenario ended while Home Assistant was not running
+        return MODE_AUTO, None
+    return state.state, until
+
+
 class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
     """Select entity for the HCL scenario (mode)."""
 
@@ -74,21 +90,14 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
         await super().async_added_to_hass()
         self.async_on_remove(self._stop_timer)
 
-        # Restore State
+        # Restore State (same rule as for the first light command, RM-T27)
         if last_state := await self.async_get_last_state():
-            if last_state.state in HCL_MODES:
-                until = None
-                if (extra := await self.async_get_last_extra_data()) is not None:
-                    until_iso = extra.as_dict().get("until")
-                    until = dt_util.parse_datetime(until_iso) if until_iso else None
-                if until is not None and until <= dt_util.utcnow():
-                    # The timed scenario ended while Home Assistant was not running
-                    self._set_mode(MODE_AUTO, announce=False)
-                else:
-                    self._set_mode(last_state.state, announce=False)
-                    if until is not None:
-                        self._schedule_end(until)
-                _LOGGER.debug("Restored HCL Mode to %s", self._attr_current_option)
+            extra = await self.async_get_last_extra_data()
+            mode, until = restored_scenario(last_state, extra.as_dict() if extra is not None else None)
+            self._set_mode(mode, announce=False)
+            if until is not None:
+                self._schedule_end(until)
+            _LOGGER.debug("Restored HCL Mode to %s", self._attr_current_option)
 
     def _set_mode(self, option: str, announce: bool = True) -> None:
         self._controller.set_active_mode(option, announce=announce)

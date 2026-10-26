@@ -12,19 +12,11 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.hcl_lighting.const import DOMAIN, MODE_SLEEP, SCENARIO_DEFAULTS
 
-from .support.entries import ADAPT, CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
+from .support.entries import ADAPT, CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, light_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 from .support.lights import FakeLights
 
 
 ADAPT_B = "switch.hcl_adapt_brightness"
-
-
-async def _light_on(hass, options=None):
-    calls = async_mock_service(hass, "light", "turn_on")
-    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"], options=options)
-    await hcl_on(hass)
-    return calls, entry
 
 
 TARGET_B = "sensor.hcl_target_brightness"
@@ -95,6 +87,32 @@ async def test_a07_timed_scenario_restored(hass, no_frontend_registration, minut
     assert hass.states.get(SELECT).state == expected
 
 
+@pytest.mark.parametrize(
+    ("until", "expected", "timed"),
+    [
+        (timedelta(minutes=-5), "auto", False),
+        (timedelta(minutes=20), "relax", True),
+        (None, "relax", False),
+        (12345, "relax", False),  # not a time (damaged store): no end, no error
+        ("not a time", "relax", False),
+    ],
+)
+async def test_rm_t27_scenario_is_restored_once_for_controller_and_select(
+    hass, no_frontend_registration, until, expected, timed
+):
+    """One restore path: the controller (first light command) and the mode
+    select show the same scenario and end time."""
+    if isinstance(until, timedelta):
+        until = (dt_util.utcnow() + until).isoformat()
+    mock_restore_cache_with_extra_data(hass, [(State(SELECT, "relax"), {"until": until})])
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"scenario_duration": 30})
+    state = hass.states.get(SELECT)
+    assert state.state == expected
+    assert core(hass, entry).controller.active_mode == expected
+    assert (state.attributes["until"] is not None) == timed
+
+
 async def test_a07_no_duration_by_default(hass, no_frontend_registration):
     set_light(hass, "light.a", "off", **CT_ATTRS)
     await setup_entry(hass, ["light.a"])
@@ -105,21 +123,21 @@ async def test_a07_no_duration_by_default(hass, no_frontend_registration):
 # ---------------------------------------------------------------- Ä-18
 @pytest.mark.usefixtures("evening")
 async def test_a18_scenario_change_uses_the_update_transition_by_default(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass)
+    calls, _entry = await light_on(hass)
     await select_scenario(hass, "focus")
     assert calls_for(calls, "light.a")[-1].data["transition"] == 20
 
 
 @pytest.mark.usefixtures("evening")
 async def test_a18_scenario_transition_option(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass, options={"scenario_transition": 2})
+    calls, _entry = await light_on(hass, options={"scenario_transition": 2})
     await select_scenario(hass, "focus")
     assert calls_for(calls, "light.a")[-1].data["transition"] == 2
 
 
 @pytest.mark.usefixtures("evening")
 async def test_a18_long_scenario_transition_is_not_cut_short(hass, no_frontend_registration, freezer):
-    calls, _entry = await _light_on(hass, options={"scenario_transition": 120})
+    calls, _entry = await light_on(hass, options={"scenario_transition": 120})
     await select_scenario(hass, "relax")
     assert calls_for(calls, "light.a")[-1].data["transition"] == 120
     calls.clear()
@@ -131,7 +149,7 @@ async def test_a18_long_scenario_transition_is_not_cut_short(hass, no_frontend_r
 
 @pytest.mark.usefixtures("evening")
 async def test_a18_restore_after_reload_is_no_scenario_change(hass, no_frontend_registration):
-    calls, entry = await _light_on(hass, options={"scenario_transition": 2})
+    calls, entry = await light_on(hass, options={"scenario_transition": 2})
     await select_scenario(hass, "focus")
     set_light(hass, "light.a", "on", brightness=10, color_temp_kelvin=3000, **CT_ATTRS)
     await hass.async_block_till_done()
@@ -145,7 +163,7 @@ async def test_a18_restore_after_reload_is_no_scenario_change(hass, no_frontend_
 # ---------------------------------------------------------------- Ä-04 night light
 @pytest.mark.usefixtures("evening")
 async def test_a04_night_light_dims_lights_that_are_on(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass)
+    calls, _entry = await light_on(hass)
     await select_scenario(hass, "night_light")
     data = calls_for(calls, "light.a")[-1].data
     assert (data["brightness_pct"], data["color_temp_kelvin"]) == (3, 2200)
@@ -169,7 +187,7 @@ async def test_a04_light_switched_on_in_night_light_gets_night_values(hass, no_f
 
 @pytest.mark.usefixtures("evening")
 async def test_a04_night_light_values_are_configurable(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass, options={"night_light_brightness": 8, "night_light_kelvin": 2000})
+    calls, _entry = await light_on(hass, options={"night_light_brightness": 8, "night_light_kelvin": 2000})
     await select_scenario(hass, "night_light")
     data = calls_for(calls, "light.a")[-1].data
     assert (data["brightness_pct"], data["color_temp_kelvin"]) == (8, 2000)
@@ -179,7 +197,7 @@ async def test_a04_night_light_values_are_configurable(hass, no_frontend_registr
 @pytest.mark.usefixtures("_at_sleep_time")
 @pytest.mark.parametrize("old", [{}, {"scenario_limits": False}])
 async def test_rm_r01_scenarios_always_within_min_max(hass, no_frontend_registration, old):
-    calls, _entry = await _light_on(hass, options={"min_brightness": 50, "max_brightness": 60, **old})
+    calls, _entry = await light_on(hass, options={"min_brightness": 50, "max_brightness": 60, **old})
     await select_scenario(hass, "focus")  # 100 %
     assert _last(calls)["brightness_pct"] == 60
     await select_scenario(hass, "relax")  # 40 %
@@ -190,7 +208,7 @@ async def test_rm_r01_scenarios_always_within_min_max(hass, no_frontend_registra
 
 @pytest.mark.usefixtures("_at_sleep_time")
 async def test_rm_r01_night_light_is_not_limited(hass, no_frontend_registration):
-    calls, _entry = await _light_on(hass, options={"min_brightness": 10})
+    calls, _entry = await light_on(hass, options={"min_brightness": 10})
     await select_scenario(hass, "night_light")
     assert _last(calls)["brightness_pct"] == 3
     assert hass.states.get(TARGET_B).state == "3"
@@ -200,7 +218,7 @@ async def test_rm_r01_night_light_is_not_limited(hass, no_frontend_registration)
 @pytest.mark.usefixtures("_at_sleep_time")
 @pytest.mark.parametrize("old", [{}, {"brightness_scaling": True}])
 async def test_rm_r02_min_max_only_clip(hass, no_frontend_registration, old):
-    calls, _entry = await _light_on(hass, options={"min_brightness": 20, "max_brightness": 60, **old})
+    calls, _entry = await light_on(hass, options={"min_brightness": 20, "max_brightness": 60, **old})
     assert _last(calls)["brightness_pct"] == 20  # curve 10 % clipped (scaled: 24 %)
     assert hass.states.get(TARGET_B).state == "20"
     attrs = hass.states.get(SENSOR).attributes
@@ -215,7 +233,7 @@ async def test_rm_r02_min_max_only_clip(hass, no_frontend_registration, old):
 @pytest.mark.parametrize("mode", ["sleep", "night_light"])
 @pytest.mark.parametrize("old", [{}, {"night_end_at_wake": False}])
 async def test_rm_r03_night_modes_end_at_the_wake_time(hass, no_frontend_registration, freezer, mode, old):
-    await _light_on(hass, options=old or None)
+    await light_on(hass, options=old or None)
     await select_scenario(hass, mode)
     until = dt_util.parse_datetime(hass.states.get(SELECT).attributes["until"])
     assert dt_util.as_local(until).strftime("%H:%M") == "07:00" and until > dt_util.utcnow()
@@ -227,7 +245,7 @@ async def test_rm_r03_night_modes_end_at_the_wake_time(hass, no_frontend_registr
 
 @pytest.mark.usefixtures("_at_sleep_time")
 async def test_rm_r03_duration_zero_keeps_the_night_mode(hass, no_frontend_registration, freezer):
-    await _light_on(hass)
+    await light_on(hass)
     await hass.services.async_call(
         DOMAIN, "set_scenario", {"entity_id": SELECT, "scenario": "night_light", "duration": 0}, blocking=True
     )

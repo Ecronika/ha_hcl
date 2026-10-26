@@ -6,6 +6,8 @@ import asyncio
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
+from .entries import wait_until
+
 
 def _entities(call: ServiceCall) -> list[str]:
     ids = call.data.get("entity_id") or []
@@ -64,8 +66,4 @@ class FakeLights:
             event.set()
 
     async def wait_for_calls(self, n: int) -> None:
-        for _ in range(1000):
-            if len(self.calls) >= n:
-                return
-            await asyncio.sleep(0)  # independent of the (possibly frozen) clock
-        raise AssertionError(f"expected {n} light calls, got {len(self.calls)}")
+        await wait_until(lambda: len(self.calls) >= n, f"expected {n} light calls, got {len(self.calls)}")

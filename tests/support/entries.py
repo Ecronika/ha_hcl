@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_mock_service
 
 from custom_components.hcl_lighting.const import DOMAIN
 from custom_components.hcl_lighting.runtime import HCLRuntimeData
@@ -86,14 +87,37 @@ def calls_for(calls, entity_id: str) -> list:
 
 
 async def settle(rounds: int = 100) -> None:
-    """Let waiting tasks run (asyncio.sleep(0) works with a frozen clock)."""
+    """Let waiting tasks run (asyncio.sleep(0) works with a frozen clock).
+
+    For a state that must hold afterwards (e.g. nothing sent, tracking back
+    to before); to wait for something to happen use wait_until (RM-T31)."""
     for _ in range(rounds):
         await asyncio.sleep(0)
+
+
+async def wait_until(condition: Callable[[], object], message: str = "condition not reached") -> None:
+    """Let waiting tasks run until the condition holds (event driven, works
+    with a frozen clock; block_till_done would wait for a hanging command)."""
+    for _ in range(1000):
+        if condition():
+            return
+        await asyncio.sleep(0)
+    raise AssertionError(message)
 
 
 async def hcl_on(hass: HomeAssistant) -> None:
     await hass.services.async_call("switch", "turn_on", {"entity_id": SWITCH}, blocking=True)
     await hass.async_block_till_done()
+
+
+async def light_on(hass: HomeAssistant, options: dict | None = None):
+    """light.a on at 100 % and 6500 K, an instance for it with HCL on; returns
+    (recorded light.turn_on calls, entry)."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6500, **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options=options)
+    await hcl_on(hass)
+    return calls, entry
 
 
 async def select_scenario(hass: HomeAssistant, option: str) -> None:
