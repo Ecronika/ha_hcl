@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-10-27
+Summary of all changes since 0.8.0; the details are in the entry of the pre-release 0.8.1b1 below (RM-… numbers refer to the roadmap). No code change compared to 0.8.1b1. The minimum Home Assistant version stays 2024.7. 0.9.0 is planned to require Home Assistant 2024.11, so this is likely the last release for 2024.7 to 2024.10.
+
+### Changed
+- **Daylight compensation: dead band only above the target** (RM-E02-32): below the target the brightness is raised again at once (before: only below target − dead band). Above the target the dead band still prevents small reductions. For a sensor that sees the lights strongly, a raise just below the target that makes the room too bright at once is not repeated until the room is clearly darker, so the light does not swing by one step. No new option.
+
+### Fixed
+- A damaged stored end time of a timed scenario no longer keeps the mode select from loading (RM-T27).
+
+### Internal
+- One rule for restoring the scenario (RM-T27), *HCL active* held in one place (RM-T29), shared test helpers and event-driven waits (RM-T31), card tests split by topic (RM-T25).
+
 ## [0.8.1b1] - 2026-10-25
 First pre-release (beta) of 0.8.1: the daylight compensation raises the light again as soon as the room is below the target (RM-E02-32, from the field test), plus internal clean-up (RM-T25, RM-T27, RM-T29, RM-T31). The minimum Home Assistant version stays 2024.7.
 
