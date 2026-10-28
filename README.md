@@ -38,7 +38,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 - **Manual control**: HCL pauses a light when you change it yourself and resumes later (see [Manual control](#manual-control)).
 - **Brightness and colour temperature separately**: Two switches per instance let HCL adapt only the colour temperature, only the brightness or both.
 - **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K).
-- **Instant-On**: Lights receive the HCL values right after they are switched on, without transition (not in Guest mode; a light switched on during Sleep counts as manual control).
+- **Instant-On**: Lights receive the HCL values right after they are switched on, without transition (a light switched on during Sleep counts as manual control).
 - **Daylight compensation** (optional): an indoor lux sensor lowers the brightness in Auto when there is enough daylight (see [Daylight compensation](#4-daylight-compensation-optional)).
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
 - **Services**: apply now, set or release manual control, set a scenario with a duration, read the curve (see [Services](#services)).
@@ -61,7 +61,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 2. Search for **"HCL Lighting"**.
 3. Name your instance (e.g. "Living Room"), select the lights (at least one target) and set the wake and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant itself, with the rules of the installed version (the same as for light actions). Typically hidden lights and configuration/diagnostic lights reached through a device or area (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Details follow the installed version, e.g. whether a configuration/diagnostic light that carries a selected label itself is included. Lights given directly are always used (light groups are expanded to their members; Hue room/zone groups are skipped).
 
-**Requirements**: Home Assistant **2024.7** or newer.
+**Requirements**: Home Assistant **2024.12** or newer.
 
 ### 3. Setup Dashboard Card
 Edit a dashboard → **Add card** → search for **HCL Curve Card**. The visual editor lets you pick the instance and the view. After an instance has been added, a one-time notification shows the YAML with the exact entity ID.
@@ -130,7 +130,7 @@ An indoor **lux sensor** lowers the brightness in **Auto** when there is enough 
 
 *   **Lux sensor** (device class illuminance) and **target illuminance at the sensor** (50–2000 lx) are required when it is on. The target is a control value at the sensor position, not a lighting standard value (a workplace still has to be planned and measured on its own).
 *   The brightness is **never above the curve** and **never below the minimum brightness**; the **colour temperature is not changed**. HCL still never switches a light on or off.
-*   **Only in Auto**: in a scenario (Focus, Relax, Cleaning, Night light, Sleep, Guest) the scenario values apply; the reduction is kept and used again when Auto returns within 2 hours.
+*   **Only in Auto**: in a scenario (Focus, Relax, Cleaning, Night light, Sleep) the scenario values apply; the reduction is kept and used again when Auto returns within 2 hours.
 *   The reduction changes **at most 11 % points per minute** (independent of the update interval up to 60 s; with a longer interval at most 11 % points per update, so it follows more slowly), less for small deviations; a **smoothing** of the sensor value (60 s) and a **dead band above the target** (5 % of the target, at least 20 lx) prevent small reductions. Below the target the brightness is raised again (too dark is worse than a little too bright); only if raising just below the target made the room too bright at once (a sensor that sees the lights strongly), HCL does not repeat it until the room is clearly darker.
 *   **No change while it has no effect**: while all lights that are on are manually controlled (or returning to HCL), while *Adapt brightness* is off and while *HCL active* is off, the reduction is held. After more than 2 hours it starts again (from the brightness the lights had in Auto, or from the curve). Lights that are off keep following the daylight, so a light switched on starts dimmed.
 *   **Sensor without a value** (unavailable, unknown, not a number, or no report for 60 min): the reduction is held for 5 minutes, then the brightness returns slowly to the curve. A single bad value changes nothing. For sensors that report only on a change, set *Sensor stale after* to 0.
@@ -158,8 +158,8 @@ Each instance is a device with these entities (IDs of new installations; existin
 | HCL active | `switch.living_room_hcl_active` | HCL on/off. Disabling this entity stops the instance (the actions `apply`, `set_manual_control` and `set_scenario` then report it). Attribute `manual_control` lists the paused lights. Its attributes (`manual_control`, `target_entities`, `calculated_*`) are live values and not stored in the history; the history of the values is in the target sensors, manual control in the logbook. |
 | Adapt brightness | `switch.living_room_adapt_brightness` | Off: HCL leaves the brightness alone (Sleep still switches lights off) |
 | Adapt colour temperature | `switch.living_room_adapt_colour_temperature` | Off: HCL leaves the colour temperature alone |
-| Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning, Guest (deprecated; also the chips of the card). Attribute `until`: end of a timed scenario. |
-| Target brightness | `sensor.living_room_target_brightness` | Brightness HCL sends now (%, scenario, limits and daylight compensation included; Sleep 0 %, Guest `unknown`) |
+| Scenario | `select.living_room_scenario` | Auto, Sleep, Night light, Focus, Relax, Cleaning (also the chips of the card). Attribute `until`: end of a timed scenario. |
+| Target brightness | `sensor.living_room_target_brightness` | Brightness HCL sends now (%, scenario, limits and daylight compensation included; Sleep 0 %) |
 | Target colour temperature | `sensor.living_room_target_colour_temperature` | Colour temperature HCL sends now (K) |
 | Curve data | `sensor.living_room_curve_data` | Data for the card (state: time of the last change of the curve, the scenario or an adapt switch). Attributes include `instance` (name of the instance, card title), `preview_active` (the lights follow an unsaved preview), `wake_time`, `sleep_time` and `default_points` (default curve for these times, used by the card's **Default curve** button). |
 
@@ -168,7 +168,7 @@ The name part of the IDs follows the language Home Assistant used when the entit
 ### Scenarios
 *   **Auto**: follow the curve.
 *   **Focus / Relax / Cleaning**: fixed values (configurable, optionally with a duration), within the min/max brightness.
-*   **Guest** (deprecated, removed in 0.9.0): HCL sends no updates – like switching *HCL active* off, except that `apply` is rejected and manual control is still detected. Selecting it logs a warning and shows a repair issue; switch *HCL active* off instead.
+*   **Guest** was removed in 0.9.0 (deprecated since 0.8.0): switch *HCL active* off instead. An instance that was left in Guest starts in Auto with *HCL active* off.
 *   **Sleep**: lights that are on when Sleep is selected are faded off. A light switched on manually during Sleep counts as manual control and stays on until it is switched off (or the timeout expires).
 *   **Night light**: dim, warm light (default 3 % / 2200 K). Lights that are on, or are switched on during the night, get these values; HCL never switches a light on or off.
 
@@ -188,7 +188,7 @@ By default a light that is switched on receives the HCL values immediately, even
 ### Services
 | Service | Fields | Effect |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. The lights of the instance are resolved at the time of the call (areas, devices, labels, groups), also while *HCL active* is off. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. Not available in Guest mode. A transition longer than the update transition is not interrupted by the update cycles. Sends the values at the time of the call; ends with an error if a light command failed or a light did not answer within 10 s (the other lights are updated). |
+| `hcl_lighting.apply` | `entity_id` (any entity of the instance), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sends the current values now to the lights that are on. The lights of the instance are resolved at the time of the call (areas, devices, labels, groups), also while *HCL active* is off. Never switches a light on; paused lights are skipped unless `release_manual_control: true`. A transition longer than the update transition is not interrupted by the update cycles. Sends the values at the time of the call; ends with an error if a light command failed or a light did not answer within 10 s (the other lights are updated). |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, default all), `manual_control` (default `true`) | Pauses the lights or hands them back to HCL |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = until changed) | Sets the scenario; a duration overrides the configured end |
 | `hcl_lighting.get_curve` | `entity_id` | Response data: `points`, `saved_points`, `preview_active`, `wake_time`, `sleep_time` |
@@ -199,7 +199,7 @@ By default a light that is switched on receives the HCL values immediately, even
 Event `hcl_lighting_manual_control` (`entity_id`, `manual_control`, `instance`, `config_entry_id`) is fired when a light starts or stops being under manual control. If the same light is adapted by two instances for the same attribute, a repair issue names the light and the instances.
 
 ### Recipes
-The examples use the YAML syntax of Home Assistant 2024.10 and later. On older versions write the steps with `service:` instead of `action:`, and in automations `trigger:` with `- platform: time` instead of `triggers:` with `- trigger: time` and `action:` instead of `actions:`.
+The examples use the current YAML syntax (`action:`, `triggers:`, `actions:`).
 
 **Switch a light on with the HCL values** (e.g. for bulbs that cannot take values while off, or a KNX/DALI gateway):
 ```yaml
@@ -210,7 +210,7 @@ data:
   brightness_pct: "{{ states('sensor.living_room_target_brightness') | int(50) }}"
   color_temp_kelvin: "{{ states('sensor.living_room_target_colour_temperature') | int(3000) }}"
 ```
-In Sleep the target brightness is 0 % (the light is switched off); in Guest mode the sensors are `unknown` and the defaults in `int(...)` are used.
+In Sleep the target brightness is 0 % (the light is switched off); while the sensors are not available (e.g. during a restart) the defaults in `int(...)` are used.
 
 **Hand all lights back to HCL at the wake time**:
 ```yaml
@@ -274,7 +274,7 @@ The curve parity test (`tests/test_curve_parity.py`) runs the card's curve maths
 
 `tests/` is organised by responsibility (e.g. `test_manual_control_detection.py`, `test_light_commands.py`, `test_config_flow.py`); the roadmap IDs stay in the test names (`test_rm_b41_…`). Shared helpers live in `tests/support/` (entries and entity IDs, the light test double `FakeLights`, curves, `timer_cycle()` for an update cycle); test modules do not import each other and do not call the scheduling internals of the switch.
 
-GitHub Actions (`.github/workflows/tests.yml`) runs Ruff (rules in `ruff.toml`), hassfest, the Home Assistant tests against the minimum supported release (2024.7.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium (pytest, pytest-asyncio and Playwright pinned). When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
+GitHub Actions (`.github/workflows/tests.yml`) runs Ruff (rules in `ruff.toml`), hassfest, the Home Assistant tests against the minimum supported release (2024.12.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.9.3), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium (pytest, pytest-asyncio and Playwright pinned). When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
 
 ---
 

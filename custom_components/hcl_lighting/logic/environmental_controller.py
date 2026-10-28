@@ -45,7 +45,7 @@ S = TypeVar("S")
 
 @dataclass(frozen=True, slots=True)
 class HCLSetpoint:
-    """Brightness (%) and colour temperature (K); None: not set (Guest)."""
+    """Brightness (%) and colour temperature (K); None: not set."""
 
     brightness: float | None
     kelvin: float | None

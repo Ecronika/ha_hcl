@@ -145,7 +145,6 @@
                     "focus": "Fokus",
                     "relax": "Entspannen",
                     "cleaning": "Putzen",
-                    "guest": "Gast",
                     "night_light": "Nachtlicht"
                 }
             }
@@ -228,7 +227,7 @@
                 },
                 "scenario": {
                     "name": "Szenario",
-                    "description": "auto, sleep, night_light, focus, relax, cleaning oder guest (abgekündigt, entfällt in 0.9.0)."
+                    "description": "auto, sleep, night_light, focus, relax oder cleaning."
                 },
                 "duration": {
                     "name": "Dauer",
@@ -252,10 +251,6 @@
             "title": "Licht in mehreren HCL-Instanzen",
             "description": "{light} wird von mehreren HCL-Instanzen gesteuert ({instances}), die dieselbe Eigenschaft anpassen. Die Instanzen überschreiben sich gegenseitig. Entferne das Licht aus einer Instanz oder schalte dort „Helligkeit anpassen“ bzw. „Farbtemperatur anpassen“ aus."
         },
-        "guest_deprecated": {
-            "title": "Szenario „Gast“ von {instance} entfällt",
-            "description": "Das Szenario Gast ist abgekündigt und entfällt in Version 0.9.0: Es wirkt wie das Ausschalten von „HCL aktiv“. Schalte stattdessen „HCL aktiv“ aus (auch in Automationen mit hcl_lighting.set_scenario) und wähle ein anderes Szenario; diese Meldung verschwindet, sobald {instance} Gast verlässt."
-        },
         "daylight_shared_sensor": {
             "title": "Luxsensor in mehreren HCL-Instanzen",
             "description": "{sensor} ist der Luxsensor der Tageslichtkompensation mehrerer aktiver HCL-Instanzen ({instances}). Zwei Regelkreise an einem Sensor arbeiten gegeneinander, wenn ihre Leuchten ihn erreichen. Verwende je Lichtzone einen eigenen, repräsentativen Sensor oder schalte die Tageslichtkompensation in allen Instanzen bis auf eine aus. Ignoriere diese Meldung, wenn die Instanzen getrennte Räume beleuchten, die der Sensor nicht sieht."
@@ -269,15 +264,11 @@
                 "night_light": "Nachtlicht",
                 "focus": "Fokus",
                 "relax": "Entspannen",
-                "cleaning": "Putzen",
-                "guest": "Gast"
+                "cleaning": "Putzen"
             }
         }
     },
     "exceptions": {
-        "guest_mode": {
-            "message": "HCL sendet im Szenario Gast keine Werte"
-        },
         "not_controlled": {
             "message": "Nicht von dieser HCL-Instanz gesteuert: {lights}"
         },

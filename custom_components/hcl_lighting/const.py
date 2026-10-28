@@ -59,7 +59,6 @@ MODE_SLEEP = "sleep"
 MODE_FOCUS = "focus"
 MODE_RELAX = "relax"
 MODE_CLEANING = "cleaning"
-MODE_GUEST = "guest"
 MODE_NIGHT_LIGHT = "night_light"
  
 HCL_MODES = [
@@ -69,7 +68,6 @@ HCL_MODES = [
     MODE_FOCUS,
     MODE_RELAX,
     MODE_CLEANING,
-    MODE_GUEST,
 ]
  
 SCENARIO_DEFAULTS = {
@@ -83,7 +81,6 @@ SCENARIO_DEFAULTS = {
     MODE_SLEEP: {"brightness": 0, "kelvin": 2000}, 
     # Dim warm light for the night; never switches lights on or off
     MODE_NIGHT_LIGHT: {"brightness": 3, "kelvin": 2200},
-    MODE_GUEST: {"brightness": None, "kelvin": None}, 
 }
 
 # v0.6.0 Options (behaviour)
@@ -160,6 +157,11 @@ def anchor_time(options, key: str) -> str:
     return str(options.get(key) or ANCHOR_DEFAULTS[key])
 
 
+# Scenario Guest: deprecated in 0.8.0, removed in 0.9.0 (RM-R12). A restored
+# Guest starts in Auto with "HCL active" off; the repair issue of 0.8.x is removed.
+REMOVED_MODE_GUEST = "guest"
+
+
 def guest_issue_id(entry_id: str) -> str:
-    """Repair issue of an instance in the deprecated scenario Guest (RM-R12)."""
+    """Repair issue of 0.8.x for an instance in the scenario Guest (RM-R12)."""
     return f"guest_deprecated_{entry_id}"

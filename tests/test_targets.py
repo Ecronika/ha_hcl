@@ -238,13 +238,13 @@ async def test_rm_b17_label_follows_the_running_home_assistant(hass, no_frontend
     config_light = ents.async_get_or_create("light", "demo", "led", config_entry=other)
     ents.async_update_entity(config_light.entity_id, entity_category=EntityCategory.CONFIG, labels={label.label_id})
     result = core(hass, entry).controller.resolve_targets({"label_id": [label.label_id]})
-    # a labelled configuration light: 2024.7 skips it, 2026.x includes it
+    # a labelled configuration light: older versions skip it, 2026.x includes it
     assert (config_light.entity_id in result) is NEW_TARGETS
 
 
 # ---------------------------------------------------------------- RM-B19
 async def test_rm_b19_targets_are_resolved(hass, no_frontend_registration):
-    """End to end on the installed Home Assistant (CI: 2024.7, 2025.7, 2025.8, current)."""
+    """End to end on the installed Home Assistant (CI: 2024.12, 2025.7, 2025.8, current)."""
     set_light(hass, "light.a", "on", **CT_ATTRS)
     set_light(hass, "light.b", "on", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a", "light.b"])

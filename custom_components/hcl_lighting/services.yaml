@@ -84,7 +84,6 @@ set_scenario:
             - focus
             - relax
             - cleaning
-            - guest
     duration:
       required: false
       selector:

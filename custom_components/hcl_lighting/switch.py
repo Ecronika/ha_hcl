@@ -134,7 +134,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         # runs in the background - the setup (also a reload) does not wait
         # for the light commands (RM-B37)
         if last_state := await self.async_get_last_state():
-            if last_state.state == STATE_ON:
+            if last_state.state == STATE_ON and not self._entry.runtime_data.start_off:
                 await self._async_start()
                 self._entry.async_create_background_task(
                     self.hass, self.async_request_update(), f"{DOMAIN} first update"
@@ -415,8 +415,6 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         a light did not answer in time.
         """
         brightness, kelvin = self.controller.calculate_target_values(dt_util.now())
-        if brightness is None:
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="guest_mode")
         targets = self._checked_lights(lights)
         async with self._scheduler.exclusive():
             if release_manual_control:
@@ -525,12 +523,6 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             if self.controller.environment.enabled:
                 # the target sensors show the effective values of this cycle
                 async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_environment")
-            
-            # Check for "Sleep Mode / Off" or "Guest Mode / Freeze"
-            if brightness is None and kelvin is None:
-                # GUEST MODE: no updates, no re-engagement
-                self.async_write_ha_state()
-                return
 
             # Update State for UI/Debugging
             self._calculated_brightness = brightness
@@ -658,10 +650,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
                  if not self.override_manager.is_overridden(entity_id):
                      # RECALCULATE FRESH VALUES IMMEDIATELY via Controller
                      fresh_b, fresh_k = self.controller.calculate_target_values(dt_util.now())
-                     
-                     if fresh_b is None: # Guest mode active
-                         return 
-                         
+
                      if fresh_b == 0: # Sleep mode
                          # A light switched on during sleep mode counts as a manual
                          # override: it stays on until it is turned off again

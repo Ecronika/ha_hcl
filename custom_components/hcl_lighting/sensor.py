@@ -188,7 +188,7 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
 
     The value HCL sends to the lights now (curve or scenario, min/max and
     scaling applied), independent of the adapt switches, so it can also be
-    passed on to other systems (e.g. KNX/DALI gateways). Unknown in Guest mode.
+    passed on to other systems (e.g. KNX/DALI gateways).
     """
 
     _attr_should_poll = False
@@ -233,7 +233,7 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
     def _refresh(self) -> None:
         now = dt_util.now()
         result = self._controller.target_result(now)
-        if result is None:  # no environmental feature (or Guest): the base
+        if result is None:  # no environmental feature: the base
             brightness, kelvin = self._controller.calculate_target_values(now)
             self._attr_native_value = brightness if self._kind == "brightness" else kelvin
             self._attr_extra_state_attributes = {}

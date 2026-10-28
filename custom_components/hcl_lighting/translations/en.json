@@ -145,7 +145,6 @@
                     "focus": "Focus",
                     "relax": "Relax",
                     "cleaning": "Cleaning",
-                    "guest": "Guest",
                     "night_light": "Night light"
                 }
             }
@@ -228,7 +227,7 @@
                 },
                 "scenario": {
                     "name": "Scenario",
-                    "description": "auto, sleep, night_light, focus, relax, cleaning or guest (deprecated, removed in 0.9.0)."
+                    "description": "auto, sleep, night_light, focus, relax or cleaning."
                 },
                 "duration": {
                     "name": "Duration",
@@ -252,10 +251,6 @@
             "title": "Light in several HCL instances",
             "description": "{light} is controlled by several HCL instances ({instances}) that adapt the same attribute. They overwrite each other. Remove the light from one instance or turn off “Adapt brightness” or “Adapt colour temperature” there."
         },
-        "guest_deprecated": {
-            "title": "Scenario “Guest” of {instance} will be removed",
-            "description": "The scenario Guest is deprecated and will be removed in version 0.9.0: it does the same as switching “HCL active” off. Switch “HCL active” off instead (also in automations with hcl_lighting.set_scenario) and select another scenario; this message disappears when {instance} leaves Guest."
-        },
         "daylight_shared_sensor": {
             "title": "Lux sensor used by several HCL instances",
             "description": "{sensor} is the lux sensor of the daylight compensation of several active HCL instances ({instances}). Two control loops on one sensor work against each other when their lights reach it. Use one sensor per lighting zone that represents it, or turn the daylight compensation off in all but one instance. Ignore this message if the instances light separate rooms that the sensor does not see."
@@ -269,15 +264,11 @@
                 "night_light": "Night light",
                 "focus": "Focus",
                 "relax": "Relax",
-                "cleaning": "Cleaning",
-                "guest": "Guest"
+                "cleaning": "Cleaning"
             }
         }
     },
     "exceptions": {
-        "guest_mode": {
-            "message": "HCL sends no values in Guest mode"
-        },
         "not_controlled": {
             "message": "Not controlled by this HCL instance: {lights}"
         },

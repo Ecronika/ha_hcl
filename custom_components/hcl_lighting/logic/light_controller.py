@@ -35,7 +35,6 @@ from ..const import (
     XY_COLOR_SENSITIVITY,
     KELVIN_RANGE,
     MODE_AUTO,
-    MODE_GUEST,
     SCENARIO_DEFAULTS,
     CONF_MIN_BRIGHTNESS,
     CONF_MAX_BRIGHTNESS,
@@ -321,7 +320,7 @@ class HCLLightController:
         _LOGGER.debug("HCL Mode changed to: %s", mode)
         # The caller (scenario select, set_scenario) requests the update
 
-    def calculate_target_values(self, now) -> tuple[int | None, int | None]:
+    def calculate_target_values(self, now) -> tuple[int, int]:
         """The effective setpoint now (brightness %, kelvin): the base of the
         curve or scenario with the environmental features of the last update
         cycle (peek: nothing is advanced, RM-E01). Used by apply, Fast-HCL,
@@ -332,9 +331,9 @@ class HCLLightController:
         return result.effective.brightness, result.effective.kelvin
 
     def target_result(self, now) -> EnvironmentalResult | None:
-        """Environmental snapshot for now (peek); None without a feature or in Guest."""
+        """Environmental snapshot for now (peek); None without a feature."""
         brightness, kelvin = self.calculate_base_values(now)
-        if not self.environment.enabled or brightness is None:
+        if not self.environment.enabled:
             return None
         # light counts of the last cycle (the same hold as the cycle); the start
         # seed as the next cycle would see it now (RM-B56)
@@ -342,13 +341,13 @@ class HCLLightController:
         lights["seed_brightness"] = self.seed_provider() if self.seed_provider is not None else None
         return self.environment.peek(now, HCLSetpoint(brightness, kelvin), self.environment_context(**lights))
 
-    def step_target_values(self, now, **lights: Any) -> tuple[int | None, int | None]:
+    def step_target_values(self, now, **lights: Any) -> tuple[int, int]:
         """The effective setpoint of a regular update cycle: the environmental
         features are advanced once (step, under the update lock, RM-E01).
         lights: light counts and seed of the cycle (see EnvironmentalContext)."""
         brightness, kelvin = self.calculate_base_values(now)
         self._cycle_lights = dict(lights)
-        if not self.environment.enabled or brightness is None:
+        if not self.environment.enabled:
             return brightness, kelvin
         result = self.environment.step(now, HCLSetpoint(brightness, kelvin), self.environment_context(**lights))
         if self.daylight_store is not None:
@@ -376,28 +375,14 @@ class HCLLightController:
         """Source of the values of the current mode: the Auto path or a scenario."""
         return "auto" if self.active_mode == MODE_AUTO else "scenario"
 
-    def calculate_base_values(self, now) -> tuple[int | None, int | None]:
-        """
-        Base setpoint (Brightness, Kelvin) based on Priority Stack.
-        User Intent > Curve.
-        """
-        
-        # 1. GUEST MODE (Freeze)
-        if self.active_mode == MODE_GUEST:
-            return None, None
-
-        # 2. FIXED SCENARIOS
+    def calculate_base_values(self, now) -> tuple[int, int]:
+        """Base setpoint (brightness %, kelvin): the scenario, else the curve."""
         if self.active_mode in SCENARIO_DEFAULTS:
             # Sleep: brightness 0 (off) from the scenario table (RM-T30)
             return self.scenario_setpoint(self.active_mode)
-
-        # 3. AUTO MODE (Curve)
-        if self.active_mode == MODE_AUTO:
-            min_b, max_b = self.brightness_limits()
-            return self.hcl_calc.get_hcl_values(now, min_b, max_b)
-            
-        # Fallback
-        return None, None
+        # Auto: the curve within the brightness limits
+        min_b, max_b = self.brightness_limits()
+        return self.hcl_calc.get_hcl_values(now, min_b, max_b)
 
     def consume_mode_change(self) -> bool:
         """True once after a scenario change (for the scenario transition)."""

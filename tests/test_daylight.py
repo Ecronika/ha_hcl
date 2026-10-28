@@ -486,7 +486,7 @@ def config_of(hass, entry):
 # ---------------------------------------------------------------- RM-B57 (found with RM-E02-31, 25.10.2026)
 async def test_rm_b57_stored_advanced_daylight_values_are_shown(hass, no_frontend_registration):
     """The collapsed section shows the stored dead band and response band on
-    every supported Home Assistant version (2024.7 does not fill sections from
+    every supported Home Assistant version (2024.12 does not fill sections from
     suggested values); otherwise saving the form would clear them."""
     set_light(hass, "light.a", "off", **CT_ATTRS)
     _lux(hass, 100)

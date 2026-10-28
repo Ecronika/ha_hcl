@@ -5,5 +5,5 @@
         "switch"
     ],
     "iot_class": "Calculated",
-    "homeassistant": "2024.7.0"
-}
+    "homeassistant": "2024.12.0"
+}

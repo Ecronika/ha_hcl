@@ -137,7 +137,7 @@ async def test_f02_apply_skips_or_releases_manual_control(hass, no_frontend_regi
 
 
 @pytest.mark.usefixtures("evening")
-async def test_f02_apply_rejects_foreign_lights_and_guest_mode(hass, no_frontend_registration):
+async def test_f02_apply_rejects_foreign_lights(hass, no_frontend_registration):
     from homeassistant.exceptions import ServiceValidationError
 
     await light_on(hass)
@@ -146,9 +146,6 @@ async def test_f02_apply_rejects_foreign_lights_and_guest_mode(hass, no_frontend
         await hass.services.async_call(
             DOMAIN, "apply", {"entity_id": SWITCH, "lights": ["light.other"]}, blocking=True
         )
-    await select_scenario(hass, "guest")
-    with pytest.raises(ServiceValidationError, match="Guest mode"):
-        await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH}, blocking=True)
     with pytest.raises(ServiceValidationError, match="is not an HCL Lighting entity"):
         await hass.services.async_call(DOMAIN, "apply", {"entity_id": "light.a"}, blocking=True)
 
