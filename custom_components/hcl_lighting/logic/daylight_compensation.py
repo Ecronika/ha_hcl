@@ -119,7 +119,7 @@ def read_lux(hass: HomeAssistant, config: DaylightConfig, now: datetime) -> LuxR
     state = hass.states.get(config.sensor)
     if state is None:
         return LuxReading(None, "missing", None)
-    reported = getattr(state, "last_reported", None) or state.last_updated
+    reported = state.last_reported
     age = max(0.0, (now - reported).total_seconds())
     if state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
         return LuxReading(None, state.state, age)
@@ -226,7 +226,7 @@ class DaylightModifier:
             details["cap_pct"] = None if final.cap_pct is None else round(final.cap_pct, 1)
             return after, ModifierSnapshot(self.key, status, reason, current, after, details), final
 
-        # Only in Auto and for a brightness (Guest: none); the cap is frozen (DL §14)
+        # Only in Auto and for a brightness; the cap is frozen (DL §14)
         if base is None or ctx.mode != MODE_AUTO:
             return done(STATUS_BYPASSED, "daylight_scenario_bypass", current, new)
         min_b = ctx.min_brightness

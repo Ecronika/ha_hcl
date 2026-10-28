@@ -115,8 +115,6 @@ async def test_f01_setpoint_sensors_follow_scenarios(hass, no_frontend_registrat
     await light_on(hass)
     await select_scenario(hass, "focus")
     assert (hass.states.get(TARGET_B).state, hass.states.get(TARGET_K).state) == ("100", "5500")
-    await select_scenario(hass, "guest")
-    assert hass.states.get(TARGET_B).state == "unknown"
     await select_scenario(hass, "sleep")
     assert hass.states.get(TARGET_B).state == "0"
 

@@ -16,7 +16,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.restore_state import async_get as async_get_restore_state
+from homeassistant.helpers.restore_state import StoredState, async_get as async_get_restore_state
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 
@@ -34,6 +34,7 @@ from .const import (
     MIN_UPDATE_INTERVAL,
     REMOVED_OPTIONS,
     anchor_time,
+    REMOVED_MODE_GUEST,
     guest_issue_id,
     CONF_OVERRIDE_TIMEOUT,
     CONF_OVERRIDE_RESET_ON_OFF,
@@ -125,17 +126,20 @@ def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) ->
         return True
     return stored.state.state != STATE_OFF
 
-def _restored_mode(hass: HomeAssistant, entry: ConfigEntry) -> str:
+def _stored_mode(hass: HomeAssistant, entry: ConfigEntry) -> StoredState | None:
+    """Stored state of the mode select (None if unknown)."""
+    entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
+    if entity_id is None:
+        return None
+    return async_get_restore_state(hass).last_states.get(entity_id)
+
+
+def _restored_mode(stored: StoredState | None) -> str:
     """Last scenario of the mode select (Auto if unknown or a timed scenario has ended).
 
     Read with HCLModeSelect's rule (restored_scenario) so the controller already
-    has the right scenario when the HCL switch sends its first update (e.g. no
-    light command in Guest mode after a reload).
+    has the right scenario when the HCL switch sends its first update.
     """
-    entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
-    if entity_id is None:
-        return MODE_AUTO
-    stored = async_get_restore_state(hass).last_states.get(entity_id)
     if stored is None:
         return MODE_AUTO
     extra = stored.extra_data.as_dict() if stored.extra_data is not None else None
@@ -335,7 +339,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
     controller.adapt_brightness = _restored_switch_state(hass, entry, "adapt_brightness")
     controller.adapt_color = _restored_switch_state(hass, entry, "adapt_color")
     # ... and the scenario (the HCL switch is set up before the mode select)
-    controller.set_active_mode(_restored_mode(hass, entry), announce=False)
+    stored_mode = _stored_mode(hass, entry)
+    controller.set_active_mode(_restored_mode(stored_mode), announce=False)
+    # Guest was removed in 0.9.0 (RM-R12): it sent no values, like "HCL active"
+    # off - an instance left in Guest starts in Auto with HCL switched off
+    from_guest = stored_mode is not None and stored_mode.state.state == REMOVED_MODE_GUEST
+    if from_guest:
+        _LOGGER.warning(
+            "%s: the scenario Guest was removed in 0.9.0; the instance starts in Auto "
+            "with 'HCL active' switched off (Guest did the same)", entry.title,
+        )
+    ir.async_delete_issue(hass, DOMAIN, guest_issue_id(entry.entry_id))  # of 0.8.x
 
     controller.environment = await _async_environment(hass, entry, controller)
 
@@ -346,6 +360,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
         environment=controller.environment,
         # Configuration this setup runs with (see update_listener)
         applied_config=_applied_config(entry, entry.options),
+        start_off=from_guest,
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

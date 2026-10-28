@@ -68,13 +68,6 @@ async def _long_apply(hass, entry):
 
 # ---------------------------------------------------------------- B-31
 @pytest.mark.usefixtures("evening")
-async def test_b31_reload_in_guest_mode_sends_nothing(hass, no_frontend_registration):
-    calls, _entry = await _reload_in(hass, "guest")
-    assert hass.states.get(SELECT).state == "guest"
-    assert calls_for(calls, "light.a") == []
-
-
-@pytest.mark.usefixtures("evening")
 async def test_b31_reload_in_focus_mode_applies_focus_first(hass, no_frontend_registration):
     calls, _entry = await _reload_in(hass, "focus")
     sent = calls_for(calls, "light.a")

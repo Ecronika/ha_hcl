@@ -14,6 +14,12 @@ async def test_b12_mode_chips_follow_select_state(page):
     assert page.errors == []
 
 
+async def test_rm_r12_no_chip_for_the_removed_scenario_guest(page):
+    await _set_hass(page, "auto")
+    chips = await page.evaluate("() => [...card.shadowRoot.querySelectorAll('.chip')].map(c => c.dataset.mode)")
+    assert sorted(chips) == ["auto", "cleaning", "focus", "night_light", "relax", "sleep"]
+
+
 async def test_b12_chip_click_still_calls_select_service(page):
     await _set_hass(page, "auto")
     await page.evaluate("() => card.shadowRoot.querySelector('.chip[data-mode=relax]').click()")
@@ -39,9 +45,6 @@ async def test_b19_active_scenario_line_is_drawn(page):
     assert ["chartB", 100] in lines and ["chartK", 5500] in lines
     await page.evaluate("() => { window.__lines = []; }")
     await _set_hass(page, "auto")
-    await page.evaluate("() => { card._chartB.update('none'); card._chartK.update('none'); }")
-    assert await page.evaluate("() => window.__lines") == []
-    await _set_hass(page, "guest")
     await page.evaluate("() => { card._chartB.update('none'); card._chartK.update('none'); }")
     assert await page.evaluate("() => window.__lines") == []
     assert page.errors == []
@@ -74,7 +77,7 @@ async def test_b43_failed_mode_change_is_reported_and_not_shown_active(page):
 
 
 async def test_b45_curve_editable_in_every_mode_with_hint(page):
-    await _set_hass(page, "guest")
+    await _set_hass(page, "relax")
     await page.evaluate("""() => card.shadowRoot.querySelector('#handles-b .handle-input[data-idx="1"]')
         .dispatchEvent(new KeyboardEvent('keydown', {key: 'ArrowUp', bubbles: true}))""")
     assert (await _points(page))[1][1] == 51
@@ -92,8 +95,6 @@ async def test_b49_now_shows_the_active_setpoint(page):
     await frames(page)
     info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
     assert "Focus" in info and "80 %" in info and "5,000 K" in info
-    await _set_hass(page, "guest", extra=extra)
-    assert "HCL sends no values" in await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
     # a draft is shown separately
     await _set_hass(page, "auto")
     await page.evaluate("() => { card._points.forEach(p => p.b = 5); card._markChanged(); }")

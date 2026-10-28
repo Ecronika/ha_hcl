@@ -42,6 +42,8 @@ class HCLRuntimeData:
     # set by the platforms (also for a disabled entity: see HCLSwitch.is_added, RM-B38)
     switch: HCLSwitch | None = None
     mode_select: HCLModeSelect | None = None
+    # the HCL switch starts off whatever it restores (scenario Guest removed, RM-R12)
+    start_off: bool = False
 
 
 type HCLConfigEntry = ConfigEntry[HCLRuntimeData]

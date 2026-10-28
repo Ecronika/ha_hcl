@@ -5,10 +5,10 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 ## Funktionen
 - **Dashboard-Karte** zum Bearbeiten der Tageskurve (Helligkeit und Farbtemperatur), mit Vorschau, Standardkurve, Plausibilitäts-Hinweisen und Szenario-Chips.
 - **Kurve** mit monotoner PCHIP-Interpolation (keine Überschwinger) aus Aufwach- und Schlafenszeit oder aus eigenen Punkten.
-- **Szenarien** Auto, Fokus, Entspannen, Putzen, Nachtlicht, Schlafen und Gast (abgekündigt).
+- **Szenarien** Auto, Fokus, Entspannen, Putzen, Nachtlicht und Schlafen.
 - **Manuelle Steuerung**: Wer ein Licht selbst ändert, pausiert HCL für dieses Licht; HCL übernimmt es später wieder.
 - **Helligkeit und Farbtemperatur getrennt**: zwei Schalter je Instanz.
-- **Sofort beim Einschalten**: Lichter bekommen die HCL-Werte direkt nach dem Einschalten, ohne Übergang (nicht im Gastmodus; wer während „Schlafen“ einschaltet, steuert manuell).
+- **Sofort beim Einschalten**: Lichter bekommen die HCL-Werte direkt nach dem Einschalten, ohne Übergang (wer während „Schlafen“ einschaltet, steuert manuell).
 - **Sparsame Befehle**: Aktualisiert wird nur bei spürbarer Änderung (Helligkeit > 1 %, Farbtemperatur > 50 K).
 - **Tageslichtkompensation** (optional): Ein Luxsensor im Raum senkt in Auto die Helligkeit, wenn genug Tageslicht da ist.
 - **Sollwert-Sensoren**, **Aktionen**, **Logbuch und Event** bei manueller Steuerung, **Diagnose** und **Reparatur-Hinweis** bei Doppelsteuerung.
@@ -25,7 +25,7 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
    ```
    Optional: `view: compact`, `title: Küche` (Standard: Name der Instanz).
 
-Voraussetzung: Home Assistant **2024.7** oder neuer.
+Voraussetzung: Home Assistant **2024.12** oder neuer.
 
 Die Karten-Ressource wird im UI-Modus der Dashboards automatisch als `/hcl_lighting_static/hcl-curve-card.js?v=<Version>` eingetragen; ein Update ersetzt den Eintrag. Im YAML-Modus selbst ergänzen:
 ```yaml
@@ -79,7 +79,7 @@ Ein eingeschaltetes Licht bekommt die Werte sofort, ohne Übergang (die Option �
 **4. Tageslichtkompensation (optional)**: Ein **Luxsensor** im Raum senkt in **Auto** die Helligkeit, wenn genug Tageslicht da ist (gemessener Regelkreis). Geregelt wird die gesamte Beleuchtungsstärke am Sensor (Tageslicht und Leuchten) – sie dimmt also auch, wenn die Leuchten allein über dem Zielwert liegen; der Zielwert wird nicht immer erreicht (Grenzen siehe unten). Nach einem Update oder einer Neuinstallation aus.
 - **Luxsensor** (Geräteklasse Beleuchtungsstärke) und **Ziel-Beleuchtungsstärke am Sensor** (50–2000 lx) sind bei eingeschalteter Funktion Pflicht. Der Zielwert ist ein Regelwert an der Sensorposition, kein Normwert (Arbeitsplätze weiterhin eigens planen und messen).
 - Die Helligkeit liegt **nie über der Kurve** und **nie unter der Mindesthelligkeit**; die **Farbtemperatur bleibt unverändert**. HCL schaltet weiterhin nie ein oder aus.
-- **Nur in Auto**: In einem Szenario (Fokus, Entspannen, Putzen, Nachtlicht, Schlafen, Gast) gelten die Szenario-Werte; die Absenkung bleibt erhalten und wird bei der Rückkehr zu Auto innerhalb von 2 Stunden weiterverwendet.
+- **Nur in Auto**: In einem Szenario (Fokus, Entspannen, Putzen, Nachtlicht, Schlafen) gelten die Szenario-Werte; die Absenkung bleibt erhalten und wird bei der Rückkehr zu Auto innerhalb von 2 Stunden weiterverwendet.
 - Die Absenkung ändert sich **höchstens um 11 Prozentpunkte pro Minute** (unabhängig vom Intervall bis 60 s; bei längerem Intervall höchstens 11 Prozentpunkte je Aktualisierung, also langsamer), bei kleinen Abweichungen langsamer; eine **Glättung** des Messwerts (60 s) und ein **Totband über dem Zielwert** (5 % des Zielwerts, mindestens 20 lx) verhindern kleine Absenkungen. Unter dem Zielwert wird wieder angehoben (zu dunkel ist schlimmer als etwas zu hell); nur wenn das Anheben knapp unter dem Zielwert den Raum sofort zu hell gemacht hat (Sensor sieht die Leuchten stark), wiederholt HCL es erst, wenn es deutlich dunkler ist.
 - **Keine Änderung ohne Wirkung**: Solange alle eingeschalteten Lichter manuell gesteuert werden (oder zu HCL zurückkehren), „Helligkeit anpassen“ aus ist oder „HCL aktiv“ aus ist, wird die Absenkung gehalten. Nach mehr als 2 Stunden beginnt sie neu (bei der Helligkeit, die die Lichter in Auto hatten, oder bei der Kurve). Ausgeschaltete Lichter folgen weiter dem Tageslicht – ein eingeschaltetes Licht startet gedimmt.
 - **Sensor ohne Wert** (nicht verfügbar, unbekannt, keine Zahl oder 60 min ohne Meldung): Die Absenkung wird 5 Minuten gehalten, danach geht die Helligkeit langsam zur Kurve zurück. Ein einzelner ungültiger Wert ändert nichts. Für Sensoren, die nur bei Änderung melden, „Sensorwert veraltet nach“ auf 0 stellen.
@@ -103,14 +103,14 @@ Jede Instanz ist ein Gerät mit diesen Entitäten (Entity-IDs neuer Installation
 | **HCL aktiv** (Schalter) | `switch.wohnzimmer_hcl_aktiv` | HCL ein/aus. Wird diese Entität deaktiviert, steht die Instanz still (die Aktionen `apply`, `set_manual_control` und `set_scenario` melden das). Attribut `manual_control`: manuell gesteuerte Lichter. Die Attribute (`manual_control`, `target_entities`, `calculated_*`) sind Live-Werte und stehen nicht im Verlauf; den Verlauf zeigen die Sollwert-Sensoren, die manuelle Steuerung das Logbuch |
 | **Helligkeit anpassen** (Schalter) | `switch.wohnzimmer_helligkeit_anpassen` | Aus: HCL lässt die Helligkeit unverändert (Schlafen schaltet trotzdem aus) |
 | **Farbtemperatur anpassen** (Schalter) | `switch.wohnzimmer_farbtemperatur_anpassen` | Aus: HCL lässt die Farbtemperatur unverändert |
-| **Szenario** (Auswahl) | `select.wohnzimmer_szenario` | Auto, Schlafen, Nachtlicht, Fokus, Entspannen, Putzen, Gast (abgekündigt; auch die Chips der Karte). Attribut `until`: Ende eines zeitlich begrenzten Szenarios |
-| **Sollhelligkeit** / **Sollfarbtemperatur** (Sensoren) | `sensor.wohnzimmer_sollhelligkeit` | Werte, die HCL jetzt sendet (Szenario, Min/Max und Tageslichtkompensation berücksichtigt; Schlafen 0 %, Gast `unknown`), unabhängig von den Anpassungs-Schaltern und der manuellen Steuerung |
+| **Szenario** (Auswahl) | `select.wohnzimmer_szenario` | Auto, Schlafen, Nachtlicht, Fokus, Entspannen, Putzen (auch die Chips der Karte). Attribut `until`: Ende eines zeitlich begrenzten Szenarios |
+| **Sollhelligkeit** / **Sollfarbtemperatur** (Sensoren) | `sensor.wohnzimmer_sollhelligkeit` | Werte, die HCL jetzt sendet (Szenario, Min/Max und Tageslichtkompensation berücksichtigt; Schlafen 0 %), unabhängig von den Anpassungs-Schaltern und der manuellen Steuerung |
 | **Curve Data** (Sensor) | `sensor.wohnzimmer_curve_data` | Daten für die Karte (Zustand: Zeit der letzten Änderung von Kurve, Szenario oder Anpassungs-Schalter). Attribute u. a. `instance` (Name der Instanz, Kartentitel), `preview_active` (Lichter folgen einer ungespeicherten Vorschau), `wake_time`, `sleep_time`, `default_points` (Standardkurve zu diesen Zeiten, für die Schaltfläche **Standardkurve** der Karte) |
 
 ## Szenarien
 - **Auto**: Lichter folgen der Kurve.
 - **Fokus / Entspannen / Putzen**: feste Werte (in den Optionen einstellbar, optional mit Dauer), innerhalb der minimalen/maximalen Helligkeit.
-- **Gast** (abgekündigt, entfällt in 0.9.0): HCL sendet keine Befehle – wie „HCL aktiv“ aus, nur wird `apply` abgelehnt und manuelle Steuerung weiter erkannt. Die Auswahl schreibt eine Warnung ins Log und zeigt eine Reparaturmeldung; stattdessen „HCL aktiv“ ausschalten.
+- **Gast** ist mit 0.9.0 entfallen (abgekündigt seit 0.8.0): stattdessen „HCL aktiv“ ausschalten. Eine Instanz, die in Gast stand, startet in Auto mit „HCL aktiv“ aus.
 - **Schlafen**: Eingeschaltete Lichter werden ausgeblendet. Wer währenddessen ein Licht einschaltet, steuert es manuell; es bleibt an, bis es ausgeschaltet wird (oder die Rückkehrzeit abläuft).
 - **Nachtlicht**: gedimmtes, warmes Licht (Standard 3 % / 2200 K). Eingeschaltete und nachts eingeschaltete Lichter bekommen diese Werte; HCL schaltet nichts ein oder aus.
 
@@ -130,7 +130,7 @@ Standardmäßig bekommt ein eingeschaltetes Licht sofort die HCL-Werte, auch wen
 ## Aktionen (Services)
 | Aktion | Felder | Wirkung |
 |---|---|---|
-| `hcl_lighting.apply` | `entity_id` (beliebige Entität der Instanz), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sendet die aktuellen Werte sofort an eingeschaltete Lichter. Die Lichter der Instanz werden beim Aufruf aufgelöst (Bereiche, Geräte, Labels, Gruppen), auch bei ausgeschaltetem *HCL aktiv*. Schaltet nie ein; manuell gesteuerte nur mit `release_manual_control: true`; nicht im Gastmodus. Ein Übergang länger als der der Aktualisierungen wird nicht unterbrochen. Scheitert ein Lichtbefehl oder antwortet ein Licht nicht innerhalb von 10 s, endet die Aktion mit einem Fehler; die übrigen Lichter sind aktualisiert |
+| `hcl_lighting.apply` | `entity_id` (beliebige Entität der Instanz), `lights` (optional), `transition` (s, optional), `release_manual_control` | Sendet die aktuellen Werte sofort an eingeschaltete Lichter. Die Lichter der Instanz werden beim Aufruf aufgelöst (Bereiche, Geräte, Labels, Gruppen), auch bei ausgeschaltetem *HCL aktiv*. Schaltet nie ein; manuell gesteuerte nur mit `release_manual_control: true`. Ein Übergang länger als der der Aktualisierungen wird nicht unterbrochen. Scheitert ein Lichtbefehl oder antwortet ein Licht nicht innerhalb von 10 s, endet die Aktion mit einem Fehler; die übrigen Lichter sind aktualisiert |
 | `hcl_lighting.set_manual_control` | `entity_id`, `lights` (optional, Standard alle), `manual_control` (Standard `true`) | Lichter pausieren oder an HCL zurückgeben |
 | `hcl_lighting.set_scenario` | `entity_id`, `scenario`, `duration` (min, optional; 0 = bis zur Änderung) | Setzt das Szenario; eine Dauer ersetzt das eingestellte Ende |
 | `hcl_lighting.get_curve` | `entity_id` | Antwortdaten: `points`, `saved_points`, `preview_active`, `wake_time`, `sleep_time` |
@@ -141,7 +141,7 @@ Standardmäßig bekommt ein eingeschaltetes Licht sofort die HCL-Werte, auch wen
 Beginnt oder endet die manuelle Steuerung eines Lichts, erscheinen ein Logbuch-Eintrag und das Event `hcl_lighting_manual_control` (`entity_id`, `manual_control`, `instance`, `config_entry_id`). Steuern zwei Instanzen dasselbe Licht für dasselbe Attribut, meldet eine Reparatur das. Diagnosedaten lassen sich auf der Integrationsseite herunterladen – ohne Namen der Instanz, Entitäts-, Geräte-, Bereichs-, Etagen- und Label-IDs als Pseudonyme (z. B. `light.redacted_1`), manuelle Steuerung als Alter in Minuten. Kurve und Aufwach- und Schlafenszeit bleiben für die Fehlersuche enthalten. Ab Home Assistant 2025.8 fügt Home Assistant die Reparaturmeldungen der Integration hinzu; deren IDs und Texte können Licht- oder Luxsensor-IDs und Instanznamen enthalten. Vor dem Veröffentlichen (z. B. in einem Issue) bitte prüfen.
 
 ## Rezepte
-Die Beispiele nutzen die YAML-Schreibweise ab Home Assistant 2024.10. Bei älteren Versionen in den Schritten `service:` statt `action:` schreiben und in Automationen `trigger:` mit `- platform: time` statt `triggers:` mit `- trigger: time` sowie `action:` statt `actions:`.
+Die Beispiele nutzen die aktuelle YAML-Schreibweise (`action:`, `triggers:`, `actions:`).
 
 **Licht mit den HCL-Werten einschalten** (z. B. für Leuchten, die im ausgeschalteten Zustand keine Werte annehmen, oder für ein KNX-/DALI-Gateway):
 ```yaml
@@ -152,7 +152,7 @@ data:
   brightness_pct: "{{ states('sensor.wohnzimmer_sollhelligkeit') | int(50) }}"
   color_temp_kelvin: "{{ states('sensor.wohnzimmer_sollfarbtemperatur') | int(3000) }}"
 ```
-Bei „Schlafen“ ist die Sollhelligkeit 0 % (das Licht wird ausgeschaltet); im Gastmodus sind die Sensoren `unknown`, dann gelten die Werte in `int(...)`.
+Bei „Schlafen“ ist die Sollhelligkeit 0 % (das Licht wird ausgeschaltet); solange die Sensoren nicht verfügbar sind (z. B. beim Neustart), gelten die Werte in `int(...)`.
 
 **Alle Lichter zur Aufwachzeit an HCL zurückgeben**:
 ```yaml

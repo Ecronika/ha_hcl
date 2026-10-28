@@ -40,10 +40,8 @@ const HCL_STRINGS = {
         mode_focus: "Focus",
         mode_relax: "Relax",
         mode_cleaning: "Cleaning",
-        mode_guest: "Guest",
         mode_sleep: "Sleep",
         mode_night_light: "Night light",
-        guest_now: "HCL sends no values",
         setpoint_unavailable: "target values not available",
         env_daylight: "daylight",
         env_daylight_hold: "daylight held",
@@ -112,10 +110,8 @@ const HCL_STRINGS = {
         mode_focus: "Fokus",
         mode_relax: "Entspannen",
         mode_cleaning: "Putzen",
-        mode_guest: "Gast",
         mode_sleep: "Schlafen",
         mode_night_light: "Nachtlicht",
-        guest_now: "HCL sendet keine Werte",
         setpoint_unavailable: "Sollwerte nicht verfügbar",
         env_daylight: "Tageslicht",
         env_daylight_hold: "Tageslicht gehalten",
@@ -177,7 +173,6 @@ const HCL_MODES = [
     ["focus", "mdi:brain"],
     ["relax", "mdi:coffee"],
     ["cleaning", "mdi:broom"],
-    ["guest", "mdi:account-group"],
     ["night_light", "mdi:weather-night"],
     ["sleep", "mdi:bed"],
 ];
@@ -1261,9 +1256,7 @@ class HCLCurveCard extends HTMLElement {
         const bState = this._targetIds.b ? states[this._targetIds.b] : undefined;
         const kState = this._targetIds.k ? states[this._targetIds.k] : undefined;
         const valid = (st) => !!st && st.state !== "" && Number.isFinite(Number(st.state));
-        if (mode === "guest") {
-            parts.push(this._t("guest_now"));
-        } else if (mode === "sleep") {
+        if (mode === "sleep") {
             parts.push(this._t("sleep_now"));
         } else if (valid(bState) && valid(kState)) {
             // Base -> effective with the reason when an environmental feature

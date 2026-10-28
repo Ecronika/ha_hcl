@@ -54,7 +54,7 @@ _DAYLIGHT_ADVANCED_OPTIONAL = (CONF_DAYLIGHT_DEADBAND_LUX, CONF_DAYLIGHT_RESPONS
 
 def _optional(key: str, current: dict[str, Any]) -> vol.Optional:
     """An optional field in a section that shows the stored value: Home
-    Assistant 2024.7 does not fill sections from suggested values, saving the
+    Assistant 2024.12 does not fill sections from suggested values, saving the
     form would clear the field (RM-B57)."""
     value = current.get(key)
     return vol.Optional(key) if value is None else vol.Optional(key, description={"suggested_value": value})
@@ -107,8 +107,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
-        """Create the options flow."""
-        return OptionsFlowHandler(config_entry)
+        """Create the options flow (the entry is self.config_entry, RM-H01)."""
+        return OptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -144,14 +144,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle a options flow for HCL Lighting."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry_proxy = config_entry
         self._pending: dict[str, Any] = {}
 
     def _current(self) -> dict[str, Any]:
         """Current settings (all in the options since entry version 1.2)."""
-        return dict(self.config_entry_proxy.options)
+        return dict(self.config_entry.options)
 
     def _merged_options(self, user_input: dict[str, Any]) -> dict[str, Any]:
         """Merge the form into the existing options.
@@ -161,7 +160,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         (wake/sleep) is changed, so the curve is regenerated from the new
         anchors.
         """
-        entry = self.config_entry_proxy
+        entry = self.config_entry
         new_options = {**entry.options, **user_input}
         for key in [k for k, v in new_options.items() if v is None]:
             del new_options[key]  # an optional field that was cleared
@@ -206,7 +205,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             }
         )
 
-        # Available in every supported Home Assistant version (2024.7+); an
+        # Available in every supported Home Assistant version (2024.12+); an
         # error here is a real bug and is not hidden behind a fallback.
         data_schema = self.add_suggested_values_to_schema(base_schema, schema_defaults)
 

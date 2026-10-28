@@ -1,19 +1,20 @@
-"""Scenarios: values, durations, transitions, night modes, Guest (deprecated)."""
+"""Scenarios: values, durations, transitions, night modes, Guest (removed in 0.9.0)."""
 from __future__ import annotations
 
 import logging
 import pytest
+import voluptuous as vol
 
 from datetime import timedelta
 from homeassistant.core import State
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed, async_mock_service, mock_restore_cache, mock_restore_cache_with_extra_data
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed, async_mock_service, mock_restore_cache, mock_restore_cache_with_extra_data
 
 from custom_components.hcl_lighting.const import DOMAIN, MODE_SLEEP, SCENARIO_DEFAULTS
 
-from .support.entries import ADAPT, CT_ATTRS, SELECT, SENSOR, calls_for, core, hcl_on, light_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
-from .support.lights import FakeLights
+from .support.entries import ADAPT, CT_ATTRS, SELECT, SENSOR, SWITCH, calls_for, core, hcl_on, light_on, select_scenario, set_light, setup_entry, switch_entity, timer_cycle
 
 
 ADAPT_B = "switch.hcl_adapt_brightness"
@@ -32,8 +33,6 @@ def _last(calls, entity_id="light.a"):
     return [c for c in calls if entity_id in c.data["entity_id"]][-1].data
 
 
-def _guest_issue(hass, entry):
-    return ir.async_get(hass).async_get_issue(DOMAIN, f"guest_deprecated_{entry.entry_id}")
 
 
 # ------------------------------------------------------------------ Ä-02
@@ -74,8 +73,6 @@ async def test_a07_scenario_duration(hass, freezer, no_frontend_registration):
     await hass.async_block_till_done()
     assert hass.states.get(SELECT).state == "auto"
     assert hass.states.get(SELECT).attributes["until"] is None
-    await hass.services.async_call("select", "select_option", {"entity_id": SELECT, "option": "guest"}, blocking=True)
-    assert hass.states.get(SELECT).attributes["until"] is None  # guest/sleep are not timed
 
 
 @pytest.mark.parametrize(("minutes", "expected"), [(-5, "auto"), (20, "relax")])
@@ -295,33 +292,45 @@ async def test_b01_sleep_mode_still_turns_off_lights_on_activation(hass, no_fron
     assert sent and sent[-1].data["brightness_pct"] == 0
 
 
-# ---------------------------------------------------------------- RM-R12
-async def test_rm_r12_guest_warns_and_shows_a_repair_issue(hass, no_frontend_registration, caplog):
-    FakeLights(hass)
-    set_light(hass, "light.a", "on", brightness=100, color_temp_kelvin=3000, **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"])
-    assert _guest_issue(hass, entry) is None
-    with caplog.at_level(logging.WARNING):
+# ---------------------------------------------------------------- RM-R12 (removed in 0.9.0)
+async def test_rm_r12_guest_is_no_longer_a_scenario(hass, no_frontend_registration):
+    from homeassistant.exceptions import ServiceValidationError
+
+    await light_on(hass)
+    assert "guest" not in hass.states.get(SELECT).attributes["options"]
+    with pytest.raises(ServiceValidationError):
         await select_scenario(hass, "guest")
-    assert hass.states.get(SELECT).state == "guest"  # still works in 0.8.0
-    issue = _guest_issue(hass, entry)
-    assert issue is not None and issue.translation_key == "guest_deprecated"
-    assert issue.severity == ir.IssueSeverity.WARNING and not issue.is_fixable
-    assert "deprecated" in caplog.text
-    await select_scenario(hass, "auto")
-    assert _guest_issue(hass, entry) is None
-    await select_scenario(hass, "guest")
-    await hass.config_entries.async_remove(entry.entry_id)
-    await hass.async_block_till_done()
-    assert _guest_issue(hass, entry) is None
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(DOMAIN, "set_scenario", {"entity_id": SELECT, "scenario": "guest"}, blocking=True)
+    assert hass.states.get(SELECT).state == "auto"
 
 
-async def test_rm_r12_guest_restored_after_a_restart_shows_the_issue(hass, no_frontend_registration):
-    mock_restore_cache(hass, [State(SELECT, "guest")])
-    set_light(hass, "light.a", "off", **CT_ATTRS)
-    entry = await setup_entry(hass, ["light.a"])
-    assert hass.states.get(SELECT).state == "guest"
-    assert _guest_issue(hass, entry) is not None
+@pytest.mark.usefixtures("evening")
+@pytest.mark.parametrize("hcl_active", ["on", "off"])
+async def test_rm_r12_restored_guest_starts_in_auto_with_hcl_off(hass, no_frontend_registration, caplog, hcl_active):
+    """An instance left in Guest (0.8.x) starts in Auto with "HCL active" off
+    (Guest sent no values either); no light command, the repair issue of 0.8.x
+    is removed."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
+    entry = MockConfigEntry(domain=DOMAIN, title="HCL", options={"target": {"entity_id": ["light.a"]}}, minor_version=2)
+    entry.add_to_hass(hass)
+    # entities of the earlier version (the restore of the first command reads the registry)
+    er.async_get(hass).async_get_or_create(
+        "select", DOMAIN, f"{entry.entry_id}_mode", config_entry=entry, suggested_object_id="hcl_scenario"
+    )
+    mock_restore_cache(hass, [State(SELECT, "guest"), State(SWITCH, hcl_active)])
+    issue_id = f"guest_deprecated_{entry.entry_id}"
+    ir.async_create_issue(hass, DOMAIN, issue_id, is_fixable=False, severity=ir.IssueSeverity.WARNING,
+                          translation_key="guest_deprecated")
+    with caplog.at_level(logging.WARNING):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+    assert hass.states.get(SELECT).state == "auto"
+    assert hass.states.get(SWITCH).state == "off"
+    assert calls_for(calls, "light.a") == []
+    assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
+    assert "Guest was removed" in caplog.text
 
 
 # ---------------------------------------------------------------- RM-B52 (review 17.10.2026)

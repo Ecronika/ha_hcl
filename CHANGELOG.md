@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0b1] - 2026-10-27
+First pre-release (beta) of 0.9.0: new minimum Home Assistant version 2024.12 (RM-H01) and the scenario Guest removed (RM-R12). Daylight Estimator and Visual Harmony follow in later betas.
+
+### Breaking changes
+- **Home Assistant 2024.12 or newer is required** (before: 2024.7). The options flow uses Home Assistant's own link to the config entry (RM-H01); 2024.12 is the first version that provides it.
+- **Scenario Guest removed** (RM-R12, deprecated since 0.8.0): `guest` is no longer an option of the scenario select or of `hcl_lighting.set_scenario`; automations that still select it now fail. Switch *HCL active* off instead – Guest did the same. An instance that was left in Guest starts in Auto with *HCL active* off (a warning in the log; no light command), and the repair issue of 0.8.x is removed. The card no longer shows a Guest chip.
+
+### Internal
+- The time of the last report of the lux sensor is read directly (`State.last_reported`, available since Home Assistant 2024.3).
+- CI tests the new minimum version 2024.12.0 instead of 2024.7.0.
+
 ## [0.8.1] - 2026-10-27
 Summary of all changes since 0.8.0; the details are in the entry of the pre-release 0.8.1b1 below (RM-… numbers refer to the roadmap). No code change compared to 0.8.1b1. The minimum Home Assistant version stays 2024.7. 0.9.0 is planned to require Home Assistant 2024.11, so this is likely the last release for 2024.7 to 2024.10.
 
