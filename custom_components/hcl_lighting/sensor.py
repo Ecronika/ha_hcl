@@ -24,6 +24,7 @@ from .const import (
     anchor_time,
 )
 from .logic.daylight_compensation import DAYLIGHT_KEY
+from .logic.visual_harmony import HARMONY_KEY
 from .logic.hcl_math import HCLCalculator, default_points
 from .entity import HCLEntity
 from .runtime import HCLConfigEntry
@@ -197,6 +198,7 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
     _unrecorded_attributes = frozenset({
         "base_value", "environment_status", "environment_reason", "reason_codes",
         "measured_lux", "filtered_lux", "target_lux", "cap_pct", "sensor_age",
+        "harmony_delta_mired", "daylight_character", "outdoor_quality", "outdoor_confidence",
     })
 
     def __init__(self, entry: ConfigEntry, controller, kind: str) -> None:
@@ -246,6 +248,21 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
             "environment_status": result.status,
             "environment_reason": result.reason,
         }
+        # status and reason of the modifier of this dimension: the daylight
+        # compensation for the brightness, Visual Harmony for the colour
+        # temperature (RM-E04; the global status may come from the other one)
+        own = result.modifier(DAYLIGHT_KEY if brightness else HARMONY_KEY)
+        if own is not None:
+            attrs["environment_status"] = own.status
+            attrs["environment_reason"] = own.reason
+        harmony = result.modifier(HARMONY_KEY)
+        if not brightness and harmony is not None:
+            attrs.update({
+                "harmony_delta_mired": harmony.details.get("delta_mired"),
+                "daylight_character": harmony.details.get("daylight_character"),
+                "outdoor_quality": harmony.details.get("outdoor_quality"),
+                "outdoor_confidence": harmony.details.get("outdoor_confidence"),
+            })
         if brightness:
             attrs["reason_codes"] = list(result.reason_codes)
             daylight = result.modifier(DAYLIGHT_KEY)

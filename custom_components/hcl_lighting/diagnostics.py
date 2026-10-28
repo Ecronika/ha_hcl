@@ -9,7 +9,8 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
-from .const import CONF_CURVE_CONFIG, CONF_DAYLIGHT_SENSOR, CONF_TARGET
+from .const import CONF_CURVE_CONFIG, CONF_DAYLIGHT_SENSOR, CONF_HARMONY_WEATHER, CONF_TARGET
+from .logic.daylight_estimator import OUTDOOR_KEY
 from .runtime import loaded_runtime
 
 # Target keys and the prefix of their pseudonyms (entity IDs keep their domain)
@@ -53,8 +54,9 @@ def _settings(values: dict[str, Any], pseudo: _Pseudonyms) -> dict[str, Any]:
         out[CONF_NAME] = REDACTED
     if CONF_TARGET in out:
         out[CONF_TARGET] = pseudo.target(out[CONF_TARGET])
-    if out.get(CONF_DAYLIGHT_SENSOR):
-        out[CONF_DAYLIGHT_SENSOR] = pseudo(str(out[CONF_DAYLIGHT_SENSOR]))
+    for key in (CONF_DAYLIGHT_SENSOR, CONF_HARMONY_WEATHER):
+        if out.get(key):
+            out[key] = pseudo(str(out[key]))
     return out
 
 
@@ -141,6 +143,7 @@ def _environment(controller, now) -> dict[str, Any] | None:
                 {"key": m.key, "status": m.status, "reason": m.reason, **dict(m.details)}
                 for m in result.modifiers
             ],
+            "outdoor_light": _outdoor(result),
         }
 
     last = controller.environment.last_result
@@ -148,6 +151,30 @@ def _environment(controller, now) -> dict[str, Any] | None:
         "now": snapshot(controller.target_result(now)),
         "last_cycle": snapshot(last),
         "last_cycle_minutes_ago": None if last is None else _minutes_since(last.evaluated_at.isoformat(), now),
+    }
+
+
+def _outdoor(result) -> dict[str, Any] | None:
+    """Daylight Estimator (RM-E03): state and coarse model values. No position
+    of the home: the solar elevation only in whole degrees, no azimuth and no
+    irradiance (with the time of the diagnosis they would locate the home to
+    about 1 km); the weather entity only as configured or not."""
+    snapshot = next((p for p in result.providers if p.key == OUTDOOR_KEY), None)
+    state = None if snapshot is None else snapshot.payload
+    if state is None:
+        return None
+    diag = state.diagnostics
+    return {
+        "quality": state.quality_level,
+        "confidence": state.confidence,
+        "character": state.daylight_character,
+        "reason": state.reason,
+        "daylight_level": None if diag is None else round(diag.daylight_level, 1),
+        "direct_sun_probability": None if diag is None else diag.direct_sun_probability,
+        "solar_elevation_deg": None if diag is None else round(diag.solar_elevation_deg),
+        "weather_entity": diag is not None and diag.weather_entity_id is not None,
+        "weather_age_minutes": None if diag is None or diag.weather_age_seconds is None
+        else int(diag.weather_age_seconds // 60),
     }
 
 

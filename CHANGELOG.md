@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0b2] - 2026-10-28
+Second pre-release (beta) of 0.9.0: Visual Harmony (RM-E04) with the Daylight Estimator (RM-E03), optional and off by default. The minimum Home Assistant version stays 2024.12.
+
+### Added
+- **Visual harmony** (RM-E04, beta values): with the daylight compensation on, the options step *Daylight compensation* has *Visual harmony* (*Off*, *Balanced*, *Strong*). When the daylight has lowered the brightness far below the curve, the colour temperature is softly limited towards warmer light (e.g. curve 100 % / 6500 K, reduction to 20 %, *Balanced*: about 4850 K). Only on a real reduction, only in Auto, never cooler than the curve, not at night; only the own correction changes slowly (5 mired/min warmer, 10 mired/min back), the curve is followed at once. A comfort heuristic, not a lighting standard or health function.
+- **Daylight Estimator** (RM-E03): the outdoor light from the position of the sun (Haurwitz clear-sky model) and optionally a weather entity (condition and cloud cover; empty: the only weather entity, if there is exactly one) refines the influence of Visual harmony (e.g. clear sky stronger, twilight or low sun weaker). Stale or unavailable weather falls back to the position of the sun. No forecast, no network access.
+- Target colour temperature: attributes `base_value`, `environment_status` and `environment_reason` (of Visual harmony; the target brightness keeps those of the daylight compensation), `harmony_delta_mired`, `daylight_character`, `outdoor_quality`, `outdoor_confidence` (not stored in the history). The card shows the change, e.g. "6500 K → 4850 K · visual harmony". The diagnostics contain the outdoor light state (no position of the home: solar elevation in whole degrees, no azimuth or irradiance; the weather entity only as configured or not).
+- Saving the options continues with the current correction (no jump, decision O17); switching Visual harmony on starts without a jump.
+
+### Internal
+- `hacs.json` is stored with LF line endings again (0.9.0b1 had stored it with CRLF).
+
 ## [0.9.0b1] - 2026-10-27
 First pre-release (beta) of 0.9.0: new minimum Home Assistant version 2024.12 (RM-H01) and the scenario Guest removed (RM-R12). Daylight Estimator and Visual Harmony follow in later betas.
 

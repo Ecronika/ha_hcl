@@ -21,7 +21,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Generic, Protocol, TypeVar
 
@@ -83,6 +83,9 @@ class EnvironmentalContext:
     # mean brightness (%) of the lights that are on, follow HCL and were set
     # last by the Auto path (start seed of the daylight cap, DL §11)
     seed_brightness: float | None = None
+    # base setpoint of this evaluation, set by the controller (a later modifier
+    # compares the intermediate setpoint with it, e.g. Visual Harmony, VH §7)
+    base: HCLSetpoint | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,6 +235,7 @@ class EnvironmentalController:
                 base, base, STATUS_DISABLED, "environment_disabled", (), False, (), (), step_time.now
             ), self._states
         states = dict(self._states)
+        ctx = replace(ctx, base=base)
         snapshots: list[EnvironmentalStateSnapshot] = []
         for provider in self._providers:
             try:
