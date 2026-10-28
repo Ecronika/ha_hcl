@@ -34,6 +34,7 @@ from .const import (
     CONF_DAYLIGHT_STALE_AFTER, CONF_DAYLIGHT_UNAVAILABLE_GRACE,
     DEFAULT_DAYLIGHT_SMOOTHING, DEFAULT_DAYLIGHT_MAX_RATE,
     DEFAULT_DAYLIGHT_STALE_AFTER, DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE, DAYLIGHT_TARGET_LUX_RANGE,
+    CONF_HARMONY_PROFILE, CONF_HARMONY_WEATHER, HARMONY_PROFILES,
 )
 
 from homeassistant.const import CONF_NAME
@@ -47,6 +48,7 @@ SECTION_DAYLIGHT_ADVANCED = "daylight_advanced"
 # Daylight options that may be empty (removed from the options when cleared)
 _DAYLIGHT_OPTIONAL = (
     CONF_DAYLIGHT_SENSOR, CONF_DAYLIGHT_TARGET_LUX, CONF_DAYLIGHT_DEADBAND_LUX, CONF_DAYLIGHT_RESPONSE_BAND_LUX,
+    CONF_HARMONY_WEATHER,
 )
 # of those, the ones in the collapsed section
 _DAYLIGHT_ADVANCED_OPTIONAL = (CONF_DAYLIGHT_DEADBAND_LUX, CONF_DAYLIGHT_RESPONSE_BAND_LUX)
@@ -285,6 +287,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     errors[CONF_DAYLIGHT_SENSOR] = "daylight_sensor_required"
                 if not flat.get(CONF_DAYLIGHT_TARGET_LUX):
                     errors[CONF_DAYLIGHT_TARGET_LUX] = "daylight_target_required"
+            elif flat.get(CONF_HARMONY_PROFILE, "off") != "off":
+                # Visual Harmony needs the measured reduction (VH-PRD-01)
+                errors[CONF_HARMONY_PROFILE] = "harmony_requires_daylight"
             if not errors:
                 self._pending.update(flat)
                 return self.async_create_entry(title="", data=self._merged_options(self._pending))
@@ -307,6 +312,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     {"domain": "sensor", "device_class": "illuminance"}
                 ),
                 vol.Optional(CONF_DAYLIGHT_TARGET_LUX): _number(*DAYLIGHT_TARGET_LUX_RANGE, unit="lx"),
+                # Visual Harmony with the Daylight Estimator (RM-E04, RM-E03)
+                vol.Required(CONF_HARMONY_PROFILE, default=current.get(CONF_HARMONY_PROFILE, "off")): selector.SelectSelector(
+                    {"options": list(HARMONY_PROFILES), "translation_key": "harmony_profile"}
+                ),
+                vol.Optional(CONF_HARMONY_WEATHER): selector.EntitySelector({"domain": "weather"}),
                 vol.Required(SECTION_DAYLIGHT_ADVANCED): section(advanced, {"collapsed": True}),
             }
         )

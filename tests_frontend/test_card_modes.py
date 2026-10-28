@@ -228,3 +228,17 @@ async def test_rm_e01_no_note_when_the_effective_value_is_the_base(page):
 async def test_rm_e01_older_backend_without_environment_attributes(page):
     info = await _now_info(page, _setpoint_hass("auto", "55", "4000"))
     assert "55 %" in info and "→" not in info and "daylight" not in info, info
+
+
+async def test_rm_e04_now_shows_the_colour_temperature_of_visual_harmony(page):
+    h = _environment_hass("80", "20", "active", "daylight_reducing")
+    h["states"]["sensor.tk"]["state"] = "4860"
+    h["states"]["sensor.tk"]["attributes"] = {
+        "base_value": 6000, "environment_status": "active", "environment_reason": "harmony_warming",
+    }
+    info = await _now_info(page, h)
+    assert "80 % → 20 %" in info and "6,000 K → 4,860 K" in info and "visual harmony" in info, info
+    h["states"]["sensor.tk"]["state"] = "6000"
+    h["states"]["sensor.tk"]["attributes"]["environment_reason"] = "harmony_no_reduction"
+    info = await _now_info(page, h)
+    assert "→ 4" not in info and "visual harmony" not in info, info

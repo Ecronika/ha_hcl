@@ -80,15 +80,19 @@
             },
             "daylight": {
                 "title": "Daylight compensation",
-                "description": "Optional: an indoor lux sensor lowers the brightness in Auto when there is enough daylight. The brightness never goes above the curve and never below the minimum brightness; the colour temperature is not changed. Choose a sensor that represents the room and is not lit directly by the lights.",
+                "description": "Optional: an indoor lux sensor lowers the brightness in Auto when there is enough daylight. The brightness never goes above the curve and never below the minimum brightness. Choose a sensor that represents the room and is not lit directly by the lights. Visual harmony (optional, only with the daylight compensation) makes the colour temperature softly warmer when the daylight has lowered the brightness strongly.",
                 "data": {
                     "daylight_enabled": "Daylight compensation",
                     "daylight_sensor": "Lux sensor",
-                    "daylight_target_lux": "Target illuminance at the sensor"
+                    "daylight_target_lux": "Target illuminance at the sensor",
+                    "harmony_profile": "Visual harmony",
+                    "harmony_weather": "Weather entity"
                 },
                 "data_description": {
                     "daylight_sensor": "Sensor with device class illuminance (lx), required when the daylight compensation is on.",
-                    "daylight_target_lux": "Lux at the sensor HCL aims for (50–2000, required when on). A control value at the sensor position, not a lighting standard value."
+                    "daylight_target_lux": "Lux at the sensor HCL aims for (50–2000, required when on). A control value at the sensor position, not a lighting standard value.",
+                    "harmony_profile": "When the daylight compensation has lowered the brightness far below the curve, the colour temperature is softly limited towards warmer light (never cooler than the curve). Off by default; Balanced or Strong. A comfort heuristic, beta values.",
+                    "harmony_weather": "Optional: refines Visual Harmony with the weather (sun, clouds, fog, rain). Empty: the only weather entity, if there is exactly one; otherwise only the position of the sun."
                 },
                 "sections": {
                     "daylight_advanced": {
@@ -121,7 +125,8 @@
             "invalid_time": "Invalid time.",
             "no_lights": "Select at least one light, area, device, floor or label.",
             "daylight_sensor_required": "Choose a lux sensor for the daylight compensation.",
-            "daylight_target_required": "Enter the target illuminance for the daylight compensation."
+            "daylight_target_required": "Enter the target illuminance for the daylight compensation.",
+            "harmony_requires_daylight": "Visual harmony needs the daylight compensation."
         }
     },
     "entity": {
@@ -265,6 +270,13 @@
                 "focus": "Focus",
                 "relax": "Relax",
                 "cleaning": "Cleaning"
+            }
+        },
+        "harmony_profile": {
+            "options": {
+                "off": "Off",
+                "balanced": "Balanced",
+                "strong": "Strong"
             }
         }
     },

@@ -80,15 +80,19 @@
             },
             "daylight": {
                 "title": "Tageslichtkompensation",
-                "description": "Optional: Ein Luxsensor im Raum senkt in Auto die Helligkeit, wenn genug Tageslicht da ist. Die Helligkeit geht nie über die Kurve und nie unter die Mindesthelligkeit; die Farbtemperatur bleibt unverändert. Wähle einen Sensor, der den Raum repräsentiert und nicht direkt von den Leuchten angestrahlt wird.",
+                "description": "Optional: Ein Luxsensor im Raum senkt die Helligkeit in Auto, wenn genug Tageslicht da ist. Die Helligkeit liegt nie über der Kurve und nie unter der Mindesthelligkeit. Wähle einen Sensor, der den Raum abbildet und nicht direkt von den Leuchten angestrahlt wird. Die visuelle Harmonie (optional, nur mit Tageslichtkompensation) macht die Farbtemperatur sanft wärmer, wenn das Tageslicht die Helligkeit stark gesenkt hat.",
                 "data": {
                     "daylight_enabled": "Tageslichtkompensation",
                     "daylight_sensor": "Luxsensor",
-                    "daylight_target_lux": "Ziel-Beleuchtungsstärke am Sensor"
+                    "daylight_target_lux": "Ziel-Beleuchtungsstärke am Sensor",
+                    "harmony_profile": "Visuelle Harmonie",
+                    "harmony_weather": "Wetter-Entität"
                 },
                 "data_description": {
                     "daylight_sensor": "Sensor mit Geräteklasse Beleuchtungsstärke (lx), Pflicht bei eingeschalteter Tageslichtkompensation.",
-                    "daylight_target_lux": "Lux am Sensor, die HCL anstrebt (50–2000, Pflicht bei eingeschalteter Funktion). Ein Regelwert an der Sensorposition, kein Normwert."
+                    "daylight_target_lux": "Lux am Sensor, die HCL anstrebt (50–2000, Pflicht bei eingeschalteter Funktion). Ein Regelwert an der Sensorposition, kein Normwert.",
+                    "harmony_profile": "Hat die Tageslichtkompensation die Helligkeit weit unter die Kurve gesenkt, wird die Farbtemperatur sanft in Richtung wärmeres Licht begrenzt (nie kälter als die Kurve). Standard aus; Ausgewogen oder Stark. Komfort-Heuristik, Beta-Werte.",
+                    "harmony_weather": "Optional: verfeinert die visuelle Harmonie mit dem Wetter (Sonne, Wolken, Nebel, Regen). Leer: die einzige Wetter-Entität, wenn es genau eine gibt; sonst nur der Sonnenstand."
                 },
                 "sections": {
                     "daylight_advanced": {
@@ -121,7 +125,8 @@
             "invalid_time": "Ungültige Uhrzeit.",
             "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen.",
             "daylight_sensor_required": "Wähle einen Luxsensor für die Tageslichtkompensation.",
-            "daylight_target_required": "Gib die Ziel-Beleuchtungsstärke für die Tageslichtkompensation an."
+            "daylight_target_required": "Gib die Ziel-Beleuchtungsstärke für die Tageslichtkompensation an.",
+            "harmony_requires_daylight": "Die visuelle Harmonie braucht die Tageslichtkompensation."
         }
     },
     "entity": {
@@ -265,6 +270,13 @@
                 "focus": "Fokus",
                 "relax": "Entspannen",
                 "cleaning": "Putzen"
+            }
+        },
+        "harmony_profile": {
+            "options": {
+                "off": "Aus",
+                "balanced": "Ausgewogen",
+                "strong": "Stark"
             }
         }
     },

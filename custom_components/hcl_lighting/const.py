@@ -135,6 +135,12 @@ DEFAULT_DAYLIGHT_STALE_AFTER = 3600
 DEFAULT_DAYLIGHT_UNAVAILABLE_GRACE = 300
 DAYLIGHT_TARGET_LUX_RANGE = (50, 2000)
 
+# v0.9.0 Visual Harmony (RM-E04) with the Daylight Estimator (RM-E03), opt-in,
+# only together with the daylight compensation
+CONF_HARMONY_PROFILE = "harmony_profile"   # off | balanced | strong
+CONF_HARMONY_WEATHER = "harmony_weather"   # optional weather entity (empty: the only one, if exactly one)
+HARMONY_PROFILES = ("off", "balanced", "strong")
+
 # Settings removed by the migration to entry version 1.2 (0.8.0): options of
 # 0.7.0 betas that are fixed behaviour now (brightness scaling, scenario
 # limits, night modes ending at the wake time), the midday anchor (RM-R07)

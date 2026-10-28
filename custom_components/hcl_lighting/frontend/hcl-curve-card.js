@@ -46,6 +46,7 @@ const HCL_STRINGS = {
         env_daylight: "daylight",
         env_daylight_hold: "daylight held",
         env_daylight_sensor: "daylight sensor without value",
+        env_harmony: "visual harmony",
         sleep_now: "lights off",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
@@ -116,6 +117,7 @@ const HCL_STRINGS = {
         env_daylight: "Tageslicht",
         env_daylight_hold: "Tageslicht gehalten",
         env_daylight_sensor: "Tageslichtsensor ohne Wert",
+        env_harmony: "visuelle Harmonie",
         sleep_now: "Lichter aus",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
@@ -1266,9 +1268,18 @@ class HCLCurveCard extends HTMLElement {
             const b = Number(bState.state);
             const base = Number(attrs.base_value);
             const changed = Number.isFinite(base) && Math.round(base) !== Math.round(b);
-            parts.push(changed ? `${f.percent(base)} → ${f.percent(b)}` : f.percent(b), f.kelvin(Number(kState.state)));
+            // colour temperature changed by Visual Harmony (RM-E04)
+            const kAttrs = kState.attributes || {};
+            const k = Number(kState.state);
+            const baseK = Number(kAttrs.base_value);
+            const kChanged = Number.isFinite(baseK) && Math.round(baseK) !== Math.round(k);
+            parts.push(
+                changed ? `${f.percent(base)} → ${f.percent(b)}` : f.percent(b),
+                kChanged ? `${f.kelvin(baseK)} → ${f.kelvin(k)}` : f.kelvin(k),
+            );
             const note = this._environmentNote(attrs.environment_status, attrs.environment_reason, changed);
             if (note) parts.push(note);
+            if (kChanged && String(kAttrs.environment_reason || "").startsWith("harmony_")) parts.push(this._t("env_harmony"));
         } else if (bState || kState) {
             // The setpoint sensors exist but have no current value: no substitute
             parts.push(this._t("setpoint_unavailable"));
