@@ -83,9 +83,10 @@ class Loop:
     seconds: float = 0.0
     persisted: tuple[float | None, datetime | None] = (None, None)
     reported_at: float | None = None  # seconds of the last report (report()); None: the age is `age`
+    sample: tuple | None = None  # handed over on a reload (RM-B60)
 
     def __post_init__(self) -> None:
-        self.modifier = DaylightModifier(self.cfg, *self.persisted)
+        self.modifier = DaylightModifier(self.cfg, *self.persisted, sample=self.sample)
         self.env = EnvironmentalController(
             providers=[FakeLux(lambda: LuxReading(self.lux, self.problem, self.sensor_age))],
             modifiers=[self.modifier],

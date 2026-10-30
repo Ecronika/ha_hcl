@@ -392,3 +392,17 @@ def test_rm_b59_rounding_is_never_cooler_than_the_base():
             published = _published(HCLSetpoint(80, float(base)), HCLSetpoint(80, kelvin)).kelvin
             assert published <= base and published % 10 == 0
             assert abs(published - kelvin) < 10
+
+
+# ---------------------------------------------------------------- RM-B61 (review 0.9.0b3)
+@pytest.mark.parametrize("base_k", [2028.0, 2878.0, 2935.0])
+def test_rm_b61_a_correction_limited_to_zero_keeps_the_base(base_k):
+    """A stored correction, the curve warmer than the limit: the applied
+    correction is 0 and the base is published unchanged (0.9.0b3: 2020 K,
+    2880 K, 2940 K through the conversion to mired and back)."""
+    rig = Rig(effective=20.0)
+    settle(rig, minutes=120)
+    assert rig.delta > 45
+    result = rig.step(base_k=base_k)
+    assert result.effective.kelvin == base_k
+    assert result.modifier(HARMONY_KEY).details["delta_mired"] == 0

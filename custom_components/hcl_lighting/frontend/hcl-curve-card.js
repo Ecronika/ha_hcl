@@ -45,9 +45,17 @@ const HCL_STRINGS = {
         setpoint_unavailable: "target values not available",
         env_daylight: "daylight",
         env_daylight_hold: "daylight held",
+        env_daylight_hold_old: "daylight held (reading older than 10 min)",
+        env_daylight_hold_budget: "daylight held (reduction for this reading used up)",
         env_daylight_sensor: "daylight sensor without value",
         env_harmony: "visual harmony",
-        sleep_now: "lights off",
+        sleep_now: "setpoint off",
+        hcl_off: "HCL off",
+        adapt_off: "adaptation off",
+        adapt_brightness_only: "brightness only",
+        adapt_color_only: "colour temperature only",
+        manual_one: "1 light manual",
+        manual_many: "{n} lights manual",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
         curve_applies_auto: "The curve applies in Auto; active now: {mode}. Changes take effect in Auto.",
@@ -116,9 +124,17 @@ const HCL_STRINGS = {
         setpoint_unavailable: "Sollwerte nicht verfügbar",
         env_daylight: "Tageslicht",
         env_daylight_hold: "Tageslicht gehalten",
+        env_daylight_hold_old: "Tageslicht gehalten (Messwert älter als 10 min)",
+        env_daylight_hold_budget: "Tageslicht gehalten (Absenkung für diesen Messwert ausgeschöpft)",
         env_daylight_sensor: "Tageslichtsensor ohne Wert",
         env_harmony: "visuelle Harmonie",
-        sleep_now: "Lichter aus",
+        sleep_now: "Sollwert aus",
+        hcl_off: "HCL aus",
+        adapt_off: "Anpassung aus",
+        adapt_brightness_only: "nur Helligkeit",
+        adapt_color_only: "nur Farbtemperatur",
+        manual_one: "1 Licht manuell",
+        manual_many: "{n} Lichter manuell",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
         curve_applies_auto: "Die Kurve gilt im Modus Auto; aktiv ist gerade {mode}. Änderungen wirken in Auto.",
@@ -434,6 +450,7 @@ class HCLCurveCard extends HTMLElement {
         this._scenarios = JSON.parse(JSON.stringify(HCL_SCENARIO_DEFAULTS));
         this._limits = { minB: 0, maxB: 100 };
         this._targetIds = { b: null, k: null };
+        this._switchIds = { hcl: null, b: null, k: null };  // HCL active and adapt switches (RM-F06)
         this._editorOpen = false;
 
         this._validationResult = { errors: [], warnings: [] };
@@ -509,6 +526,7 @@ class HCLCurveCard extends HTMLElement {
         this._modeUntil = null;
         this._dataState = "loading";
         this._targetIds = { b: null, k: null };
+        this._switchIds = { hcl: null, b: null, k: null };
     }
 
     // ------------------------------------------------------------ Home Assistant state
@@ -569,6 +587,11 @@ class HCLCurveCard extends HTMLElement {
             };
             if (JSON.stringify(limits) !== JSON.stringify(this._limits)) { this._limits = limits; visualsChanged = true; }
             this._targetIds = { b: attrs.target_brightness_entity_id || null, k: attrs.target_color_temp_entity_id || null };
+            this._switchIds = {
+                hcl: attrs.switch_entity_id || null,
+                b: attrs.adapt_brightness_entity_id || null,
+                k: attrs.adapt_color_entity_id || null,
+            };
             const defaults = Array.isArray(attrs.default_points) && attrs.default_points.length >= 2 ? attrs.default_points : null;
             if (JSON.stringify(defaults) !== JSON.stringify(this._defaultPoints)) { this._defaultPoints = defaults; visualsChanged = true; }
             if (this._syncMode(hass, attrs)) visualsChanged = true;
@@ -584,7 +607,8 @@ class HCLCurveCard extends HTMLElement {
         const entity = this.config && this.config.entity;
         const stateObj = entity ? states[entity] : undefined;
         const attrs = (stateObj && stateObj.attributes) || {};
-        const related = [attrs.mode_entity_id, attrs.target_brightness_entity_id, attrs.target_color_temp_entity_id]
+        const related = [attrs.mode_entity_id, attrs.target_brightness_entity_id, attrs.target_color_temp_entity_id,
+            attrs.switch_entity_id, attrs.adapt_brightness_entity_id, attrs.adapt_color_entity_id]
             .map(id => (id ? states[id] : undefined));
         let loaded = false;
         if (!stateObj) for (const _ in states) { loaded = true; break; } // loading → missing
@@ -1255,6 +1279,8 @@ class HCLCurveCard extends HTMLElement {
         const untilText = mode && mode !== "auto" ? this._untilText(this._modeUntil) : null;
         if (untilText) parts.push(untilText);
         const states = (this._hass && this._hass.states) || {};
+        const control = this._controlNotes(states);
+        if (control.state) parts.push(control.state);
         const bState = this._targetIds.b ? states[this._targetIds.b] : undefined;
         const kState = this._targetIds.k ? states[this._targetIds.k] : undefined;
         const valid = (st) => !!st && st.state !== "" && Number.isFinite(Number(st.state));
@@ -1296,6 +1322,7 @@ class HCLCurveCard extends HTMLElement {
                 parts.push(this._t("setpoint_unavailable"));
             }
         }
+        if (control.manual) parts.push(control.manual);
         hclSetSpoken(el, parts.join(" · "), parts.join(", "));
         // The draft line appears with the first change: not while a point is
         // dragged (it would move the charts under the pointer, RM-B27)
@@ -1310,10 +1337,32 @@ class HCLCurveCard extends HTMLElement {
         }
     }
 
+    // Whether the setpoint can take effect (RM-F06): HCL off, an adapt switch
+    // off, lights under manual control. Nothing for an older integration
+    // without the switch references.
+    _controlNotes(states) {
+        const ids = this._switchIds;
+        const main = ids.hcl ? states[ids.hcl] : undefined;
+        if (!main) return { state: null, manual: null };
+        if (main.state === "off") return { state: this._t("hcl_off"), manual: null };
+        const off = (id) => !!id && !!states[id] && states[id].state === "off";
+        const bOff = off(ids.b);
+        const kOff = off(ids.k);
+        const state = bOff && kOff ? this._t("adapt_off")
+            : bOff ? this._t("adapt_color_only") : kOff ? this._t("adapt_brightness_only") : null;
+        const list = main.attributes && main.attributes.manual_control;
+        const n = main.state === "on" && Array.isArray(list) ? list.length : 0;
+        const manual = n === 1 ? this._t("manual_one") : n > 1 ? this._t("manual_many", { n }) : null;
+        return { state, manual };
+    }
+
     // Short reason of an environmental feature (daylight compensation) for the "now" line
     _environmentNote(status, reason, changed) {
         if (typeof reason !== "string" || !reason.startsWith("daylight_")) return null;
         if (status === "degraded" || status === "fallback") return this._t("env_daylight_sensor");
+        // a rarely reporting sensor holds the reduction (RM-E02-33, RM-B62)
+        if (reason === "daylight_hold_sample_old" && changed) return this._t("env_daylight_hold_old");
+        if (reason === "daylight_hold_sample_budget" && changed) return this._t("env_daylight_hold_budget");
         if (status === "hold" && changed) return this._t("env_daylight_hold");
         if (status === "active" && changed) return this._t("env_daylight");
         return null;

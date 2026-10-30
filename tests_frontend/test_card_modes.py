@@ -242,3 +242,86 @@ async def test_rm_e04_now_shows_the_colour_temperature_of_visual_harmony(page):
     h["states"]["sensor.tk"]["attributes"]["environment_reason"] = "harmony_no_reduction"
     info = await _now_info(page, h)
     assert "→ 4" not in info and "visual harmony" not in info, info
+
+
+# ---------------------------------------------------------------- RM-B62
+@pytest.mark.parametrize("reason,en,de", [
+    ("daylight_hold_sample_old", "daylight held (reading older than 10 min)", "Tageslicht gehalten (Messwert älter als 10 min)"),
+    ("daylight_hold_sample_budget", "daylight held (reduction for this reading used up)",
+     "Tageslicht gehalten (Absenkung für diesen Messwert ausgeschöpft)"),
+])
+async def test_rm_b62_hold_of_a_rarely_reporting_sensor_is_named(page, reason, en, de):
+    """Review 30.10.2026: the b3 reasons come with status active; the card
+    showed only "daylight"."""
+    h = _environment_hass("80", "55", "active", reason)
+    assert en in await _now_info(page, h)
+    h["language"] = "de"
+    h["locale"]["language"] = "de"
+    assert de in await _now_info(page, h)
+    info = await _now_info(page, _environment_hass("80", "80", "active", reason))
+    assert "held" not in info and "daylight" not in info, info  # no reduction against the curve
+
+
+# ---------------------------------------------------------------- RM-F06, RM-B63
+def _control_hass(mode="auto", hcl="on", adapt_b="on", adapt_k="on", manual=()):
+    h = _environment_hass("80", "80", "active", "daylight_within_deadband")
+    h["states"]["select.mode"]["state"] = mode
+    h["states"]["sensor.hcl_curve_data"]["attributes"].update({
+        "switch_entity_id": "switch.hcl", "adapt_brightness_entity_id": "switch.hcl_adapt_brightness",
+        "adapt_color_entity_id": "switch.hcl_adapt_color",
+    })
+    h["states"]["switch.hcl"] = {"state": hcl, "attributes": {"manual_control": list(manual)}}
+    h["states"]["switch.hcl_adapt_brightness"] = {"state": adapt_b, "attributes": {}}
+    h["states"]["switch.hcl_adapt_color"] = {"state": adapt_k, "attributes": {}}
+    return h
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+    ({}, None),
+    ({"hcl": "off"}, "HCL off"),
+    ({"hcl": "off", "manual": ["light.a"]}, "HCL off"),
+    ({"adapt_b": "off"}, "colour temperature only"),
+    ({"adapt_k": "off"}, "brightness only"),
+    ({"adapt_b": "off", "adapt_k": "off"}, "adaptation off"),
+    ({"manual": ["light.a"]}, "1 light manual"),
+    ({"manual": ["light.a", "light.b"]}, "2 lights manual"),
+])
+async def test_rm_f06_now_shows_whether_the_setpoint_can_take_effect(page, kwargs, expected):
+    """User review 30.10.2026 (O18 = A): HCL off, an adapt switch off and
+    lights under manual control are shown in the now line."""
+    info = await _now_info(page, _control_hass(**kwargs))
+    notes = ["HCL off", "only", "adaptation off", "manual"]
+    if expected is None:
+        assert not any(n in info for n in notes), info
+    else:
+        assert expected in info, info
+        assert "80 %" in info  # the setpoint itself is still shown
+    if kwargs.get("hcl") == "off":
+        assert "manual" not in info, info
+
+
+async def test_rm_f06_a_change_of_a_switch_alone_updates_the_line(page):
+    await _now_info(page, _control_hass())
+    await page.evaluate("""() => {
+        const h = card._hass;
+        card.hass = { ...h, states: { ...h.states, "switch.hcl": { state: "off", attributes: {} } } };
+    }""")
+    await frames(page)
+    info = await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+    assert "HCL off" in info, info
+
+
+async def test_rm_f06_older_integration_without_switch_references(page):
+    h = _control_hass(hcl="off")
+    for key in ("switch_entity_id", "adapt_brightness_entity_id", "adapt_color_entity_id"):
+        del h["states"]["sensor.hcl_curve_data"]["attributes"][key]
+    info = await _now_info(page, h)
+    assert "HCL off" not in info and "80 %" in info, info
+
+
+async def test_rm_b63_sleep_states_the_setpoint_not_the_lights(page):
+    """Sleep: manually controlled lights stay on (by design) - the line names
+    the setpoint, not "lights off", and shows the manual exception."""
+    info = await _now_info(page, _control_hass(mode="sleep", manual=["light.a"]))
+    assert "Sleep" in info and "setpoint off" in info and "1 light manual" in info, info
+    assert "lights off" not in info, info

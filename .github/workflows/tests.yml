@@ -59,9 +59,9 @@ jobs:
             phcc: "0.13.269"
             extra: "pycares<5"
           # Current release (update together with pytest-homeassistant-custom-component)
-          - ha: "2026.9.3"
+          - ha: "2026.10.4"
             python: "3.14"
-            phcc: "0.13.366"
+            phcc: "0.13.375"
             extra: ""
     steps:
       - uses: actions/checkout@v4

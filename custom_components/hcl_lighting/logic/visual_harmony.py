@@ -194,6 +194,7 @@ class VisualHarmonyModifier:
             if delta and current.kelvin:
                 # the stored correction stays and is released at its rate (RM-B58)
                 delta = min(delta, max(0.0, WARMEST_MIRED - 1_000_000 / current.kelvin))
+            if delta and current.kelvin:  # no conversion for 0: the base unchanged (RM-B61)
                 after = replace(current, kelvin=1_000_000 / (1_000_000 / current.kelvin + delta))
             details["delta_mired"] = None if delta is None else round(delta, 1)
             return after, ModifierSnapshot(self.key, status, reason, current, after, details), final

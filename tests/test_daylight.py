@@ -515,3 +515,27 @@ async def test_rm_e02_33_a_sensor_that_reports_rarely(hass, noon, no_frontend_re
     assert state.attributes["sensor_age"] > 600
     await _cycles(hass, noon, 40, lux=3000)  # reports every cycle
     assert float(hass.states.get(TARGET_B).state) == 10  # minimum brightness of the entry
+
+
+async def test_rm_b60_saving_the_options_keeps_the_budget(hass, noon, no_frontend_registration):
+    """Reviews 30.10.2026: each reload gave the same report another 25 points.
+    An unrelated option saved twice: still at most 25 points; a new report
+    continues; another sensor (reported at the same moment) is new evidence."""
+    _lux(hass, 3000)
+    hass.states.async_set("sensor.lux2", "3000", LUX_ATTRS)
+    fake, entry = await _daylight(hass, lux=3000)
+    await _cycles(hass, noon, 8)
+    assert float(hass.states.get(TARGET_B).state) == 75
+    for smoothing in (61, 62):
+        hass.config_entries.async_update_entry(entry, options={**entry.options, "daylight_smoothing": smoothing})
+        await hass.async_block_till_done()
+        await _cycles(hass, noon, 3)
+        assert float(hass.states.get(TARGET_B).state) == 75  # 0.9.0b3: lower after each reload
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "daylight_sensor": "sensor.lux2"})
+    await hass.async_block_till_done()
+    await _cycles(hass, noon, 6)
+    assert float(hass.states.get(TARGET_B).state) == 50
+    for _ in range(8):  # the new sensor reports again
+        hass.states.async_set("sensor.lux2", "3000", LUX_ATTRS, force_update=True)
+        await _cycles(hass, noon)
+    assert float(hass.states.get(TARGET_B).state) < 50
