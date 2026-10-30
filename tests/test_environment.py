@@ -601,3 +601,117 @@ def test_rm_e02_32_only_a_reduction_right_after_a_raise_limits_raising(pause, re
         assert loop.cap > start
     result = _settle(loop, 400, steps=1)  # clearly below the target: raised in any case
     assert result.modifier("daylight").reason == "daylight_raising"
+
+
+# ---------------------------------------------------------------- RM-E02-33 (Praxis 29.10.2026)
+def _kitchen(**cfg) -> Loop:
+    """Kitchen of the field test: target 120 lx, dead band 20 lx, base 71 %,
+    a sensor that reports rarely (Aqara P1: about every 50 min without motion)."""
+    loop = Loop(cfg=config(target_lux=120, deadband_lux=20, response_band_lux=120, **cfg))
+    loop.report(100)  # below the target: the cap stays at the base
+    for _ in range(5):
+        loop.step(base=71)
+    assert loop.cap == 71
+    return loop
+
+
+def _minutes(loop: Loop, minutes: float, **ctx):
+    for _ in range(round(minutes * 60 / 27)):
+        result = loop.step(base=71, **ctx)
+    return result
+
+
+@pytest.mark.parametrize("lights_on", [0, 1])
+def test_rm_e02_33_a_single_sample_lowers_for_at_most_10_minutes(lights_on):
+    """29.10.2026: one report of 152 lx (a short bright spell), then none for
+    50 min - the cap fell from 71 % to 19 % (0.9.0b2). A reduction needs a
+    sample of at most 10 min; raising does not."""
+    loop = _kitchen()
+    loop.report(152)
+    result = _minutes(loop, 50, lights_on=lights_on, lights_controlled=lights_on)
+    assert result.modifier("daylight").reason == "daylight_hold_sample_old"
+    assert loop.cap >= 71 - 11 - 1  # at most 10 min of 1.1 %/min
+
+
+def test_rm_e02_33_one_sample_lowers_by_at_most_25_points():
+    """A large excess reaches the minimum within the 10 min at full rate: one
+    sample lowers by at most 25 % points; a new report (also of the same
+    value) allows the next 25."""
+    loop = _kitchen()
+    loop.report(400)
+    result = _minutes(loop, 5)
+    assert loop.cap == pytest.approx(71 - 25)
+    assert result.modifier("daylight").reason == "daylight_hold_sample_budget"
+    loop.report(400)
+    _minutes(loop, 5)
+    assert loop.cap == pytest.approx(71 - 50)
+
+
+def test_rm_e02_33_raising_needs_no_fresh_sample():
+    loop = _kitchen()
+    loop.report(400)
+    _minutes(loop, 5)
+    loop.report(60)  # darker: raised although the sample gets old
+    result = _minutes(loop, 30)
+    assert loop.cap == 71
+    assert result.modifier("daylight").reason == "daylight_at_base"
+
+
+def test_rm_e02_33_a_sensor_reporting_every_5_min_lowers_fully():
+    """Lasting daylight with a sensor that reports every 5 min (Hue): the
+    reduction still reaches the minimum, only in steps of 25 points."""
+    loop = _kitchen()
+    for i in range(round(20 * 60 / 27)):
+        if i % 11 == 0:
+            loop.report(400)
+        loop.step(base=71)
+    assert loop.cap == 3
+
+
+def test_rm_e02_33_not_for_sensors_that_report_only_on_a_change():
+    """Sensor stale after 0 (reports only on a change): an old value is still
+    valid, so neither the 10 min nor the 25 points apply."""
+    loop = _kitchen(stale_after_s=0)
+    loop.report(400)
+    _minutes(loop, 30)
+    assert loop.cap == 3
+
+
+def test_rm_e02_33_a_restart_of_the_loop_forgets_the_sample():
+    """After a long pause (start of the loop) the budget starts again."""
+    loop = _kitchen()
+    loop.report(400)
+    _minutes(loop, 5)
+    _minutes(loop, 125, hcl_active=False)  # paused for more than 2 h
+    loop.report(400)
+    _minutes(loop, 5)
+    assert loop.cap == pytest.approx(71 - 25)
+
+
+def test_rm_e02_33_at_the_minimum_the_reason_stays_reducing():
+    """Fully reduced with a fresh sample: nothing is held back by E02-33."""
+    loop = _kitchen()
+    for i in range(round(20 * 60 / 27)):
+        if i % 11 == 0:
+            loop.report(400)
+        result = loop.step(base=71)
+    assert loop.cap == 3
+    assert result.modifier("daylight").reason == "daylight_reducing"
+
+
+def test_rm_e02_33_a_lower_curve_does_not_use_the_budget():
+    """Review 0.9.0b3: the curve falls while one sample lowers - only the
+    reduction by the daylight counts against the 25 points."""
+    loop = _kitchen()
+    loop.report(400)
+    loop.step(base=71)
+    for base in (60, 45, 40):
+        result = loop.step(base=base)
+    assert result.modifier("daylight").reason == "daylight_reducing"
+    used = loop.state.sample_used
+    assert used < 25
+    cap = loop.cap
+    for _ in range(10):
+        result = loop.step(base=40)
+    assert loop.cap == pytest.approx(cap - (25 - used))  # 0.9.0b3 draft: held at once
+    assert result.modifier("daylight").reason == "daylight_hold_sample_budget"

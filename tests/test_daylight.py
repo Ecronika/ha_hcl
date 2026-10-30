@@ -47,8 +47,12 @@ async def _daylight(hass, lux=2000, options=None, lights=("light.a",)):
     return fake, entry
 
 
-async def _cycles(hass, freezer, n=1, seconds=27):
+async def _cycles(hass, freezer, n=1, seconds=27, lux=None):
+    """n update cycles; with lux the sensor reports that value before each
+    cycle (otherwise its last report gets older, RM-E02-33)."""
     for _ in range(n):
+        if lux is not None:
+            _lux(hass, lux)
         freezer.tick(timedelta(seconds=seconds))
         await timer_cycle(hass)
         await hass.async_block_till_done()
@@ -76,7 +80,7 @@ async def test_rm_e01_without_daylight_nothing_changes(hass, noon, no_frontend_r
 # ---------------------------------------------------------------- control in HA
 async def test_rm_e02_bright_room_dims_the_lights(hass, noon, no_frontend_registration):
     fake, entry = await _daylight(hass, lux=3000)
-    await _cycles(hass, noon, 20)
+    await _cycles(hass, noon, 20, lux=3000)
     sent = _sent_brightness(fake)
     assert sent is not None and sent < 100
     state = hass.states.get(TARGET_B)
@@ -129,9 +133,8 @@ def test_rm_e01_environment_attributes_are_not_recorded():
 async def test_rm_e02_single_invalid_sample_sends_nothing(hass, noon, no_frontend_registration):
     """DL-T19: one unknown value: no light command, no jump to the base."""
     fake, entry = await _daylight(hass, lux=3000)
-    await _cycles(hass, noon, 20)
-    _lux(hass, 520)  # within the dead band: no change
-    await _cycles(hass, noon, 3)
+    await _cycles(hass, noon, 20, lux=3000)
+    await _cycles(hass, noon, 3, lux=520)  # within the dead band: no change
     # the light has the values (the test double does not change its state)
     b, k = (float(hass.states.get(e).state) for e in (TARGET_B, TARGET_K))
     set_light(hass, "light.a", "on", **{**ON, "brightness": round(b * 255 / 100), "color_temp_kelvin": int(k)})
@@ -499,3 +502,16 @@ async def test_rm_b57_stored_advanced_daylight_values_are_shown(hass, no_fronten
     shown = {str(k): k for k in result["data_schema"].schema[section].schema.schema}
     assert shown["daylight_deadband_lux"].description == {"suggested_value": 40}
     assert shown["daylight_response_band_lux"].description == {"suggested_value": 100}
+
+
+async def test_rm_e02_33_a_sensor_that_reports_rarely(hass, noon, no_frontend_registration):
+    """Praxis 29.10.2026: one report lowers by at most 25 % points and not
+    after 10 min; the next report (same value) continues the reduction."""
+    fake, entry = await _daylight(hass, lux=3000)
+    await _cycles(hass, noon, 40)  # 18 min without a new report
+    state = hass.states.get(TARGET_B)
+    assert float(state.state) == 75  # curve 100 %
+    assert state.attributes["environment_reason"] == "daylight_hold_sample_old"
+    assert state.attributes["sensor_age"] > 600
+    await _cycles(hass, noon, 40, lux=3000)  # reports every cycle
+    assert float(hass.states.get(TARGET_B).state) == 10  # minimum brightness of the entry

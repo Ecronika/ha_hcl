@@ -72,6 +72,11 @@ TIGHTEN_RATE = 5.0  # mired/min towards a warmer correction (VH-PRD-13)
 RELEASE_RATE = 10.0  # mired/min back towards the base
 _MIRED_MIN = 1_000_000 / 7000.0  # colour temperature range of the options (2000-7000 K)
 _MIRED_MAX = 1_000_000 / 2000.0
+# Warmest colour temperature of any correction: the warm end of the envelope
+# with the largest offset (about 3770 K). The applied correction never goes
+# beyond it, also after the base jumped to a warmer value (RM-B58); a fixed
+# value, so a change of the character does not move it.
+WARMEST_MIRED = 1_000_000 / _ENVELOPE[0][1] + max(offset for _w, offset in _CHARACTER.values())
 DISABLED = "disabled"  # handover marker: the feature was off before a reload
 
 
@@ -187,6 +192,8 @@ class VisualHarmonyModifier:
         def done(status: str, reason: str, delta: float | None, final: HarmonyState):
             after = current
             if delta and current.kelvin:
+                # the stored correction stays and is released at its rate (RM-B58)
+                delta = min(delta, max(0.0, WARMEST_MIRED - 1_000_000 / current.kelvin))
                 after = replace(current, kelvin=1_000_000 / (1_000_000 / current.kelvin + delta))
             details["delta_mired"] = None if delta is None else round(delta, 1)
             return after, ModifierSnapshot(self.key, status, reason, current, after, details), final

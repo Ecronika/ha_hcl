@@ -82,11 +82,12 @@ class Loop:
     age: float = 0.0
     seconds: float = 0.0
     persisted: tuple[float | None, datetime | None] = (None, None)
+    reported_at: float | None = None  # seconds of the last report (report()); None: the age is `age`
 
     def __post_init__(self) -> None:
         self.modifier = DaylightModifier(self.cfg, *self.persisted)
         self.env = EnvironmentalController(
-            providers=[FakeLux(lambda: LuxReading(self.lux, self.problem, self.age))],
+            providers=[FakeLux(lambda: LuxReading(self.lux, self.problem, self.sensor_age))],
             modifiers=[self.modifier],
             clock=lambda: self.seconds,
         )
@@ -94,6 +95,14 @@ class Loop:
     @property
     def now(self) -> datetime:
         return START + timedelta(seconds=self.seconds)
+
+    @property
+    def sensor_age(self) -> float:
+        return self.age if self.reported_at is None else self.seconds - self.reported_at
+
+    def report(self, lux: float) -> None:
+        """The sensor reports now (also the same value); its age grows from here."""
+        self.lux, self.reported_at = lux, self.seconds
 
     def step(self, base: float = 80, dt: float = 27, **ctx):
         self.seconds += dt

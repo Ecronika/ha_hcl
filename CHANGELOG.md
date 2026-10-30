@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0b3] - 2026-10-29
+Third pre-release (beta) of 0.9.0: the daylight compensation with sensors that report rarely (RM-E02-33, from the field test) and two fixes of Visual harmony (RM-B58, RM-B59). The minimum Home Assistant version stays 2024.12.
+
+### Changed
+- **Daylight compensation: a reduction needs a fresh sensor value** (RM-E02-33): a value older than 10 minutes lowers the brightness no further, and one report lowers it by at most 25 % points (a lower curve does not count); a new report continues (a repeated identical value only if Home Assistant records it – MQTT sensors such as Zigbee2MQTT record only a changed value). Raising is not affected. In the field test a motion sensor that reports the illuminance only about every 50 minutes without motion reported 152 lx once (target 120 lx) during a bright spell of 10 minutes – the kitchen was lowered from 71 % to 19 % over 50 minutes. With a sensor whose value changes every few minutes nothing changes noticeably; with a rarely reporting one the light follows lasting daylight in steps. Not with *Sensor stale after* 0 (sensors that report only on change). The target brightness shows the reason `daylight_hold_sample_old` (value older than 10 minutes) or `daylight_hold_sample_budget` (25 points used). No new option.
+
+### Fixed
+- Visual harmony: after the curve jumped to a warmer colour temperature (e.g. a curve saved in the card) the correction still in effect was added to the new value, so the light could become warmer than intended and below 2000 K (curve 6500 → 2000 K at 20 % brightness: 1830 K for some minutes). The applied correction now never goes beyond the warm end of the envelope (about 3770 K: 4000 K plus the largest offset of the daylight character, a fixed limit so that a change of the weather does not move it); the stored correction is still released at its rate (RM-B58). `harmony_delta_mired` shows the correction in effect.
+- Visual harmony: the rounding to 10 K could publish a value a few kelvin cooler than the curve (6510 K for a curve of 6507 K); a warmer result now stays at or below the curve (RM-B59).
+
 ## [0.9.0b2] - 2026-10-28
 Second pre-release (beta) of 0.9.0: Visual Harmony (RM-E04) with the Daylight Estimator (RM-E03), optional and off by default. The minimum Home Assistant version stays 2024.12.
 

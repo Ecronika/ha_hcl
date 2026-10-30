@@ -39,7 +39,7 @@ async def test_rm_e04_strong_daylight_makes_the_light_warmer(hass, noon, no_fron
     shows base, effective and the own reason."""
     hass.states.async_set("weather.home", "sunny", {"cloud_coverage": 10})
     fake, entry = await _daylight(hass, lux=3000, options=HARMONY)
-    await _cycles(hass, noon, 120)
+    await _cycles(hass, noon, 120, lux=3000)
     sent = _sent_kelvin(fake)
     assert sent is not None and sent < 5800
     state = hass.states.get(TARGET_K)

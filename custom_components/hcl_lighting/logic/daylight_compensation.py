@@ -13,7 +13,7 @@ import logging
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -63,6 +63,11 @@ PERSIST_DELAY = 300.0  # s, coalesced store writes (DL-PRD-21/22)
 STORE_VERSION = 1
 # A reduction this soon after a raise counts as an overshoot of that raise (RM-E02-32)
 OVERSHOOT_WINDOW = 600.0
+# A reduction needs fresh evidence (RM-E02-33): a sample older than this lowers
+# no further, and one sample lowers by at most this many percent points
+SAMPLE_FRESH_S = 600.0
+SAMPLE_BUDGET_PCT = 25.0
+_SAMPLE_HOLDS = ("daylight_hold_sample_old", "daylight_hold_sample_budget")
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,6 +178,8 @@ class DaylightState:
     raised_from: float | None = None  # cap before the current raise (RM-E02-32)
     raised_at: float | None = None  # monotonic time of the last raising step
     ceiling: float | None = None  # raising just below the target overshot from here (RM-E02-32)
+    sample_at: datetime | None = None  # report of the sample that lowers (RM-E02-33)
+    sample_used: float = 0.0  # percent points this sample has lowered the cap
     persisted_cap: float | None = None  # from the store, used once at the start
     persisted_at: datetime | None = None
 
@@ -277,6 +284,11 @@ class DaylightModifier:
                 excess = lux - (cfg.target_lux + cfg.deadband_lux)
                 cap = max(min_b, cur - rate * min(1.0, excess / band))
                 reason = "daylight_reducing"
+                if cfg.stale_after_s > 0 and reading.age_s is not None:
+                    left, held, new = self._sample_budget(new, reading, time)
+                    if left <= 0 or cur - cap > left:  # (also a peek without a rate)
+                        cap, reason = max(cap, cur - left), held
+                    new = replace(new, sample_used=new.sample_used + cur - cap)
                 if cap < cur and new.raised_from is not None:
                     overshoot = time.monotonic - new.raised_at <= OVERSHOOT_WINDOW
                     new = replace(new, raised_from=None, ceiling=new.raised_from if overshoot else None)
@@ -296,7 +308,7 @@ class DaylightModifier:
                     reason = "daylight_overshoot_limit"
                 else:
                     reason = "daylight_within_deadband"
-            if ctx.lights_on == 0:
+            if ctx.lights_on == 0 and reason not in _SAMPLE_HOLDS:
                 reason = "daylight_lights_off_observe"
             status = STATUS_ACTIVE
         if start_reason and status == STATUS_ACTIVE:
@@ -304,6 +316,24 @@ class DaylightModifier:
         effective = min(base, cap)
         new = replace(new, cap_pct=cap, last_auto=time.monotonic)
         return done(status, reason, replace(current, brightness=effective), new)
+
+    @staticmethod
+    def _sample_budget(
+        state: DaylightState, reading: LuxReading, time: StepTime
+    ) -> tuple[float, str, DaylightState]:
+        """A reduction needs a fresh sample (RM-E02-33): a sensor that reports
+        rarely (e.g. every 50 min without motion) must not lower the light for
+        the whole time on one short bright spell. A sample older than 10 min
+        lowers no further, one sample by at most 25 percent points (a lower
+        curve does not count); a new report is fresh evidence. Not for sensors
+        that report only on a change (stale check 0). Returns the points left
+        and the reason when they are used up."""
+        reported = time.now - timedelta(seconds=reading.age_s)
+        if state.sample_at is None or abs((reported - state.sample_at).total_seconds()) > 1.0:
+            state = replace(state, sample_at=reported, sample_used=0.0)
+        if reading.age_s > SAMPLE_FRESH_S:
+            return 0.0, "daylight_hold_sample_old", state
+        return max(0.0, SAMPLE_BUDGET_PCT - state.sample_used), "daylight_hold_sample_budget", state
 
     def _observe(self, state: DaylightState, reading: LuxReading, time: StepTime) -> DaylightState:
         """Filter and source health: also during a hold (DL §12, §21)."""
@@ -332,7 +362,10 @@ class DaylightModifier:
         scenario value, DL-PRD-17), else the base."""
         persisted, persisted_at = state.persisted_cap, state.persisted_at
         # the persisted cap is used once; an overshoot limit is not carried over
-        state = replace(state, persisted_cap=None, persisted_at=None, raised_from=None, raised_at=None, ceiling=None)
+        state = replace(
+            state, persisted_cap=None, persisted_at=None, raised_from=None, raised_at=None, ceiling=None,
+            sample_at=None, sample_used=0.0,
+        )
         if persisted is not None and persisted_at is not None:
             age = (time.now - persisted_at).total_seconds()
             if 0 <= age <= PERSISTED_CAP_MAX_AGE:
