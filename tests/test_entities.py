@@ -279,3 +279,22 @@ async def test_rm_t21_entities_share_one_device_and_take_their_icons_from_icons_
         assert e.original_icon is None, e.entity_id  # no icon in the code
         if e.translation_key != "hcl_curve_sensor":  # timestamp sensor: icon of its device class
             assert icons[e.domain][e.translation_key]["default"].startswith("mdi:"), e.entity_id
+
+
+# ---------------------------------------------------------------- RM-F06
+async def test_rm_f06_curve_sensor_names_the_switches(hass, no_frontend_registration):
+    """The card shows whether the setpoint can take effect: HCL active and the
+    adapt switches; a renamed switch is followed."""
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"])
+    registry = er.async_get(hass)
+    attrs = hass.states.get("sensor.hcl_curve_data").attributes
+    for key, unique_id in (
+        ("switch_entity_id", entry.entry_id),
+        ("adapt_brightness_entity_id", f"{entry.entry_id}_adapt_brightness"),
+        ("adapt_color_entity_id", f"{entry.entry_id}_adapt_color"),
+    ):
+        assert attrs[key] == registry.async_get_entity_id("switch", DOMAIN, unique_id) is not None
+    registry.async_update_entity(attrs["switch_entity_id"], new_entity_id="switch.wohnzimmer_hcl")
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.hcl_curve_data").attributes["switch_entity_id"] == "switch.wohnzimmer_hcl"

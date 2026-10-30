@@ -46,6 +46,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_ad
     ])
 
 
+_SWITCH_KEYS = ("switch_entity_id", "adapt_brightness_entity_id", "adapt_color_entity_id")
+
+
 class HCLLightingCurveSensor(HCLEntity, SensorEntity):
     """Sensor that exposes the full HCL Curve state."""
 
@@ -101,14 +104,19 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
 
     @callback
     def _handle_registry_update(self, event) -> None:
-        """Re-resolve the mode select when a select entity is added, renamed or removed."""
-        if not str(event.data.get("entity_id", "")).startswith("select."):
-            return
-        mode_entity_id = self._resolve_mode_entity_id()
-        if mode_entity_id != self._mode_entity_id:
-            self._mode_entity_id = mode_entity_id
-            self._update_attributes()
-            self.async_write_ha_state()
+        """Re-resolve the mode select and the switches when such an entity is
+        added, renamed or removed (the card reads them)."""
+        entity_id = str(event.data.get("entity_id", ""))
+        if entity_id.startswith("select."):
+            mode_entity_id = self._resolve_mode_entity_id()
+            if mode_entity_id != self._mode_entity_id:
+                self._mode_entity_id = mode_entity_id
+                self._update_attributes()
+                self.async_write_ha_state()
+        elif entity_id.startswith("switch."):
+            if self._switch_ids() != {k: self._attr_extra_state_attributes.get(k) for k in _SWITCH_KEYS}:
+                self._update_attributes()
+                self.async_write_ha_state()
 
     @callback
     def _handle_update(self, *_args):
@@ -166,6 +174,8 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
             # Setpoint sensors (the card shows the active values from them)
             "target_brightness_entity_id": self._related_entity_id("target_brightness"),
             "target_color_temp_entity_id": self._related_entity_id("target_color_temp"),
+            # Switches: the card shows whether the setpoint can take effect (RM-F06)
+            **self._switch_ids(),
             # Anchor times (HH:MM); the card's night checks use sleep → wake
             "wake_time": self._anchor(CONF_WAKE_TIME),
             "sleep_time": self._anchor(CONF_SLEEP_TIME),
@@ -182,6 +192,16 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
         return er.async_get(self.hass).async_get_entity_id(
             "sensor", DOMAIN, f"{self._entry.entry_id}_{key}"
         )
+
+    def _switch_ids(self) -> dict[str, str | None]:
+        """HCL active and the adapt switches of this entry (by unique ID)."""
+        registry = er.async_get(self.hass)
+        entry_id = self._entry.entry_id
+        unique_ids = (entry_id, f"{entry_id}_adapt_brightness", f"{entry_id}_adapt_color")
+        return {
+            key: registry.async_get_entity_id("switch", DOMAIN, unique_id)
+            for key, unique_id in zip(_SWITCH_KEYS, unique_ids)
+        }
 
 
 class HCLSetpointSensor(HCLEntity, SensorEntity):

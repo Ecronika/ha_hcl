@@ -52,7 +52,8 @@ async def _registry_setup(hass):
 
     ids = {
         "plain": light("plain"),
-        "own_area": light("own_area", area_id=kitchen.id),
+        # with a name of its own: HA 2026.10 rejects an own area without one
+        "own_area": light("own_area", name="Own", area_id=kitchen.id),
         "hidden": light("hidden", hidden_by=er.RegistryEntryHider.USER),
         "config": light("config", entity_category=EntityCategory.CONFIG),
     }

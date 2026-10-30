@@ -194,14 +194,21 @@ class DaylightModifier:
     key = DAYLIGHT_KEY
 
     def __init__(
-        self, config: DaylightConfig, persisted_cap: float | None = None, persisted_at: datetime | None = None
+        self,
+        config: DaylightConfig,
+        persisted_cap: float | None = None,
+        persisted_at: datetime | None = None,
+        sample: tuple[datetime | None, float] | None = None,
     ) -> None:
+        """sample: report and used budget of the sample before a reload (RM-B60)."""
         self.config = config
         self._persisted = (persisted_cap, persisted_at)
+        self._sample = sample or (None, 0.0)
 
     def initial_state(self) -> DaylightState:
         cap, at = self._persisted
-        return DaylightState(persisted_cap=cap, persisted_at=at)
+        sample_at, used = self._sample
+        return DaylightState(persisted_cap=cap, persisted_at=at, sample_at=sample_at, sample_used=used)
 
     def evaluate(
         self,
@@ -362,14 +369,13 @@ class DaylightModifier:
         scenario value, DL-PRD-17), else the base."""
         persisted, persisted_at = state.persisted_cap, state.persisted_at
         # the persisted cap is used once; an overshoot limit is not carried over
-        state = replace(
-            state, persisted_cap=None, persisted_at=None, raised_from=None, raised_at=None, ceiling=None,
-            sample_at=None, sample_used=0.0,
-        )
+        state = replace(state, persisted_cap=None, persisted_at=None, raised_from=None, raised_at=None, ceiling=None)
         if persisted is not None and persisted_at is not None:
             age = (time.now - persisted_at).total_seconds()
             if 0 <= age <= PERSISTED_CAP_MAX_AGE:
+                # a reload continues with the budget of the sample (RM-B60)
                 return _clamp(persisted, min_b, base), "daylight_resume", state
+        state = replace(state, sample_at=None, sample_used=0.0)
         if ctx.seed_brightness is not None:
             return _clamp(ctx.seed_brightness, min_b, base), "daylight_seed", state
         return base, "daylight_seed_fallback", state

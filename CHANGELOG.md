@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0b4] - 2026-10-30
+Fourth pre-release (beta) of 0.9.0: fixes from two reviews of 0.9.0b3 (RM-B60–B63) and a clearer "now" line in the card (RM-F06). The minimum Home Assistant version stays 2024.12.
+
+### Added
+- **Card: whether the values can take effect** (RM-F06): the "now" line shows "HCL off", "brightness only" or "colour temperature only" (an adapt switch off), "adaptation off" (both off) and the number of lights under manual control (e.g. "2 lights manual"). For this the curve sensor has the new attributes `switch_entity_id`, `adapt_brightness_entity_id` and `adapt_color_entity_id`.
+
+### Fixed
+- Daylight compensation: reloading the integration (e.g. saving the options) gave the same lux report another 25 % points of reduction (RM-E02-33); the budget of the report is now handed over to the reloaded integration as long as the sensor stays the same (RM-B60). After a restart of Home Assistant the sensor value is written anew and counts as a new report.
+- Visual harmony: a correction limited to zero still converted the colour temperature, and the rounding then published a value next to the curve (e.g. 2940 K for a curve of 2935 K); the curve value is now kept (RM-B61).
+- Card: the daylight compensation held because of a rarely reporting sensor showed only "daylight"; it now shows "daylight held (reading older than 10 min)" or "daylight held (reduction for this reading used up)" (RM-B62).
+- Card: in Sleep the "now" line said "lights off", although manually controlled lights stay on; it now says "setpoint off" (RM-B63).
+
+### Documentation
+- Sensor that reports rarely: a reduction is undone only by a new, darker report (or after *Sensor stale after* plus the grace); *Sensor stale after* 0 also switches off the 10-minute and 25-point limits (RM-D09).
+
+### Internal
+- CI tests the current release Home Assistant 2026.10.4 instead of 2026.9.3 (RM-T32); a registry test gives the light with its own area a name of its own, as Home Assistant 2026.10 requires.
+
 ## [0.9.0b3] - 2026-10-29
 Third pre-release (beta) of 0.9.0: the daylight compensation with sensors that report rarely (RM-E02-33, from the field test) and two fixes of Visual harmony (RM-B58, RM-B59). The minimum Home Assistant version stays 2024.12.
 

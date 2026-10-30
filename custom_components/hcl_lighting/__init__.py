@@ -56,7 +56,13 @@ from .services import (
     async_register_services,
     resolve_entry_id,
 )
-from .logic.daylight_compensation import DaylightCapStore, DaylightConfig, DaylightModifier, LuxSensorProvider
+from .logic.daylight_compensation import (
+    DAYLIGHT_KEY,
+    DaylightCapStore,
+    DaylightConfig,
+    DaylightModifier,
+    LuxSensorProvider,
+)
 from .logic.daylight_estimator import OutdoorLightProvider
 from .logic.environmental_controller import EnvironmentalController
 from .logic.visual_harmony import DISABLED as HARMONY_DISABLED, HARMONY_KEY, HarmonyConfig, VisualHarmonyModifier
@@ -71,6 +77,7 @@ DATA_OVERRIDE_MANAGERS = f"{DOMAIN}_override_managers"
 DATA_COMMAND_TRACKERS = f"{DOMAIN}_command_trackers"
 # Visual Harmony correction handed over to the next setup of a reload (RM-E04, O17 = C)
 DATA_HARMONY_HANDOVER = f"{DOMAIN}_harmony_handover"
+DATA_DAYLIGHT_HANDOVER = f"{DOMAIN}_daylight_handover"
 OVERRIDE_STORE_VERSION = 1
 
 
@@ -445,6 +452,7 @@ async def _async_environment(
     store = DaylightCapStore(hass, entry.entry_id)
     config = DaylightConfig.from_options(entry.options)
     handover = hass.data.get(DATA_HARMONY_HANDOVER, {}).pop(entry.entry_id, None)
+    handed = hass.data.get(DATA_DAYLIGHT_HANDOVER, {}).pop(entry.entry_id, None)
     if config is None:
         controller.daylight_store = None
         controller.environment_sensor = None
@@ -454,7 +462,9 @@ async def _async_environment(
     controller.daylight_store = store
     controller.environment_sensor = config.sensor
     providers: list = [LuxSensorProvider(hass, config)]
-    modifiers: list = [DaylightModifier(config, cap, stamp)]
+    # the budget of the last report continues with the same sensor (RM-B60)
+    sample = handed[1:] if handed is not None and handed[0] == config.sensor else None
+    modifiers: list = [DaylightModifier(config, cap, stamp, sample)]
     # Visual Harmony (RM-E04) after the daylight compensation, with the
     # Daylight Estimator (RM-E03) as its only provider of the outdoor light
     if (harmony := HarmonyConfig.from_options(entry.options)) is not None:
@@ -469,8 +479,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool
         # The daylight cap is written now (a reload resumes from it, DL §20)
         if entry.runtime_data.controller.daylight_store is not None:
             await entry.runtime_data.controller.daylight_store.async_flush()
-        # The Visual Harmony correction continues in the next setup (E04-17)
-        harmony = entry.runtime_data.environment.state(HARMONY_KEY)
+        # The Visual Harmony correction continues in the next setup (E04-17),
+        # as does the budget of the last lux report (RM-B60)
+        environment = entry.runtime_data.environment
+        daylight = environment.state(DAYLIGHT_KEY)
+        if daylight is not None and entry.runtime_data.controller.environment_sensor:
+            hass.data.setdefault(DATA_DAYLIGHT_HANDOVER, {})[entry.entry_id] = (
+                entry.runtime_data.controller.environment_sensor, daylight.sample_at, daylight.sample_used
+            )
+        harmony = environment.state(HARMONY_KEY)
         hass.data.setdefault(DATA_HARMONY_HANDOVER, {})[entry.entry_id] = (
             HARMONY_DISABLED if harmony is None else harmony.delta_mired
         )
@@ -487,6 +504,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data.get(DATA_OVERRIDE_MANAGERS, {}).pop(entry.entry_id, None)
     hass.data.get(DATA_COMMAND_TRACKERS, {}).pop(entry.entry_id, None)
     hass.data.get(DATA_HARMONY_HANDOVER, {}).pop(entry.entry_id, None)
+    hass.data.get(DATA_DAYLIGHT_HANDOVER, {}).pop(entry.entry_id, None)
     await _override_store(hass, entry.entry_id).async_remove()
     await DaylightCapStore(hass, entry.entry_id).async_remove()
     ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")

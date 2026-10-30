@@ -715,3 +715,45 @@ def test_rm_e02_33_a_lower_curve_does_not_use_the_budget():
         result = loop.step(base=40)
     assert loop.cap == pytest.approx(cap - (25 - used))  # 0.9.0b3 draft: held at once
     assert result.modifier("daylight").reason == "daylight_hold_sample_budget"
+
+
+# ---------------------------------------------------------------- RM-B60 (reviews 0.9.0b3)
+def _reload(loop: Loop, handover: bool = True) -> Loop:
+    """Reload of the entry: the cap comes from the store, the sample of the
+    budget is handed over (a restart has no handover)."""
+    state = loop.state
+    new = Loop(
+        cfg=loop.cfg, lux=loop.lux, persisted=(loop.cap, loop.now),
+        sample=(state.sample_at, state.sample_used) if handover else None,
+    )
+    new.seconds, new.reported_at = loop.seconds, loop.reported_at
+    return new
+
+
+def test_rm_b60_a_reload_keeps_the_budget_of_the_sample():
+    """Reviews 30.10.2026: saving the options gave the same report another
+    25 points (100 -> 75 -> 50 -> 25 %). One report lowers by at most 25
+    points, also over two reloads; a new report continues."""
+    loop = _kitchen()
+    loop.report(400)
+    _minutes(loop, 3)
+    assert loop.cap == pytest.approx(71 - 25)
+    for _ in range(2):
+        loop = _reload(loop)
+        result = _minutes(loop, 3)
+        assert loop.cap == pytest.approx(71 - 25)
+    assert result.modifier("daylight").reason == "daylight_hold_sample_budget"
+    loop.report(400)
+    _minutes(loop, 3)
+    assert loop.cap == pytest.approx(71 - 50)
+
+
+def test_rm_b60_without_handover_the_report_counts_as_new():
+    """A restart of Home Assistant writes the sensor anew (new report): no
+    handover, a new budget."""
+    loop = _kitchen()
+    loop.report(400)
+    _minutes(loop, 3)
+    loop = _reload(loop, handover=False)
+    _minutes(loop, 3)
+    assert loop.cap == pytest.approx(71 - 50)
