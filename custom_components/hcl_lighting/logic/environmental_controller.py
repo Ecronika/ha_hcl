@@ -173,7 +173,11 @@ def _published(base: HCLSetpoint, effective: HCLSetpoint) -> HCLSetpoint:
         brightness = int(round(brightness))
     kelvin = effective.kelvin
     if kelvin is not None and kelvin != base.kelvin:
-        kelvin = int(round(kelvin / 10.0) * 10)
+        rounded = int(round(kelvin / 10.0) * 10)
+        if base.kelvin is not None and kelvin < base.kelvin < rounded:
+            # a warmer result stays warmer after the rounding (VH-PRD-03, RM-B59)
+            rounded = int(base.kelvin // 10 * 10)
+        kelvin = rounded
     return HCLSetpoint(brightness, kelvin)
 
 

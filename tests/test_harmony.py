@@ -10,6 +10,7 @@ import pytest
 from custom_components.hcl_lighting.logic.daylight_estimator import (
     BRIGHT_OVERCAST,
     CLEAR_DIRECT,
+    LOW_SUN_DIRECT,
     NIGHT,
     OUTDOOR_KEY,
     TWILIGHT,
@@ -30,6 +31,7 @@ from custom_components.hcl_lighting.logic.visual_harmony import (
     HARMONY_KEY,
     RELEASE_RATE,
     TIGHTEN_RATE,
+    WARMEST_MIRED,
     HarmonyConfig,
     VisualHarmonyModifier,
     envelope_mired,
@@ -140,8 +142,8 @@ def test_vh_t03_the_base_follows_at_once():
     rig = Rig(effective=20.0)
     settle(rig, minutes=120)
     delta = rig.delta
-    result = rig.step(base_k=5000.0)  # the curve moves: no lag of the base
-    assert 1_000_000 / (mired(5000) + rig.delta) == pytest.approx(result.effective.kelvin, abs=10)
+    result = rig.step(base_k=6000.0)  # the curve moves: no lag of the base
+    assert 1_000_000 / (mired(6000) + rig.delta) == pytest.approx(result.effective.kelvin, abs=10)
     assert abs(rig.delta - delta) <= RELEASE_RATE * 27 / 60 + 1e-9  # only the correction is smoothed
 
 
@@ -306,3 +308,87 @@ def test_vh_t17_e04_17_changed_parameters_continue_from_the_handed_over_correcti
     same.step()
     same.step()
     assert same.delta == pytest.approx(old.delta, abs=0.01)  # identical reload: no jump
+
+
+# ---------------------------------------------------------------- RM-B58 (review 29.10.2026)
+@pytest.mark.parametrize("base_k", [2000.0, 2700.0])
+def test_rm_b58_a_base_warmer_than_the_envelope_gets_no_correction(base_k):
+    """The curve jumps from 6500 K to a warm value (curve saved) while a
+    correction of about 52 mired is in effect: 0.9.0b2 sent 1830 K / 2390 K
+    (warmer than the envelope, below 2000 K). The applied correction is
+    limited to the envelope; the stored one is still released at its rate."""
+    rig = Rig(effective=20.0)
+    settle(rig, minutes=120)
+    before = rig.delta
+    assert before > 50
+    result = rig.step(base_k=base_k)
+    assert result.effective.kelvin == base_k
+    assert before - rig.delta <= RELEASE_RATE * 27 / 60 + 1e-9
+
+
+@pytest.mark.parametrize("character", [None, TWILIGHT, BRIGHT_OVERCAST])
+def test_rm_b58_never_warmer_than_the_warmest_point_of_the_envelope(character):
+    """Strong, full reduction, then the base 6500 K -> 4300 K: the applied
+    correction ends at the warm end of the envelope with the largest offset
+    (4000 K + 15 mired, about 3770 K); 0.9.0b2: about 3200 K."""
+    rig = Rig(profile="strong", effective=5.0, outdoor=None if character is None else outdoor(character, 1.0))
+    settle(rig, minutes=120)
+    assert rig.delta > 45
+    result = rig.step(base_k=4300.0)
+    assert result.effective.kelvin >= 1_000_000 / WARMEST_MIRED - 10
+    assert WARMEST_MIRED == pytest.approx(mired(4000) + 15)
+
+
+def test_rm_b58_a_change_of_the_character_does_not_move_the_limit():
+    """Review 0.9.0b3: a limit that depends on the character offset would jump
+    by up to 23 mired when the character changes."""
+    rig = Rig(profile="strong", effective=5.0, outdoor=outdoor(LOW_SUN_DIRECT, 1.0))
+    settle(rig, minutes=120)
+    sent = [mired(rig.step(base_k=4600.0).effective.kelvin)]
+    rig.outdoor = outdoor(BRIGHT_OVERCAST, 1.0)
+    for _ in range(10):
+        sent.append(mired(rig.step(base_k=4600.0).effective.kelvin))
+    assert max(abs(b - a) for a, b in zip(sent, sent[1:])) <= RELEASE_RATE * 27 / 60 + 0.5
+
+
+def test_rm_b58_the_correction_is_released_at_its_rate_when_the_daylight_goes():
+    """The limit does not make the release faster: the daylight compensation
+    raises the brightness at once or at 11 %/min, the colour temperature
+    returns at most 10 mired/min (VH-PRD-13)."""
+    for raise_per_step in (11 * 27 / 60, 100.0):
+        rig = Rig(effective=20.0)
+        settle(rig, minutes=120)
+        sent = [mired(rig.step().effective.kelvin)]
+        for _ in range(40):
+            rig.effective = min(100.0, rig.effective + raise_per_step)
+            sent.append(mired(rig.step().effective.kelvin))
+        assert max(a - b for a, b in zip(sent, sent[1:])) <= RELEASE_RATE * 27 / 60 + 0.5
+        assert sent[-1] == pytest.approx(mired(6500), abs=0.5)
+
+
+def test_rm_b58_no_jump_along_the_evening_curve():
+    """The curve falls from 6500 K to 2200 K in 3 h with a constant reduction:
+    the colour temperature changes smoothly (no step larger than the change
+    of the curve plus the rate of the correction) and is never below 2000 K."""
+    rig = Rig(effective=20.0)
+    settle(rig, minutes=120)
+    steps = 400
+    kelvins = [6500 - (6500 - 2200) * i / steps for i in range(steps + 1)]
+    sent = [mired(rig.step(base_k=k).effective.kelvin) for k in kelvins]
+    curve_step = max(mired(b) - mired(a) for a, b in zip(kelvins, kelvins[1:]))
+    assert max(abs(b - a) for a, b in zip(sent, sent[1:])) <= curve_step + RELEASE_RATE * 27 / 60 + 1.0
+    assert max(sent) <= mired(2000)
+
+
+# ---------------------------------------------------------------- RM-B59 (review 29.10.2026)
+def test_rm_b59_rounding_is_never_cooler_than_the_base():
+    """VH-PRD-03 after the rounding to 10 K: base 6507 K, result 6506.998 K
+    was published as 6510 K."""
+    from custom_components.hcl_lighting.logic.environmental_controller import _published
+
+    assert _published(HCLSetpoint(80, 6507.0), HCLSetpoint(80, 6506.998)).kelvin == 6500
+    for base in range(2000, 7001, 7):
+        for kelvin in (base - 0.001, base - 4.9, base - 5.0, base - 12.0):
+            published = _published(HCLSetpoint(80, float(base)), HCLSetpoint(80, kelvin)).kelvin
+            assert published <= base and published % 10 == 0
+            assert abs(published - kelvin) < 10
