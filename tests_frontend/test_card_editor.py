@@ -1,6 +1,8 @@
 """Browser tests of hcl-curve-card.js: curve editor: adding, moving and deleting points (pointer, keyboard, numeric input, sliders), texts and the card editor."""
 from __future__ import annotations
 
+import pytest
+
 from card_support import POINTS, DEFAULT_POINTS, _hass, frames, _set_hass, _points, _status, _night_warnings, _set_points
 
 
@@ -264,14 +266,15 @@ async def _drag_rows(page, idx: int, steps: int, dy: int, insert_at: int | None 
 async def test_rm_b27_charts_do_not_move_while_dragging(page):
     await _set_hass(page, "auto")
     msgs_before = await page.evaluate("() => card.shadowRoot.getElementById('validation-area').textContent")
-    # point 1 (09:00, 50 %) down to about 10 %: the curve to 09:30 (75 %) gets steep
-    rows = await _drag_rows(page, 1, 6, 14)
+    # point 11 (22:00, 10 %) up: the night is brighter for longer (the slope
+    # warning of 0.9.0b4 no longer comes from this curve, RM-B66)
+    rows = await _drag_rows(page, 11, 6, -14)
     during, after = rows[:-1], rows[-1]
     assert all(r["off"] <= 1 for r in during)  # the point stays under the pointer
     assert all(r["top"] == 0 for r in during)  # the charts do not move
     assert all(r["msgs"] == msgs_before and r["draft"] == 0 for r in during)
     assert after["draft"] > 0  # draft line and messages follow on release
-    assert after["msgs"] != msgs_before  # the slope warning appears after release
+    assert after["msgs"] != msgs_before  # the night warning changes after release
     assert page.errors == []
 
 
@@ -355,3 +358,23 @@ async def test_rm_f05_editor_title_field(page):
     assert configs["option"] == "Küche (sensor.a_curve_data)"
     assert configs["label"] == "Titel (leer: Name der Instanz)"
     assert configs["out"][0]["title"] == "Kochen" and "title" not in configs["out"][1]
+
+
+# ---------------------------------------------------------------- RM-B66
+@pytest.mark.parametrize("points", ["DEFAULT_POINTS", "DEFAULT_POINTS_0401"])
+async def test_rm_b66_the_default_curve_does_not_warn_about_itself(page, points):
+    """0.9.0b4: every default curve showed "Brightness changes too steeply
+    (>2 %/min)" at the wake time (the quick rise of RM-R06), some also the
+    colour temperature warning."""
+    import card_support
+
+    await _set_hass(page, "auto", extra={"control_points": getattr(card_support, points)})
+    msgs = await page.evaluate("() => card._validationResult.warnings.map(w => w.msg)")
+    assert not [m for m in msgs if "steep" in m], msgs
+
+
+async def test_rm_b66_a_jump_still_warns(page):
+    steep = [{"t": 420, "k": 2700, "b": 1}, {"t": 435, "k": 2700, "b": 100}, {"t": 1320, "k": 2200, "b": 10}]
+    await _set_hass(page, "auto", extra={"control_points": steep})
+    msgs = await page.evaluate("() => card._validationResult.warnings.map(w => w.msg)")
+    assert any("Brightness changes too steeply" in m for m in msgs), msgs

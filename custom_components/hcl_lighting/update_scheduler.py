@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # One cycle: (context of the request that caused it, end running transition
 # protections first); the caller holds the lock
-CycleRunner = Callable[[Context | None, bool], Awaitable[None]]
+CycleRunner = Callable[[Context | None, bool, bool], Awaitable[None]]
 
 
 class HCLUpdateScheduler:
@@ -93,7 +93,9 @@ class HCLUpdateScheduler:
             yield
 
     async def _cycle(self) -> None:
-        self._requested = False
+        # periodic: only the timer, no request (scenario, curve, release,
+        # targets, HCL on) covered by this cycle (RM-B64)
+        periodic, self._requested = not self._requested, False
         context, self._request_context = self._request_context, None
         end_protection, self._end_protection = self._end_protection, False
-        await self._run_cycle(context, end_protection)
+        await self._run_cycle(context, end_protection, periodic)

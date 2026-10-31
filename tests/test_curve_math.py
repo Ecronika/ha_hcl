@@ -217,3 +217,14 @@ def test_rm_t30_minimum_day_span_is_shared_with_the_config_flow():
     assert default_points("07:00", "13:00") == fallback  # 360 min: too short
     assert default_points("07:00", "13:01") != fallback  # 361 min: used
     assert default_points("22:00", "04:00") == fallback  # over midnight, 360 min
+
+
+# ---------------------------------------------------------------- RM-B66
+def test_rm_b66_default_curve_fixture_of_the_card_tests():
+    """The card test checks that the steepest default curve raises no slope
+    warning; its points are these (wake time 04:01)."""
+    pts = default_points("04:01", "22:00")
+    assert [(p["t"], p["b"], p["k"]) for p in pts] == [
+        (241, 30, 3000), (261, 90, 4500), (301, 100, 5000), (541, 100, 6000),
+        (1080, 100, 5000), (1140, 100, 5000), (1320, 10, 2200), (1335, 5, 2200), (240, 5, 2200),
+    ]

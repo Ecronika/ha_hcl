@@ -12,6 +12,8 @@ from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    BRIGHTNESS_THRESHOLD,
+    KELVIN_THRESHOLD,
     OVERRIDE_BRIGHTNESS_DELTA,
     OVERRIDE_KELVIN_DELTA,
     OVERRIDE_TIMEOUT_HOURS,
@@ -46,6 +48,19 @@ class Tracking(NamedTuple):
     source: str | None  # auto | scenario | apply | other: who set last_set (DL-PRD-23)
 
 
+MAX_REPEATS = 2  # repeats of an unchanged command in update cycles (RM-B64)
+REPEAT_RETRY_SECONDS = 900  # then one more try every 15 min
+
+
+def _report(state: State | None) -> tuple | None:
+    """What a light reports, to tell whether it changed since a command."""
+    if state is None:
+        return None
+    attrs = state.attributes
+    xy = attrs.get("xy_color")
+    return (state.state, attrs.get("brightness"), attrs.get("color_temp_kelvin"), tuple(xy) if xy else None)
+
+
 def _as_tuple(value: Any) -> tuple | None:
     """A reported list or tuple as a tuple (None stays None)."""
     return tuple(value) if value else None
@@ -77,6 +92,11 @@ class LightState:
     unreachable_since: datetime | None = None
     # smooth return to HCL: update cycles leave the light alone until then
     reengage_until: datetime | None = None
+    # update cycles that sent the values of the last command again while the
+    # light reported the same as then (it does not reach them, RM-B64)
+    repeats: int = 0
+    repeat_report: tuple | None = None
+    repeat_sent: datetime | None = None  # last command of the update cycle (UTC)
 
     def tracking(self) -> Tracking:
         return Tracking(
@@ -237,6 +257,48 @@ class OverrideManager:
             )
         else:
             light.command_start = None
+
+    def may_repeat(self, entity_id: str, values: tuple[int, int], state: State | None) -> bool:
+        """Update cycle: whether to send values the light may not take over (RM-B64).
+
+        A command with the values of the last one (within the update
+        thresholds) while the light reports the same as at that command is a
+        repeat. A light that cannot reach the values (actuator limits, a wrong
+        colour temperature range, no power while Home Assistant still shows it
+        on) would otherwise get the same command in every cycle. After
+        MAX_REPEATS repeats the cycle stops until the values or the light's
+        report change, and tries again every REPEAT_RETRY_SECONDS (e.g. a
+        limit fixed at the actuator, a bulb that restored exactly the stale
+        state); a lost command is still sent again.
+        """
+        light = self._light(entity_id)
+        report = _report(state)
+        last = light.last_set
+        same = (
+            last is not None
+            and report == light.repeat_report
+            and abs(last[0] - values[0]) <= BRIGHTNESS_THRESHOLD
+            and abs(last[1] - values[1]) <= KELVIN_THRESHOLD
+        )
+        light.repeats = light.repeats + 1 if same else 0
+        light.repeat_report = report
+        now = dt_util.utcnow()
+        send = light.repeats <= MAX_REPEATS or (
+            light.repeat_sent is not None and (now - light.repeat_sent).total_seconds() >= REPEAT_RETRY_SECONDS
+        )
+        if light.repeats == MAX_REPEATS + 1:
+            _LOGGER.debug(
+                "%s does not take over %s: sent again only when the values or the light change, else every %s s",
+                entity_id, values, REPEAT_RETRY_SECONDS,
+            )
+        if send:
+            light.repeat_sent = now
+        return send
+
+    def reset_repeats(self, entity_id: str, state: State | None) -> None:
+        """A command outside the update cycle (switch-on, scenario, apply, smooth return)."""
+        light = self._light(entity_id)
+        light.repeats, light.repeat_report = 0, _report(state)
 
     def last_source(self, entity_id: str) -> str | None:
         """Where the last values of the light came from (auto, scenario, apply, other)."""

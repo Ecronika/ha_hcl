@@ -54,6 +54,27 @@ def _service_call(hass: HomeAssistant, data: dict[str, Any]):
         return ServiceCall(domain="light", service="turn_on", data=data)
 
 
+def _is_hue_group(state) -> bool:
+    """A room/zone group of the Hue integration (its lights are the members)."""
+    attrs = state.attributes
+    return bool(attrs.get("is_hue_group") or attrs.get("lights") or attrs.get("hue_type"))
+
+
+def skipped_hue_groups(hass: HomeAssistant, target_config: dict[str, Any]) -> set[str]:
+    """Hue room/zone groups given directly in the target that are skipped: those
+    without a member list (one with `entity_id` members is expanded like a
+    light group). RM-B65 names them, otherwise the instance may control no
+    light unnoticed."""
+    given = target_config.get("entity_id") or []
+    given = [given] if isinstance(given, str) else given
+    return {
+        eid for eid in given
+        if (state := hass.states.get(eid)) is not None
+        and not state.attributes.get(ATTR_ENTITY_ID)
+        and _is_hue_group(state)
+    }
+
+
 def resolve_lights(hass: HomeAssistant, target_config: dict[str, Any], groups: set[str] | None = None) -> set[str]:
     """Light entity IDs of a target.
 
@@ -89,7 +110,7 @@ def resolve_lights(hass: HomeAssistant, target_config: dict[str, Any], groups: s
             to_process.extend(members)
             if groups is not None:
                 groups.add(eid)
-        elif state.attributes.get("is_hue_group") or state.attributes.get("lights") or state.attributes.get("hue_type"):
+        elif _is_hue_group(state):
             continue
         elif eid.startswith("light."):
             lights.add(eid)

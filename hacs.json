@@ -1,9 +1,5 @@
 {
     "name": "HCL Lighting",
     "render_readme": true,
-    "domains": [
-        "switch"
-    ],
-    "iot_class": "Calculated",
     "homeassistant": "2024.12.0"
 }

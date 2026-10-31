@@ -78,8 +78,8 @@ const HCL_STRINGS = {
         chart_k_desc: "Colour temperature over the day: lowest {min} at {tmin}, highest {max} at {tmax}.",
         color_bar: "Colour over the day",
         val_min_points: "The curve needs at least 2 points.",
-        val_slope_b: "Brightness changes too steeply (>2 %/min) at {time}.",
-        val_slope_k: "Colour temperature changes too steeply (>100 K/min) at {time}.",
+        val_slope_b: "Brightness changes too steeply (>6 %/min) at {time}.",
+        val_slope_k: "Colour temperature changes too steeply (>200 K/min) at {time}.",
         val_peak_k: "Active phase: colour temperature too low here, raise it above 5000 K.",
         val_peak_b: "Active phase: brightness too low here, raise it above 70 %.",
         val_peak_short: "Active phase too short (<4 h). Try high brightness and colour temperature around noon.",
@@ -157,8 +157,8 @@ const HCL_STRINGS = {
         chart_k_desc: "Farbtemperatur über den Tag: niedrigster Wert {min} um {tmin}, höchster {max} um {tmax}.",
         color_bar: "Farbverlauf des Tages",
         val_min_points: "Die Kurve braucht mindestens 2 Punkte.",
-        val_slope_b: "Helligkeit ändert sich zu steil (>2 %/min) um {time}.",
-        val_slope_k: "Farbtemperatur ändert sich zu steil (>100 K/min) um {time}.",
+        val_slope_b: "Helligkeit ändert sich zu steil (>6 %/min) um {time}.",
+        val_slope_k: "Farbtemperatur ändert sich zu steil (>200 K/min) um {time}.",
         val_peak_k: "Aktivphase: Farbtemperatur hier zu niedrig, über 5000 K anheben.",
         val_peak_b: "Aktivphase: Helligkeit hier zu niedrig, über 70 % anheben.",
         val_peak_short: "Aktivphase zu kurz (<4 h). Um die Mittagszeit hohe Helligkeit und Farbtemperatur wählen.",
@@ -459,8 +459,12 @@ class HCLCurveCard extends HTMLElement {
             nightStart: 1320,
             nightEnd: 420,
             minDailyPeakDuration: 240, // 4 hours
-            maxSlopeB: 2.0,            // % per min
-            maxSlopeK: 100,            // K per min
+            // above the default curve of the integration (quick rise after
+            // waking, RM-R06: up to 5.3 %/min and 143 K/min between the 15-min
+            // samples, wake time a minute after a quarter hour), which must
+            // not warn about itself (RM-B66)
+            maxSlopeB: 6.0,            // % per min
+            maxSlopeK: 200,            // K per min
         };
         // Default curve for the anchor times of the instance (sensor attribute, RM-R08)
         this._defaultPoints = null;
