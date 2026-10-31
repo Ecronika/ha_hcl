@@ -1023,3 +1023,90 @@ async def test_rm_b53_apply_while_hcl_is_off_still_sends_both_parts(hass, no_fro
     await hass.services.async_call(DOMAIN, "apply", {"entity_id": SWITCH, "transition": 5}, blocking=True)
     sent = [c.data for c in lights.for_light("light.a")]
     assert any("color_temp_kelvin" in d for d in sent) and any("brightness_pct" in d for d in sent), sent
+
+
+# ---------------------------------------------------------------- RM-B64 (scenario review 31.10.2026)
+async def _capped(hass, freezer, brightness=204, **attrs):
+    """light.a reports 80 % (actuator maximum) and never takes over the
+    command (the test double keeps its state); noon: the curve asks for 100 %."""
+    lights = FakeLights(hass)
+    set_light(hass, "light.a", "on", brightness=brightness, color_temp_kelvin=6000, **{**CT_ATTRS, **attrs})
+    await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)  # the first command
+    return lights
+
+
+async def _cycles(hass, freezer, n):
+    for _ in range(n):
+        freezer.tick(timedelta(seconds=27))
+        await timer_cycle(hass)
+        await hass.async_block_till_done()
+
+
+async def test_rm_b64_unreachable_setpoint_is_not_sent_in_every_cycle(hass, noon, no_frontend_registration):
+    """0.9.0b4: a light that cannot reach the setpoint (KNX actuator with a
+    maximum of 80 %) got the same command in every cycle (about 133 per hour).
+    The first command and two repeats remain (a lost radio command is sent
+    again), then the cycle stops until the setpoint or the light changes."""
+    lights = await _capped(hass, noon)
+    await _cycles(hass, noon, 10)
+    assert len(lights.calls) == 3, [c.data for c in lights.calls]
+    assert {c.data["brightness_pct"] for c in lights.calls} == {100}
+
+
+async def test_rm_b64_a_new_setpoint_is_sent_again(hass, noon, no_frontend_registration):
+    lights = await _capped(hass, noon)
+    await _cycles(hass, noon, 5)
+    lights.calls.clear()
+    noon.move_to("2026-01-15 20:00:00+00:00")  # 21:00: the evening curve, far below 100 %
+    await _cycles(hass, noon, 1)
+    assert len(lights.calls) == 1 and lights.calls[0].data["brightness_pct"] < 100
+
+
+async def test_rm_b64_a_lost_command_is_still_sent_again(hass, noon, no_frontend_registration):
+    """The light misses the first command (radio): the next cycle repeats it,
+    and once the light has the value nothing more is sent."""
+    lights = await _capped(hass, noon, brightness=128)
+    await _cycles(hass, noon, 1)
+    assert len(lights.calls) == 2  # switching HCL on, then the repeat
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)  # takes over (HCL context window)
+    await hass.async_block_till_done()
+    lights.calls.clear()
+    await _cycles(hass, noon, 3)
+    assert lights.calls == []
+
+
+async def test_rm_b64_switching_on_again_starts_anew(hass, noon, no_frontend_registration):
+    lights = await _capped(hass, noon)
+    await _cycles(hass, noon, 5)
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    await hass.async_block_till_done()
+    lights.calls.clear()
+    set_light(hass, "light.a", "on", brightness=204, color_temp_kelvin=6000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    await _cycles(hass, noon, 6)
+    # the switch-on command (fast path) plus at most two repeats
+    assert 2 <= len(lights.calls) <= 3, [c.data for c in lights.calls]
+
+
+async def test_rm_b64_sleep_does_not_switch_off_in_every_cycle(hass, noon, no_frontend_registration):
+    """A light HA still shows as on (no power at the wall switch) gets the
+    off command three times, not in every cycle (RM-B52 unchanged: a dim light
+    on is switched off at once)."""
+    lights = await _capped(hass, noon)
+    await select_scenario(hass, "sleep")
+    lights.calls.clear()
+    await _cycles(hass, noon, 10)
+    assert len(lights.calls) <= 3, [c.data for c in lights.calls]
+    assert all(c.data["brightness_pct"] == 0 for c in lights.calls)
+
+
+async def test_rm_b64_a_held_command_is_tried_again_after_15_minutes(hass, noon, no_frontend_registration):
+    """Subagent review 0.9.0b5: without a change of values or report the stop
+    would never end (e.g. a fixed scenario, an actuator limit fixed in ETS, a
+    bulb that restores exactly the stale state). A slow retry every 15 min."""
+    lights = await _capped(hass, noon)
+    await _cycles(hass, noon, 10)  # 4.5 min: the command and two repeats
+    assert len(lights.calls) == 3
+    await _cycles(hass, noon, 26)  # 15.3 min after the last command (second cycle)
+    assert len(lights.calls) == 4

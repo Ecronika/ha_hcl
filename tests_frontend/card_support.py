@@ -23,6 +23,16 @@ DEFAULT_POINTS = [
 ]
 
 
+# Default curve for 04:01 / 22:00: the steepest default between the 15-min
+# samples (wake time a minute after a quarter hour: 5.3 %/min, 143 K/min;
+# pinned in the backend test test_rm_b66_default_curve_fixture_of_the_card_tests)
+DEFAULT_POINTS_0401 = [
+    {"t": 241, "k": 3000, "b": 30}, {"t": 261, "k": 4500, "b": 90}, {"t": 301, "k": 5000, "b": 100},
+    {"t": 541, "k": 6000, "b": 100}, {"t": 1080, "k": 5000, "b": 100}, {"t": 1140, "k": 5000, "b": 100},
+    {"t": 1320, "k": 2200, "b": 10}, {"t": 1335, "k": 2200, "b": 5}, {"t": 240, "k": 2200, "b": 5},
+]
+
+
 def _hass(
     mode: str, language: str = "en", dark: bool = False, extra: dict | None = None,
     time_zone: str | None = None,

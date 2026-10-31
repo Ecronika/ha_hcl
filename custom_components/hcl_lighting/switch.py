@@ -37,6 +37,7 @@ from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
 from .logic.light_controller import HCLLightController
+from .logic.targets import skipped_hue_groups
 from .logic.units import brightness_pct, on_brightness
 from .entity import HCLEntity
 from .runtime import HCLConfigEntry
@@ -101,6 +102,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         # switch is never added and the instance does nothing (RM-B38)
         self._added = False
         self._resolved_targets = set() # Cache for target entities
+        self._warned_hue_groups: set[str] = set()  # named once (RM-B65)
         
         # Modules
         self.hcl_calc = hcl_calc
@@ -350,6 +352,19 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self._scheduler.start()
         await self._re_evaluate_targets_and_listeners()
 
+    def _warn_skipped_hue_groups(self) -> None:
+        """Name a directly selected Hue room/zone group once (RM-B65)."""
+        skipped = skipped_hue_groups(self.hass, configured_target(self._entry)) - self._warned_hue_groups
+        if not skipped:
+            return
+        self._warned_hue_groups |= skipped
+        _LOGGER.warning(
+            "%s: Hue room/zone groups are not controlled (%s); select their lights or their area"
+            " instead%s",
+            self._entry.title, ", ".join(sorted(skipped)),
+            "" if self._resolved_targets else " - this instance controls no lights",
+        )
+
     async def _re_evaluate_targets_and_listeners(self) -> None:
         """Re-evaluate target entities and update state listeners."""
         # Stop existing listener if any
@@ -364,6 +379,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             groups=groups,
         )
         self._watch_groups(groups)
+        self._warn_skipped_hue_groups()
         async_check_conflicts(self.hass)
         
         # Start new listener if targets exist
@@ -510,8 +526,11 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         manual control, targets changed, HCL switched on); see HCLUpdateScheduler."""
         await self._scheduler.request(context)
 
-    async def _run_cycle(self, parent: Context | None, end_protection: bool) -> None:
-        """One update of all lights (the scheduler holds the update lock)."""
+    async def _run_cycle(self, parent: Context | None, end_protection: bool, periodic: bool = False) -> None:
+        """One update of all lights (the scheduler holds the update lock).
+
+        periodic: a cycle of the timer only; an unchanged command a light does
+        not take over is then repeated at most twice (RM-B64)."""
         if end_protection:
             self.override_manager.end_reengaging()
         if not self.is_on:
@@ -583,6 +602,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
                     self._calculated_kelvin,
                     transition=transition,
                     parent=parent,
+                    cycle=periodic and not scenario_change,
                 )
                 # The scenario transition may be longer than the update
                 # interval: the following cycles must not cut it short

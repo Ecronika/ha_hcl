@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0b5] - 2026-10-31
+Fifth pre-release (beta) of 0.9.0: fixes from a scenario review of 0.9.0b4 (RM-B64, RM-B65, RM-B66), notes for integrators and wall switches (RM-D10), a quick start with a picture in the README (RM-D13) and the HACS validation (RM-T33). The minimum Home Assistant version stays 2024.12.
+
+### Fixed
+- **No command in every update for a value a light cannot reach** (RM-B64): a light that never takes over the values – a KNX/DALI actuator with its own minimum or maximum dimming value (e.g. 5 % at night below a minimum of 10 %), a light with a wrong colour temperature range, or a bulb without power that Home Assistant still shows as on – got the same command in every update (about 130 per hour at 27 s). Now the regular updates repeat an unchanged command at most twice (so a lost radio command is still sent again) and then wait until the values or the light change, with one more try every 15 minutes. Switching on, a scenario change, `apply` and the return after manual control send as before. In Sleep the off command to a light that stays on is limited the same way. A command that fails with an error is still tried again in every update.
+- **Only a Hue room or zone group selected** (RM-B65): a group without a member list (Hue bridges with the older v1 API) is skipped, so the instance controlled no light without saying so. The log now names such a group once, and says when the instance controls no light at all. Groups that list their lights are expanded to them as before.
+- **The default curve warned about itself** (RM-B66): the card showed "Brightness changes too steeply (>2 %/min)" at the wake time for every default curve (its quick morning rise, RM-R06), for some wake times also the colour temperature warning. The limits of the warning are now 6 %/min and 200 K/min (the steepest default curve reaches 5.3 %/min and 143 K/min); real jumps still warn.
+
+### Documentation
+- Notes on lights (RM-D10): actuators with their own dimming limits (set minimum/maximum and Night light to them), smart bulbs behind a normal wall switch (power-on values count as manual control while Home Assistant still shows the bulb on; remedies), emergency and safety lighting (not in the targets), Sleep or Night light in children's and care rooms (after a restart without *Keep manual control across restarts* a light switched on during Sleep is switched off), Hue room and zone groups without a member list.
+- README: a picture of the card, a quick start in five steps and what HCL Lighting does differently (RM-D13).
+
+### Internal
+- `hacs.json` without the keys `domains` and `iot_class`, which the HACS validation rejects; CI runs the HACS validation (RM-T33).
+
 ## [0.9.0b4] - 2026-10-30
 Fourth pre-release (beta) of 0.9.0: fixes from two reviews of 0.9.0b3 (RM-B60–B63) and a clearer "now" line in the card (RM-F06). The minimum Home Assistant version stays 2024.12.
 

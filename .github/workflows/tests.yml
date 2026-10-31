@@ -34,6 +34,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: home-assistant/actions/hassfest@master
 
+  # HACS validation (RM-T33): the checks HACS runs for a repository of its
+  # default list (hacs.json, brand, description, topics, release, ...)
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          comment: "false"  # the workflow may only read (permissions above)
+
   homeassistant:
     name: Home Assistant ${{ matrix.ha }}
     runs-on: ubuntu-latest

@@ -354,3 +354,37 @@ async def test_rm_b44_apply_while_off_does_not_start_the_listeners(hass, no_fron
     await hass.async_block_till_done()
     assert lights.for_light("light.a")
     assert sw._state_listener_remove_callback is None
+
+
+# ---------------------------------------------------------------- RM-B65 (scenario review 31.10.2026)
+async def test_rm_b65_a_selected_hue_group_is_named_in_the_log(hass, no_frontend_registration, caplog):
+    """Only the Hue room group chosen: the instance controls no light (Hue
+    groups are skipped, documented) - 0.9.0b4 said nothing. Now one warning
+    names the group; it is not repeated when the targets are resolved again."""
+    hass.states.async_set("light.wohnzimmer", "on", {"is_hue_group": True, "brightness": 100, **CT_ATTRS})
+    await setup_entry(hass, ["light.wohnzimmer"])
+    await hcl_on(hass)
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING" and "light.wohnzimmer" in r.getMessage()]
+    assert len(warnings) == 1 and "controls no lights" in warnings[0], warnings
+    assert switch_entity(hass).resolved_targets == set()
+
+
+async def test_rm_b65_lights_next_to_the_group_are_controlled(hass, no_frontend_registration, caplog):
+    hass.states.async_set("light.wohnzimmer", "on", {"is_hue_group": True, "brightness": 100, **CT_ATTRS})
+    set_light(hass, "light.a", "on", **CT_ATTRS)
+    await setup_entry(hass, ["light.wohnzimmer", "light.a"])
+    await hcl_on(hass)
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING" and "light.wohnzimmer" in r.getMessage()]
+    assert len(warnings) == 1 and "controls no lights" not in warnings[0], warnings
+    assert switch_entity(hass).resolved_targets == {"light.a"}
+
+
+async def test_rm_b65_a_hue_group_with_members_is_expanded_without_warning(hass, no_frontend_registration, caplog):
+    """Hue v2 room/zone groups list their lights (`entity_id`): they are
+    expanded like light groups - no warning (subagent review 0.9.0b5)."""
+    set_light(hass, "light.a", "on", **CT_ATTRS)
+    hass.states.async_set("light.wohnzimmer", "on", {"is_hue_group": True, "entity_id": ["light.a"], **CT_ATTRS})
+    await setup_entry(hass, ["light.wohnzimmer"])
+    await hcl_on(hass)
+    assert switch_entity(hass).resolved_targets == {"light.a"}
+    assert not [r for r in caplog.records if r.levelname == "WARNING" and "light.wohnzimmer" in r.getMessage()]

@@ -444,6 +444,7 @@ class HCLLightController:
         parent: Context | None = None,
         on_failure: Callable[[list[str]], None] | None = None,
         source: str | None = None,
+        cycle: bool = False,
     ) -> BatchResult:
         """Apply settings to a batch of lights (one command per light, in parallel).
 
@@ -458,6 +459,9 @@ class HCLLightController:
         fast_mode: the commands run in the background (the caller does not
         wait); result.updated holds the lights a command was sent to, and
         on_failure is called with the lights whose command failed later.
+
+        cycle: a regular update cycle; an unchanged command a light does not
+        take over is repeated at most twice (RM-B64).
         """
         result = BatchResult()
         if not lights:
@@ -483,10 +487,17 @@ class HCLLightController:
             if not self._needs_update(entity_id, brightness, kelvin):
                 continue
             cap_type = self._get_capability(entity_id)
+            if cap_type not in ("ct", "xy_sim", "dim"):
+                continue
+            # Native colour temperature: the value the light can reach
+            tracked_kelvin = self.reachable_kelvin(entity_id, kelvin) if cap_type == "ct" else kelvin
+            state = self.hass.states.get(entity_id)
+            if not cycle:
+                self.override_manager.reset_repeats(entity_id, state)
+            elif not self.override_manager.may_repeat(entity_id, (brightness, tracked_kelvin), state):
+                continue
             data: dict[str, Any] = {"entity_id": [entity_id], "brightness_pct": brightness, "transition": transition_val}
             if cap_type == "ct":
-                # Native colour temperature: the value the light can reach
-                tracked_kelvin = self.reachable_kelvin(entity_id, kelvin)
                 data["color_temp_kelvin"] = tracked_kelvin
                 job = (
                     self._async_call("light", "turn_on", data, blocking=True, parent=parent)
@@ -495,7 +506,6 @@ class HCLLightController:
                     )
                 )
             elif cap_type == "xy_sim":
-                tracked_kelvin = kelvin
                 data["xy_color"] = xy
                 job = (
                     self._async_call("light", "turn_on", data, blocking=True, parent=parent)
@@ -503,11 +513,8 @@ class HCLLightController:
                         entity_id, xy[0], xy[1], brightness, transition_val, parent, generation
                     )
                 )
-            elif cap_type == "dim":
-                tracked_kelvin = kelvin
+            else:  # dim
                 job = self._async_call("light", "turn_on", data, blocking=True, parent=parent)
-            else:
-                continue
             # Tracking is set before sending (state reports may arrive at once);
             # a failed command restores it.
             previous[entity_id] = (
@@ -515,7 +522,7 @@ class HCLLightController:
                 self.commands.claim(entity_id),
             )
             self.override_manager.set_last_set_values(
-                entity_id, brightness, tracked_kelvin, start=self.hass.states.get(entity_id),
+                entity_id, brightness, tracked_kelvin, start=state,
                 source=source or self.command_source(),
             )
             self.override_manager.set_ignore_window(entity_id, transition_val)
@@ -691,6 +698,7 @@ class HCLLightController:
             return False  # nothing HCL adapts
 
         previous = (self.override_manager.tracking_snapshot(entity_id), self.commands.claim(entity_id))
+        self.override_manager.reset_repeats(entity_id, state)
         self.override_manager.set_last_set_values(
             entity_id, brightness, tracked_kelvin, start=state, source=self.command_source()
         )

@@ -8,6 +8,22 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 [![GitHub release](https://img.shields.io/github/release/Ecronika/ha_hcl.svg)](https://github.com/Ecronika/ha_hcl/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+![The HCL curve card: scenario chips, the values HCL sends now (here lowered by daylight) and the daily curve of brightness and colour temperature](https://raw.githubusercontent.com/Ecronika/ha_hcl/main/docs/images/card_en.png)
+
+## ⚡ Quick start
+1. **Install** with HACS: ⋮ → *Custom repositories* → `https://github.com/Ecronika/ha_hcl` as **Integration**, download **HCL Lighting**, restart Home Assistant (details: [Installation](#-installation)).
+2. **Add an instance** per room or zone: Settings → Devices & services → Add integration → **HCL Lighting**; choose the lights (entities, areas, labels …) and your wake and sleep time.
+3. **Add the card** to a dashboard (**HCL Curve Card**) to see what HCL does and to edit the curve.
+4. **Done**: lights that are on follow the curve; switched on, they get the current values at once. Changing a light yourself pauses HCL for that light.
+5. **Optional**: a lux sensor for the [daylight compensation](#4-daylight-compensation-optional), scenarios (Focus, Relax, Night light …) on the card or in automations.
+
+## 💡 What HCL Lighting does differently
+- **Your own daily curve**: drawn and checked in the card instead of a fixed formula; the default curve comes from your wake and sleep time.
+- **Real daylight control**: an indoor lux sensor dims the lights when there is daylight (a closed loop with limits, not an on/off threshold).
+- **Manual control you can follow**: a light you change yourself stays as you set it and returns to HCL later; the card shows how many lights are paused.
+- **Never switches a light on**: presence, buttons and automations decide *when* there is light, HCL decides *how* it looks – it works next to any presence automation.
+- **Setpoint sensors** for KNX/DALI gateways and other systems, German and English, Home Assistant 2024.12 or newer.
+
 ## ✨ Features
 
 ### 🎨 Interactive Dashboard Card
@@ -37,7 +53,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 🧠 Control
 - **Manual control**: HCL pauses a light when you change it yourself and resumes later (see [Manual control](#manual-control)).
 - **Brightness and colour temperature separately**: Two switches per instance let HCL adapt only the colour temperature, only the brightness or both.
-- **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K).
+- **Traffic Control**: Updates are only sent when the values change noticeably (brightness > 1 %, colour temperature > 50 K); a light that cannot reach a value gets it at most three times (then every 15 minutes).
 - **Instant-On**: Lights receive the HCL values right after they are switched on, without transition (a light switched on during Sleep counts as manual control).
 - **Daylight compensation** (optional): an indoor lux sensor lowers the brightness in Auto when there is enough daylight; with *Visual harmony* (optional) the colour temperature then gets softly warmer (see [Daylight compensation](#4-daylight-compensation-optional)).
 - **Setpoint sensors**: the values HCL sends now, as sensors for automations and gateways (see [Recipes](#recipes)).
@@ -59,7 +75,7 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
 2. Search for **"HCL Lighting"**.
-3. Name your instance (e.g. "Living Room"), select the lights (at least one target) and set the wake and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant itself, with the rules of the installed version (the same as for light actions). Typically hidden lights and configuration/diagnostic lights reached through a device or area (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Details follow the installed version, e.g. whether a configuration/diagnostic light that carries a selected label itself is included. Lights given directly are always used (light groups are expanded to their members; Hue room/zone groups are skipped).
+3. Name your instance (e.g. "Living Room"), select the lights (at least one target) and set the wake and sleep time. Targets can be entities, devices, areas, floors or labels; light groups are expanded to their members. Lights that are added to a selected area, device, floor or label later are picked up automatically. Areas, devices, floors and labels are resolved by Home Assistant itself, with the rules of the installed version (the same as for light actions). Typically hidden lights and configuration/diagnostic lights reached through a device or area (e.g. status LEDs of wall switches) are skipped, a light assigned to its own area belongs to that area, not to the area of its device, and on versions with child devices a device includes them. Details follow the installed version, e.g. whether a configuration/diagnostic light that carries a selected label itself is included. Lights given directly are always used (light groups and Hue room/zone groups that list their lights are expanded to their members; Hue groups without a member list are skipped).
 
 **Requirements**: Home Assistant **2024.12** or newer.
 
@@ -155,6 +171,11 @@ Some bulbs have firmware limits that HCL cannot fix, but the options can work ar
 *   **Lights that keep glowing after Sleep**: Sleep switches the lights off with the *transition when the scenario changes*. Some bulbs stay at their minimum level when switched off with a transition (reported for IKEA and AwoX/EGLO) while Home Assistant shows them off. Set this transition to 0 s.
 *   **Lights that switch themselves back on** (reported for Sengled): switched off during a long transition, they may continue it. Use a short *transition of updates*.
 *   **Previous colour visible when switching on**: HCL sends its values when the light reports on, so the light shows its previous values for a moment. To avoid that, switch it on with the HCL values (see *Recipes*). With ZHA, the option "Enhanced light transition" keeps such a command with a transition from fading from the previous colour.
+*   **Actuators with their own dimming limits** (KNX/DALI dimming actuators, dimmer modules with a minimum or maximum dimming value): set *Minimum brightness*, *Maximum brightness* and *Night light: brightness* to these limits. A light that cannot reach a value gets the same command at most three times in a row (the command and two repeats, so a lost radio command is sent again), then HCL waits until the value or the light changes and only tries again every 15 minutes. A command that fails with an error is tried again in every update, as before.
+*   **Smart bulbs behind a normal wall switch**: if the bulb loses power while Home Assistant still shows it on (Zigbee2MQTT without availability check or before its timeout, ZHA before the timeout for mains-powered devices), it reports its power-on values when power returns. HCL cannot tell that from someone changing the light and treats it as manual control until the return time (default 4 hours). Remedies: enable availability with a short timeout (a gap of more than 5 minutes then counts as switched off, and the bulb gets the HCL values when it comes back), keep the bulb powered (smart switch in detached mode) or use a shorter return time. Bulbs that come back on together get the HCL values at once; a command a bulb misses while it starts up is sent again in the next update.
+*   **Emergency and safety lighting**: do not include it in the targets. With areas, floors or labels, hide such a light in Home Assistant (hidden lights reached through an area or device are skipped) or select the lights individually or with a label of their own. HCL never switches a light on, but it would dim one that is on.
+*   **Sleep or Night light in children's and care rooms**: a light switched on during Sleep stays on (manual control) until the return time or – without *Keep manual control across restarts* – until Home Assistant restarts; HCL then switches it off. Where light may be wanted at night, use Night light or enable that option.
+*   **Hue room and zone groups** that list their lights are expanded to them; groups without a member list (Hue bridges with the older v1 API) are skipped – select their lights or their area. A skipped group is named in the log.
 
 ---
 
@@ -283,7 +304,7 @@ The curve parity test (`tests/test_curve_parity.py`) runs the card's curve maths
 
 `tests/` is organised by responsibility (e.g. `test_manual_control_detection.py`, `test_light_commands.py`, `test_config_flow.py`); the roadmap IDs stay in the test names (`test_rm_b41_…`). Shared helpers live in `tests/support/` (entries and entity IDs, the light test double `FakeLights`, curves, `timer_cycle()` for an update cycle); test modules do not import each other and do not call the scheduling internals of the switch.
 
-GitHub Actions (`.github/workflows/tests.yml`) runs Ruff (rules in `ruff.toml`), hassfest, the Home Assistant tests against the minimum supported release (2024.12.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.10.4), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium (pytest, pytest-asyncio and Playwright pinned). When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
+GitHub Actions (`.github/workflows/tests.yml`) runs Ruff (rules in `ruff.toml`), hassfest, the HACS validation, the Home Assistant tests against the minimum supported release (2024.12.0), the two releases at the boundary of Home Assistant's target helpers (2025.7.0, 2025.8.0) and the current release (2026.10.4), each with the matching pinned `pytest-homeassistant-custom-component`, plus the card tests in Chromium (pytest, pytest-asyncio and Playwright pinned). When a new Home Assistant release should be covered, update the `ha`/`python`/`phcc` values of the "current" matrix entry.
 
 ---
 
