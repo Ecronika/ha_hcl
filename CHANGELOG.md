@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-01
+Summary of all changes since 0.8.1; the details are in the entries of the pre-releases 0.9.0b1 to 0.9.0b5 below (RM-… numbers refer to the roadmap). No code change compared to 0.9.0b5.
+
+### Upgrade notes – behaviour that changes from 0.8.1
+- **Home Assistant 2024.12 or newer is required** (before: 2024.7; RM-H01).
+- **Scenario Guest removed** (RM-R12, deprecated since 0.8.0): `guest` is no longer an option of the scenario select or of `hcl_lighting.set_scenario`; automations that still select it now fail. Switch *HCL active* off instead. An instance that was left in Guest starts in Auto with *HCL active* off.
+- **Daylight compensation: a reduction needs a fresh sensor value** (RM-E02-33): a value older than 10 minutes lowers the brightness no further, and one report lowers it by at most 25 % points; raising is not affected. Noticeable only with sensors that report rarely; not with *Sensor stale after* 0.
+- **No repeated command for a value a light cannot reach** (RM-B64): the regular updates repeat an unchanged command at most twice and then wait for a change, with one more try every 15 minutes. Switching on, scenario changes, `apply` and the return after manual control send as before.
+
+### Added
+- **Visual harmony** (RM-E04, optional, off by default, beta values) with the **Daylight Estimator** (RM-E03): with the daylight compensation on, a large reduction of the brightness softly limits the colour temperature towards warmer light; the outdoor light from the position of the sun and optionally a weather entity refines the influence. Never cooler than the curve, never warmer than about 3770 K by its own correction, only in Auto, not at night.
+- **Card:** the "now" line shows whether the values can take effect – "HCL off", "brightness only", "colour temperature only", "adaptation off", the number of lights under manual control (RM-F06) – and why the daylight compensation holds (RM-B62). New attributes of the curve sensor: `switch_entity_id`, `adapt_brightness_entity_id`, `adapt_color_entity_id`.
+
+### Fixed
+- Daylight compensation: reloading the integration no longer gives the same lux report a new reduction budget (RM-B60).
+- Visual harmony: no colour temperature warmer than intended after a jump of the curve (RM-B58), rounding never cooler than the curve (RM-B59), no conversion for a correction of zero (RM-B61).
+- A Hue room or zone group without a member list is named in the log when it is skipped (RM-B65).
+- Card: the default curve no longer warns about its own morning rise (RM-B66); in Sleep the "now" line says "setpoint off" instead of "lights off" (RM-B63).
+
+### Documentation
+- README: quick start with a picture of the card and what HCL Lighting does differently (RM-D13); notes on lights – actuators with their own dimming limits, smart bulbs behind a wall switch and power restoration, emergency lighting, Sleep in children's and care rooms, Hue groups (RM-D10); sensors that report rarely (RM-D09).
+
+### Internal
+- CI tests Home Assistant 2024.12.0, 2025.7.0, 2025.8.0 and 2026.10.4 and runs the HACS validation (RM-T32, RM-T33); `hacs.json` with LF line endings and without the keys rejected by HACS.
+
 ## [0.9.0b5] - 2026-10-31
 Fifth pre-release (beta) of 0.9.0: fixes from a scenario review of 0.9.0b4 (RM-B64, RM-B65, RM-B66), notes for integrators and wall switches (RM-D10), a quick start with a picture in the README (RM-D13) and the HACS validation (RM-T33). The minimum Home Assistant version stays 2024.12.
 
