@@ -16,7 +16,6 @@ from homeassistant.helpers.event import async_track_point_in_utc_time
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    DOMAIN,
     HCL_MODES,
     MODE_AUTO,
     TIMED_MODES,
@@ -26,6 +25,7 @@ from .const import (
     CONF_WAKE_TIME,
     DEFAULT_WAKE_TIME,
     anchor_time,
+    signal_update,
 )
 from .logic.light_controller import HCLLightController
 from .entity import HCLEntity
@@ -161,4 +161,4 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
 
         # Apply the new mode immediately (the switch and the curve sensor listen);
         # the context of the request is passed on to the light commands
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", context)
+        async_dispatcher_send(self.hass, signal_update(self._entry.entry_id), context)

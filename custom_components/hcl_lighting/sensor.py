@@ -22,6 +22,8 @@ from .const import (
     CONF_WAKE_TIME,
     CONF_SLEEP_TIME,
     anchor_time,
+    signal_environment,
+    signal_update,
 )
 from .logic.daylight_compensation import DAYLIGHT_KEY
 from .logic.visual_harmony import HARMONY_KEY
@@ -88,7 +90,7 @@ class HCLLightingCurveSensor(HCLEntity, SensorEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, 
-                f"{DOMAIN}_{self._entry.entry_id}_update",
+                signal_update(self._entry.entry_id),
                 self._handle_update
             )
         )
@@ -233,13 +235,13 @@ class HCLSetpointSensor(HCLEntity, SensorEntity):
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", self._handle_update
+                self.hass, signal_update(self._entry.entry_id), self._handle_update
             )
         )
         # after every update cycle with environmental features (RM-E01)
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, f"{DOMAIN}_{self._entry.entry_id}_environment", self._handle_update
+                self.hass, signal_environment(self._entry.entry_id), self._handle_update
             )
         )
         self.async_on_remove(

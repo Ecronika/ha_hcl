@@ -429,8 +429,6 @@ class HCLLightController:
         for eid in to_remove:
             del self._capability_cache[eid]
         self.commands.prune(valid_entity_ids)
-
-            
         if to_remove:
             _LOGGER.debug("Pruned %d stale entities from capability cache", len(to_remove))
 
@@ -537,9 +535,7 @@ class HCLLightController:
                 # hangs does not hold Home Assistant's own waiting for tasks
                 task = self.hass.async_create_background_task(job, f"{DOMAIN} light command {entity_id}")
                 self._track_in_flight(task, entity_id)
-                task.add_done_callback(
-                    lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
-                )
+                self._result_later(task, entity_id, previous[entity_id], on_failure)
                 result.updated.append(entity_id)
             return result
 
@@ -562,9 +558,7 @@ class HCLLightController:
             # The update itself is cancelled (unload, shutdown): the commands
             # finish on their own, their results are handled like fast mode
             for task, entity_id in tasks.items():
-                task.add_done_callback(
-                    lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
-                )
+                self._result_later(task, entity_id, previous[entity_id], on_failure)
             raise
         for task in done:
             entity_id = tasks[task]
@@ -586,9 +580,7 @@ class HCLLightController:
             )
             # The values may still arrive: tracking and context stay. A late
             # error restores the tracking like a failed fast-mode command.
-            task.add_done_callback(
-                lambda t, eid=entity_id: self._background_result(t, eid, previous[eid], on_failure)
-            )
+            self._result_later(task, entity_id, previous[entity_id], on_failure)
             result.pending.append(entity_id)
         return result
 
@@ -630,6 +622,16 @@ class HCLLightController:
             return False
         self.override_manager.restore_tracking(entity_id, snapshot)
         return True
+
+    def _result_later(
+        self,
+        task: asyncio.Task,
+        entity_id: str,
+        previous: tuple[Tracking, int],
+        on_failure: Callable[[list[str]], None] | None,
+    ) -> None:
+        """Handle the result of a command when it finishes (HCL does not wait for it)."""
+        task.add_done_callback(lambda t: self._background_result(t, entity_id, previous, on_failure))
 
     def _background_result(
         self,
@@ -712,9 +714,7 @@ class HCLLightController:
             self._background_result(task, entity_id, previous, None)
         else:
             self._track_in_flight(task, entity_id)
-            task.add_done_callback(
-                lambda t: self._background_result(t, entity_id, previous, None)
-            )
+            self._result_later(task, entity_id, previous, None)
         return True
 
     async def reengage_light(
@@ -818,43 +818,38 @@ class HCLLightController:
 
         # Check Brightness
         delta_b = 0
-        if not check_b:
-            pass
-        elif curr_b is not None:
-             delta_b = abs(curr_b_pct - target_b)
-        else:
-            # Unknown brightness, assume update needed
-            return True
-            
+        if check_b:
+            if curr_b is None:
+                return True  # unknown brightness: update
+            delta_b = abs(curr_b_pct - target_b)
+
         # Check Kelvin (if supported)
         delta_k = 0
-        if not check_k:
-            pass
-        elif curr_k is not None:
-             # Compare with what the light can reach: a CT light clamps the
-             # target to its own range and reports the clamped value.
-             delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
-        elif (capability := self._get_capability(entity_id)) in ("ct", "xy_sim"):
-             # Light is in a colour mode (no colour_temp is reported).
-             expected_k = self.reachable_kelvin(entity_id, target_k, state)
-             if capability == "ct" and not self._sent_kelvin(entity_id, expected_k):
-                 # A light with colour temperature is driven by it (RM-R09):
-                 # bring it back from a colour mode (e.g. the XY simulation of
-                 # 0.7), once per value - a light that keeps reporting a colour
-                 # mode afterwards is compared by its XY colour (RM-B43).
-                 return True
-             curr_xy = state.attributes.get("xy_color")
-             if not curr_xy:
-                 return True
-             target_x, target_y = kelvin_to_xy(expected_k)
-             dist_xy = xy_distance(curr_xy, (target_x, target_y))
-             if dist_xy > XY_COLOR_DISTANCE_THRESHOLD:
-                 return True
-             delta_k = abs(
-                 color_xy_to_temperature(curr_xy[0], curr_xy[1])
-                 - color_xy_to_temperature(target_x, target_y)
-             )
-        
+        if check_k and curr_k is not None:
+            # Compare with what the light can reach: a CT light clamps the
+            # target to its own range and reports the clamped value.
+            delta_k = abs(curr_k - self.reachable_kelvin(entity_id, target_k, state))
+        elif check_k and (capability := self._get_capability(entity_id)) in ("ct", "xy_sim"):
+            # Light is in a colour mode (no colour_temp is reported).
+            expected_k = self.reachable_kelvin(entity_id, target_k, state)
+            if capability == "ct" and not self._sent_kelvin(entity_id, expected_k):
+                # A light with colour temperature is driven by it (RM-R09):
+                # bring it back from a colour mode (e.g. the XY simulation of
+                # 0.7), once per value - a light that keeps reporting a colour
+                # mode afterwards is compared by its XY colour (RM-B43).
+                return True
+            curr_xy = state.attributes.get("xy_color")
+            if not curr_xy:
+                return True
+            target_x, target_y = kelvin_to_xy(expected_k)
+            dist_xy = xy_distance(curr_xy, (target_x, target_y))
+            if dist_xy > XY_COLOR_DISTANCE_THRESHOLD:
+                return True
+            delta_k = abs(
+                color_xy_to_temperature(curr_xy[0], curr_xy[1])
+                - color_xy_to_temperature(target_x, target_y)
+            )
+
         if delta_b <= BRIGHTNESS_THRESHOLD and (delta_k <= KELVIN_THRESHOLD if target_k else True):
              # Logs demoted to TRACE (level 5) to avoid spam
              _LOGGER.log(5, "Skipping update for %s: Change too small (Delta B=%s%%, K=%sK)", entity_id, delta_b, delta_k if target_k else "N/A")

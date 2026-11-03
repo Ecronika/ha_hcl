@@ -11,14 +11,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Context, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
-from homeassistant.const import STATE_OFF, STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.const import (
+    ENTITY_MATCH_ALL,
+    EVENT_CALL_SERVICE,
+    STATE_OFF,
+    STATE_ON,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
-from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
-from homeassistant.const import EVENT_CALL_SERVICE, ENTITY_MATCH_ALL
 
 from .const import (
     DOMAIN,
@@ -31,6 +36,9 @@ from .const import (
     DEFAULT_TRANSITION,
     DEFAULT_RESPECT_TURN_ON_VALUES,
     CONF_SCENARIO_TRANSITION,
+    signal_environment,
+    signal_overrides,
+    signal_update,
 )
 
 from .conflicts import async_check_conflicts
@@ -155,7 +163,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         # Keep the manual_control attribute current
         self.async_on_remove(
             async_dispatcher_connect(
-                self.hass, f"{DOMAIN}_{self._entry.entry_id}_overrides", self._handle_overrides_changed
+                self.hass, signal_overrides(self._entry.entry_id), self._handle_overrides_changed
             )
         )
 
@@ -172,7 +180,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass, 
-                f"{DOMAIN}_{self._entry.entry_id}_update",
+                signal_update(self._entry.entry_id),
                 self._handle_global_update
             )
         )
@@ -188,9 +196,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             self._group_listener_remove_callback()
             self._group_listener_remove_callback = None
 
-        if self._state_listener_remove_callback:
-            self._state_listener_remove_callback()
-            self._state_listener_remove_callback = None
+        self._stop_state_listener()
 
     async def _async_hass_started(self, _hass: HomeAssistant) -> None:
         """Re-resolve targets after HA startup (groups are expanded only when loaded)."""
@@ -365,12 +371,15 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             "" if self._resolved_targets else " - this instance controls no lights",
         )
 
-    async def _re_evaluate_targets_and_listeners(self) -> None:
-        """Re-evaluate target entities and update state listeners."""
-        # Stop existing listener if any
+    def _stop_state_listener(self) -> None:
+        """Stop listening to the state changes of the target lights."""
         if self._state_listener_remove_callback:
             self._state_listener_remove_callback()
             self._state_listener_remove_callback = None
+
+    async def _re_evaluate_targets_and_listeners(self) -> None:
+        """Re-evaluate target entities and update state listeners."""
+        self._stop_state_listener()
 
         # Resolve targets dynamically
         groups: set[str] = set()
@@ -513,9 +522,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         self.async_write_ha_state() # Ensure UI updates immediately
         async_check_conflicts(self.hass)
 
-        if self._state_listener_remove_callback:
-            self._state_listener_remove_callback()
-            self._state_listener_remove_callback = None
+        self._stop_state_listener()
 
         # The member lists of target groups are watched only while HCL is on
         self._watch_groups(set())
@@ -541,7 +548,7 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
             brightness, kelvin = self.controller.step_target_values(dt_util.now(), **self._cycle_lights())
             if self.controller.environment.enabled:
                 # the target sensors show the effective values of this cycle
-                async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_environment")
+                async_dispatcher_send(self.hass, signal_environment(self._entry.entry_id))
 
             # Update State for UI/Debugging
             self._calculated_brightness = brightness
@@ -707,15 +714,12 @@ class HCLSwitch(HCLEntity, RestoreEntity, SwitchEntity):
                 return
 
             # 3. Check for Manual Override
-            is_override = self.override_manager.check_override(
-                entity_id, 
+            self.override_manager.check_override(
+                entity_id,
                 new_state,
-                (self._calculated_brightness, self._calculated_kelvin), # Fallback Reference
-                old_state=old_state
+                (self._calculated_brightness, self._calculated_kelvin),  # fallback reference
+                old_state=old_state,
             )
-            
-            if is_override:
-                return
         except Exception:
             _LOGGER.exception("Error handling state change for %s", event.data.get("entity_id", "unknown"))
 
@@ -742,7 +746,7 @@ class HCLAdaptSwitch(HCLEntity, RestoreEntity, SwitchEntity):
         setattr(self._controller, self._key, value)
         self.async_write_ha_state()
         async_check_conflicts(self.hass)
-        async_dispatcher_send(self.hass, f"{DOMAIN}_{self._entry.entry_id}_update", context)
+        async_dispatcher_send(self.hass, signal_update(self._entry.entry_id), context)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Let HCL adapt this attribute."""

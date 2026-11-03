@@ -14,6 +14,8 @@ from ..const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+MINUTES_PER_DAY = 1440
+
 class HCLPoint(TypedDict):
     """Control point for HCL curve."""
     t: int # Minutes from midnight (0..1439)
@@ -28,9 +30,6 @@ class CurveConfig(TypedDict):
 class HCLCalculator:
     """Calculator for HCL values using Free-hand Interpolation."""
 
-    # Time -> (Kelvin, Brightness %)
-    # Format: (Minutes from Midnight, Kelvin, Brightness)
-    
     def __init__(self):
         """Initialize with default curve."""
         self.active_curve = []
@@ -57,10 +56,10 @@ class HCLCalculator:
              return
 
         normalized = []
-        has_midnight = any(int(p['t']) % 1440 == 0 and int(p['t']) != 1440 for p in points)
+        has_midnight = any(int(p['t']) % MINUTES_PER_DAY == 0 and int(p['t']) != MINUTES_PER_DAY for p in points)
         for p in points:
             t = int(p['t'])
-            if t == 1440:
+            if t == MINUTES_PER_DAY:
                 if has_midnight:
                     _LOGGER.warning(
                         "Curve has points at 00:00 and 24:00 (the same moment); using the 00:00 point"
@@ -83,8 +82,6 @@ class HCLCalculator:
         """Set the default curve for the wake and sleep time (RM-R06/R07)."""
         self.calculate_curve_from_points(default_points(wake_str, sleep_str))
 
-    MINUTES_PER_DAY = 1440
-    
     def get_hcl_values(
         self, now, min_brightness: int, max_brightness: int
     ) -> tuple[int, int]:
@@ -193,13 +190,13 @@ class HCLCalculator:
         t0 = curr_pt['t']
         t1 = next_pt['t']
         dt = t1 - t0
-        if dt < 0: dt += 1440
+        if dt < 0: dt += MINUTES_PER_DAY
         
         if dt == 0: return curr_pt['b'], curr_pt['k'] # Fail safe
 
         # Current time relative to t0
         dist = current_minutes - t0
-        if dist < 0: dist += 1440
+        if dist < 0: dist += MINUTES_PER_DAY
         
         t = dist / dt
         
@@ -238,8 +235,8 @@ class HCLCalculator:
             - Flat segments: Returns 0 if |slope| < 1e-9
         """
         # Forward distances on the 24 h circle (prev -> curr -> next)
-        dt_left = (t_curr - t_prev) % 1440
-        dt_right = (t_next - t_curr) % 1440
+        dt_left = (t_curr - t_prev) % MINUTES_PER_DAY
+        dt_right = (t_next - t_curr) % MINUTES_PER_DAY
         
         # Secants
         if dt_left == 0 or dt_right == 0: return 0
@@ -314,11 +311,11 @@ def default_points(wake_str: str | None, sleep_str: str | None) -> List[HCLPoint
     """Control points of the default curve for a wake and sleep time (RM-R06/R07)."""
     wake = _minutes(wake_str, DEFAULT_WAKE_TIME)
     sleep = _minutes(sleep_str, DEFAULT_SLEEP_TIME)
-    span = (sleep - wake) % 1440
+    span = (sleep - wake) % MINUTES_PER_DAY
     if span <= MIN_ACTIVE_SPAN_MINUTES:  # rejected by the config flow; old or invalid data
         _LOGGER.warning("Wake-sleep span (%d min) too short; using 07:00-22:00", span)
         wake, sleep = _minutes(_FALLBACK[0], DEFAULT_WAKE_TIME), _minutes(_FALLBACK[1], DEFAULT_SLEEP_TIME)
-        span = (sleep - wake) % 1440
+        span = (sleep - wake) % MINUTES_PER_DAY
     day = [(t, k, b) for t, k, b in _FROM_WAKE] + [(span + t, k, b) for t, k, b in _TO_SLEEP]
     if span < _FULL_DAY_MINUTES:
         scale = span / _REFERENCE_DAY_MINUTES
@@ -326,7 +323,7 @@ def default_points(wake_str: str | None, sleep_str: str | None) -> List[HCLPoint
             (_REFERENCE_DAY_MINUTES + t, k, b) for t, k, b in _TO_SLEEP
         ]
         day = [(round(t * scale), k, b) for t, k, b in reference]
-    night = 1440 - span
+    night = MINUTES_PER_DAY - span
     if night >= _NIGHT_MIN_MINUTES:
         day += [(span + _NIGHT_AFTER_SLEEP, *_NIGHT), (night + span - 1, *_NIGHT)]
-    return [{"t": (wake + t) % 1440, "k": k, "b": b} for t, k, b in day]
+    return [{"t": (wake + t) % MINUTES_PER_DAY, "k": k, "b": b} for t, k, b in day]
