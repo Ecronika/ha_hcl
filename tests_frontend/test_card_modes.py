@@ -413,3 +413,18 @@ async def test_rm_f08_preview_tooltip_names_what_ends_the_preview(page):
     await _set_hass(page, "auto")
     title = await page.evaluate("() => card.shadowRoot.getElementById('btn-test').title")
     assert "reload of the integration" in title and "Save" in title, title
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("auto", "Hand the manually controlled lights (2) back to HCL now? They get the HCL values at once."),
+    ("sleep", "Hand the manually controlled lights (2) back to HCL now? In Sleep they are switched off."),
+])
+async def test_rm_f09_hand_back_question_names_number_and_sleep_consequence(page, mode, expected):
+    """Neubewertung 0.9.2 (B2): in Sleep handing back switches the lights off -
+    the question says so and names the number of lights."""
+    await _show_with_calls(page, _control_hass(mode=mode, manual=["light.a", "light.b"]))
+    await page.evaluate("""() => { window.__asked = null;
+        window.confirm = (q) => { window.__asked = q; return false; };
+        card.shadowRoot.getElementById('btn-release').click(); }""")
+    assert await page.evaluate("() => window.__asked") == expected
+    assert await page.evaluate("() => window.__calls.length") == 0
