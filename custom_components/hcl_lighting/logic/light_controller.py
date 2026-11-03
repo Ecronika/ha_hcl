@@ -485,7 +485,9 @@ class HCLLightController:
             if not self._needs_update(entity_id, brightness, kelvin):
                 continue
             cap_type = self._get_capability(entity_id)
-            if cap_type not in ("ct", "xy_sim", "dim"):
+            # A light that can only be switched has nothing to adapt; Sleep
+            # (0 %) still switches it off like every other light (RM-B67)
+            if cap_type not in ("ct", "xy_sim", "dim") and not (cap_type == "onoff" and brightness == 0):
                 continue
             # Native colour temperature: the value the light can reach
             tracked_kelvin = self.reachable_kelvin(entity_id, kelvin) if cap_type == "ct" else kelvin
@@ -511,7 +513,7 @@ class HCLLightController:
                         entity_id, xy[0], xy[1], brightness, transition_val, parent, generation
                     )
                 )
-            else:  # dim
+            else:  # dim, or onoff switched off (brightness 0 turns a light off in Home Assistant)
                 job = self._async_call("light", "turn_on", data, blocking=True, parent=parent)
             # Tracking is set before sending (state reports may arrive at once);
             # a failed command restores it.

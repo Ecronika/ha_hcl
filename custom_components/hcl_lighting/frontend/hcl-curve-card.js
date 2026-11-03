@@ -59,7 +59,8 @@ const HCL_STRINGS = {
         no_lights: "no lights",
         env_scenario_fixed: "without daylight control",
         release_title: "Hand the manually controlled lights back to HCL",
-        confirm_release: "Hand the manually controlled lights back to HCL now? They get the HCL values at once.",
+        confirm_release: "Hand the manually controlled lights ({n}) back to HCL now? They get the HCL values at once.",
+        confirm_release_sleep: "Hand the manually controlled lights ({n}) back to HCL now? In Sleep they are switched off.",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
         curve_applies_auto: "The curve applies in Auto; active now: {mode}. Changes take effect in Auto.",
@@ -143,7 +144,8 @@ const HCL_STRINGS = {
         no_lights: "keine Lichter",
         env_scenario_fixed: "ohne Tageslichtregelung",
         release_title: "Manuell gesteuerte Lichter an HCL zurückgeben",
-        confirm_release: "Manuell gesteuerte Lichter jetzt an HCL zurückgeben? Sie bekommen sofort die HCL-Werte.",
+        confirm_release: "Manuell gesteuerte Lichter ({n}) jetzt an HCL zurückgeben? Sie bekommen sofort die HCL-Werte.",
+        confirm_release_sleep: "Manuell gesteuerte Lichter ({n}) jetzt an HCL zurückgeben? In „Schlafen“ werden sie ausgeschaltet.",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
         curve_applies_auto: "Die Kurve gilt im Modus Auto; aktiv ist gerade {mode}. Änderungen wirken in Auto.",
@@ -1409,7 +1411,12 @@ class HCLCurveCard extends HTMLElement {
         // releasing manual control anywhere else (switch and lights)
         const switchId = this._switchIds.hcl;
         if (!this._hass || !switchId || this._pendingRelease) return;
-        if (!confirm(this._t("confirm_release"))) return;
+        // the question names the number and, in Sleep, the consequence (RM-F09)
+        const main = this._hass.states[switchId];
+        const list = main && main.attributes && main.attributes.manual_control;
+        const n = Array.isArray(list) ? list.length : 0;
+        const key = this._currentMode === "sleep" ? "confirm_release_sleep" : "confirm_release";
+        if (!confirm(this._t(key, { n }))) return;
         this._pendingRelease = true;
         try {
             await this._callService(

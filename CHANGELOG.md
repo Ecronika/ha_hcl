@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-11-04
+A fix for lights that can only be switched in Sleep (RM-B67), a clearer question in the card (RM-F09) and notes on such lights (RM-D17), from a re-review of 0.9.2. The minimum Home Assistant version stays 2024.12.
+
+### Fixed
+- **Sleep switches off lights that can only be switched on and off** (RM-B67): relay actuators, plugs or switches shown as lights were skipped by every command, so Sleep left them on – unlike all other lights ("Sleep switches off every light that is on", RM-B52). They are now switched off with the others. A light switched on during Sleep still counts as manually controlled and stays on. Nothing else changes for these lights: the curve, Night light and the other scenarios do not adapt them.
+
+### Changed
+- Card: the question before handing manually controlled lights back names their number and, in Sleep, that they are switched off (RM-F09).
+
+### Documentation
+- Notes on lights: lights that can only be switched, and *Adapt colour temperature* alone on lights that can only be dimmed (RM-D17).
+
 ## [0.9.2] - 2026-11-03
 Card and documentation from a persona review of 0.9.1 (RM-O21, RM-F08, RM-D16). The behaviour of the integration does not change; the minimum Home Assistant version stays 2024.12.
 

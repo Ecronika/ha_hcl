@@ -349,6 +349,51 @@ async def test_rm_b52_sleep_switches_off_a_very_dim_light(hass, no_frontend_regi
     assert any(d.get("brightness_pct") == 0 for d in sent), sent
 
 
+ONOFF = {"supported_color_modes": ["onoff"], "color_mode": "onoff"}
+
+
+async def test_rm_b67_sleep_switches_off_an_on_off_light(hass, no_frontend_registration):
+    """Neubewertung 0.9.2 (B1, RM-B67, O22 = A): a light that can only be
+    switched (relay, plug) was skipped in every command, so Sleep left it on -
+    against "Sleep switches off every light that is on" (RM-B52)."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", **ONOFF)
+    await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    assert calls_for(calls, "light.a") == []  # Auto: nothing to adapt
+    await select_scenario(hass, "night_light")
+    assert calls_for(calls, "light.a") == []  # no brightness to set
+    await select_scenario(hass, "sleep")
+    assert [c.data.get("brightness_pct") for c in calls_for(calls, "light.a")] == [0]
+
+
+async def test_rm_b67_sleep_switches_off_an_on_off_light_without_brightness_adaptation(
+    hass, no_frontend_registration
+):
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "on", **ONOFF)
+    await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    await hass.services.async_call("switch", "turn_off", {"entity_id": ADAPT}, blocking=True)
+    await select_scenario(hass, "sleep")
+    assert [c.data.get("brightness_pct") for c in calls_for(calls, "light.a")] == [0]
+
+
+async def test_rm_b67_on_off_light_switched_on_during_sleep_stays_on(hass, no_frontend_registration):
+    """Switching it on during Sleep is manual control, as for every other light."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "off", **ONOFF)
+    entry = await setup_entry(hass, ["light.a"])
+    await hcl_on(hass)
+    await select_scenario(hass, "sleep")
+    set_light(hass, "light.a", "on", **ONOFF)
+    await hass.async_block_till_done()
+    assert core(hass, entry).override_manager.is_overridden("light.a")
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    assert calls_for(calls, "light.a") == []
+
+
 async def test_rm_b52_sleep_switches_off_a_dim_light_without_brightness_adaptation(hass, no_frontend_registration):
     calls = async_mock_service(hass, "light", "turn_on")
     set_light(hass, "light.a", "on", brightness=2, supported_color_modes=["brightness"], color_mode="brightness")
