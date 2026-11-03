@@ -325,3 +325,91 @@ async def test_rm_b63_sleep_states_the_setpoint_not_the_lights(page):
     info = await _now_info(page, _control_hass(mode="sleep", manual=["light.a"]))
     assert "Sleep" in info and "setpoint off" in info and "1 light manual" in info, info
     assert "lights off" not in info, info
+
+
+# ---------------------------------------------------------------- RM-O21, RM-F08
+async def _release_button(page) -> dict:
+    return await page.evaluate("""() => { const b = card.shadowRoot.getElementById('btn-release');
+        return {hidden: b.hidden, visible: b.offsetParent !== null, text: b.textContent,
+                label: b.getAttribute('aria-label') || ''}; }""")
+
+
+async def _show_with_calls(page, h: dict) -> str:
+    await page.evaluate("(h) => { h.callService = (...a) => window.__calls.push(a); card.hass = h; }", h)
+    await frames(page)
+    return await page.evaluate("() => card.shadowRoot.getElementById('now-info').textContent")
+
+
+async def test_rm_o21_manual_note_hands_the_lights_back_after_a_confirmation(page):
+    """Persona review 0.9.1 (R6, O21 = B): "N lights manual" is a button; after
+    a confirmation it hands all lights back with the existing action."""
+    info = await _show_with_calls(page, _control_hass(manual=["light.a", "light.b"]))
+    button = await _release_button(page)
+    assert not button["hidden"] and button["visible"] and button["text"] == "2 lights manual", button
+    assert "back to HCL" in button["label"], button
+    assert "2 lights manual" in info and "80 %" in info, info
+    # declined: no call
+    await page.evaluate("() => { window.confirm = () => false; card.shadowRoot.getElementById('btn-release').click(); }")
+    await frames(page)
+    assert await page.evaluate("() => window.__calls.length") == 0
+    # confirmed: set_manual_control for the whole instance, addressed through
+    # the HCL switch (same permissions as releasing it anywhere else)
+    await page.evaluate("() => { window.confirm = () => true; card.shadowRoot.getElementById('btn-release').click(); }")
+    await page.wait_for_function("() => window.__calls.length === 1")
+    assert await page.evaluate("() => window.__calls[0]") == [
+        "hcl_lighting", "set_manual_control", {"entity_id": "switch.hcl", "manual_control": False},
+    ]
+    assert page.errors == []
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"hcl": "off", "manual": ["light.a"]}])
+async def test_rm_o21_no_button_without_manual_control(page, kwargs):
+    await _show_with_calls(page, _control_hass(**kwargs))
+    button = await _release_button(page)
+    assert button["hidden"] and not button["visible"], button
+
+
+async def test_rm_o21_a_failed_hand_back_is_shown(page):
+    h = _control_hass(manual=["light.a"])
+    await page.evaluate("""(h) => { h.callService = async () => { throw new Error('Unauthorized'); };
+        card.hass = h; window.confirm = () => true; }""", h)
+    await frames(page)
+    await page.evaluate("() => card.shadowRoot.getElementById('btn-release').click()")
+    await page.wait_for_function("() => card.shadowRoot.getElementById('status').textContent.includes('Unauthorized')")
+    status = await _status(page)
+    assert "Handing back to HCL failed: Unauthorized" in status["text"], status
+
+
+async def test_rm_f08_instance_without_lights(page):
+    """Persona review 0.9.1 (R5): a target that resolves to no light (e.g. an
+    empty area) is shown; an older integration without the attribute shows nothing."""
+    h = _control_hass()
+    h["states"]["switch.hcl"]["attributes"]["target_entities"] = []
+    info = await _now_info(page, h)
+    assert "no lights" in info, info
+    h["states"]["switch.hcl"]["attributes"]["target_entities"] = ["light.a"]
+    assert "no lights" not in await _now_info(page, h)
+    del h["states"]["switch.hcl"]["attributes"]["target_entities"]
+    assert "no lights" not in await _now_info(page, h)
+
+
+@pytest.mark.parametrize("mode,shown", [("focus", True), ("cleaning", True), ("night_light", False), ("auto", False)])
+async def test_rm_f08_scenario_with_fixed_values_names_the_paused_daylight_control(page, mode, shown):
+    """Persona review 0.9.1 (R3): Focus has fixed values, the daylight
+    compensation does not act - the now line says so (only when it is set up)."""
+    h = _environment_hass("80", "80", "bypassed", "daylight_scenario_bypass")
+    h["states"]["select.mode"]["state"] = mode
+    info = await _now_info(page, h)
+    assert ("without daylight control" in info) is shown, info
+    h["language"] = "de"
+    h["locale"]["language"] = "de"
+    assert ("ohne Tageslichtregelung" in await _now_info(page, h)) is shown
+    # without the daylight compensation (no environment attributes): nothing
+    plain = _setpoint_hass(mode, "80", "4000")
+    assert "daylight control" not in await _now_info(page, plain)
+
+
+async def test_rm_f08_preview_tooltip_names_what_ends_the_preview(page):
+    await _set_hass(page, "auto")
+    title = await page.evaluate("() => card.shadowRoot.getElementById('btn-test').title")
+    assert "reload of the integration" in title and "Save" in title, title

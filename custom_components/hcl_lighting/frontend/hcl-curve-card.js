@@ -21,7 +21,7 @@ const HCL_STRINGS = {
         revert: "Revert",
         revert_title: "Discard unsaved changes and load the saved curve",
         preview: "Preview",
-        preview_title: "Apply unsaved changes to the lights until the next reload",
+        preview_title: "Apply unsaved changes to the lights until Save, Revert or a reload of the integration",
         save: "Save",
         save_title: "Save the curve",
         undo_title: "Undo last change (Ctrl+Z)",
@@ -56,6 +56,10 @@ const HCL_STRINGS = {
         adapt_color_only: "colour temperature only",
         manual_one: "1 light manual",
         manual_many: "{n} lights manual",
+        no_lights: "no lights",
+        env_scenario_fixed: "without daylight control",
+        release_title: "Hand the manually controlled lights back to HCL",
+        confirm_release: "Hand the manually controlled lights back to HCL now? They get the HCL values at once.",
         confirm_revert: "Discard all unsaved changes and load the saved curve?",
         preview_active: "Preview active – not saved. Save keeps it, Revert discards it.",
         curve_applies_auto: "The curve applies in Auto; active now: {mode}. Changes take effect in Auto.",
@@ -65,6 +69,7 @@ const HCL_STRINGS = {
         preview_failed: "Preview failed: {msg}",
         revert_failed: "Revert failed: {msg}",
         mode_failed: "Changing the scenario failed: {msg}",
+        release_failed: "Handing back to HCL failed: {msg}",
         data_loading: "Waiting for data from {entity} …",
         data_missing: "Entity {entity} not found. Choose the HCL curve sensor in the card settings.",
         data_unavailable: "{entity} is unavailable (is the integration loaded?).",
@@ -100,7 +105,7 @@ const HCL_STRINGS = {
         revert: "Verwerfen",
         revert_title: "Ungespeicherte Änderungen verwerfen und gespeicherte Kurve laden",
         preview: "Vorschau",
-        preview_title: "Ungespeicherte Änderungen bis zum nächsten Neuladen an die Lichter senden",
+        preview_title: "Ungespeicherte Änderungen bis Speichern, Verwerfen oder Neuladen der Integration an die Lichter senden",
         save: "Speichern",
         save_title: "Kurve speichern",
         undo_title: "Letzte Änderung rückgängig (Strg+Z)",
@@ -135,6 +140,10 @@ const HCL_STRINGS = {
         adapt_color_only: "nur Farbtemperatur",
         manual_one: "1 Licht manuell",
         manual_many: "{n} Lichter manuell",
+        no_lights: "keine Lichter",
+        env_scenario_fixed: "ohne Tageslichtregelung",
+        release_title: "Manuell gesteuerte Lichter an HCL zurückgeben",
+        confirm_release: "Manuell gesteuerte Lichter jetzt an HCL zurückgeben? Sie bekommen sofort die HCL-Werte.",
         confirm_revert: "Alle ungespeicherten Änderungen verwerfen und die gespeicherte Kurve laden?",
         preview_active: "Vorschau aktiv – nicht gespeichert. Speichern übernimmt sie, Verwerfen verwirft sie.",
         curve_applies_auto: "Die Kurve gilt im Modus Auto; aktiv ist gerade {mode}. Änderungen wirken in Auto.",
@@ -144,6 +153,7 @@ const HCL_STRINGS = {
         preview_failed: "Vorschau fehlgeschlagen: {msg}",
         revert_failed: "Verwerfen fehlgeschlagen: {msg}",
         mode_failed: "Szenario-Wechsel fehlgeschlagen: {msg}",
+        release_failed: "Rückgabe an HCL fehlgeschlagen: {msg}",
         data_loading: "Warte auf Daten von {entity} …",
         data_missing: "Entität {entity} nicht gefunden. In den Karteneinstellungen den HCL-Kurvensensor wählen.",
         data_unavailable: "{entity} ist nicht verfügbar (Integration geladen?).",
@@ -858,7 +868,12 @@ class HCLCurveCard extends HTMLElement {
           .chip.pending { border-style: dashed; border-color: var(--hcl-accent); }
           #now-info { padding: 0 16px 8px 16px; font-size: 0.875rem; }
           #draft-info { padding: 0 16px 8px 16px; font-size: 0.75rem; color: var(--hcl-text-2); }
-          #draft-info:empty, #now-info:empty { display: none; }
+          #draft-info:empty { display: none; }
+          /* RM-O21: "N lights manual" hands the lights back to HCL (after a confirmation) */
+          #btn-release { background: none; border: none; padding: 0; margin: 0; font: inherit; color: var(--hcl-accent);
+              text-decoration: underline dotted; text-underline-offset: 2px; }
+          #btn-release[hidden], #now-info[hidden] { display: none; }
+          #btn-release::before { content: " · "; color: var(--hcl-text); text-decoration: none; display: inline-block; white-space: pre; }
           .toggle-row { padding: 0 16px 8px 16px; }
           .editor-section[hidden] { display: none; }
           .charts {
@@ -939,7 +954,7 @@ class HCLCurveCard extends HTMLElement {
           </div>
           <div id="status" class="messages" role="status" aria-live="polite"></div>
           <div class="mode-selector" id="mode-chips" role="group">${chips}</div>
-          <div id="now-info"></div>
+          <div id="now-info"><span id="now-text"></span><button id="btn-release" class="link" hidden></button></div>
           <div class="toggle-row"><button id="btn-toggle-editor" aria-expanded="false"></button></div>
           <div class="editor-section" id="editor-section">
               <div class="row actions">
@@ -991,6 +1006,7 @@ class HCLCurveCard extends HTMLElement {
         $("btn-delete").addEventListener("click", () => this._deletePoint(this._selected));
         $("btn-toggle-editor").addEventListener("click", () => this._toggleEditor());
         $("btn-default").addEventListener("click", () => this._loadDefaultCurve());
+        $("btn-release").addEventListener("click", () => this._releaseManual());
         ["in-t", "in-b", "in-k"].forEach(id => $(id).addEventListener("change", () => this._applyNumeric()));
         $("chartB").addEventListener("dblclick", (e) => this._onChartDblClick(e));
         $("chartK").addEventListener("dblclick", (e) => this._onChartDblClick(e));
@@ -1266,14 +1282,18 @@ class HCLCurveCard extends HTMLElement {
     // "Now": the value HCL is aiming for (setpoint sensors), not the draft
     _renderNowInfo() {
         const $ = (id) => this.shadowRoot && this.shadowRoot.getElementById(id);
-        const el = $("now-info");
+        const info = $("now-info");
+        const el = $("now-text");
         const draftEl = $("draft-info");
-        if (!el) return;
+        if (!el || !info) return;
         if (this._dataState !== "ready" || !this._points.length) {
             hclSetSpoken(el, "", "");
+            this._setReleaseButton(null);
+            if (info.hidden !== true) info.hidden = true;
             if (draftEl && !this._drag) hclSetSpoken(draftEl, "", "");
             return;
         }
+        if (info.hidden !== false) info.hidden = false;
         const now = this._nowMinutes();
         const f = this._fmt;
         const mode = this._currentMode;
@@ -1310,6 +1330,10 @@ class HCLCurveCard extends HTMLElement {
             const note = this._environmentNote(attrs.environment_status, attrs.environment_reason, changed);
             if (note) parts.push(note);
             if (kChanged && String(kAttrs.environment_reason || "").startsWith("harmony_")) parts.push(this._t("env_harmony"));
+            // a scenario with fixed values while the daylight compensation is set up (RM-F08 b)
+            if (["focus", "relax", "cleaning"].includes(mode) && attrs.environment_reason === "daylight_scenario_bypass") {
+                parts.push(this._t("env_scenario_fixed"));
+            }
         } else if (bState || kState) {
             // The setpoint sensors exist but have no current value: no substitute
             parts.push(this._t("setpoint_unavailable"));
@@ -1326,8 +1350,9 @@ class HCLCurveCard extends HTMLElement {
                 parts.push(this._t("setpoint_unavailable"));
             }
         }
-        if (control.manual) parts.push(control.manual);
         hclSetSpoken(el, parts.join(" · "), parts.join(", "));
+        // lights under manual control: a button that hands them back (RM-O21)
+        this._setReleaseButton(control.manual);
         // The draft line appears with the first change: not while a point is
         // dragged (it would move the charts under the pointer, RM-B27)
         if (draftEl && !this._drag) {
@@ -1349,6 +1374,9 @@ class HCLCurveCard extends HTMLElement {
         const main = ids.hcl ? states[ids.hcl] : undefined;
         if (!main) return { state: null, manual: null };
         if (main.state === "off") return { state: this._t("hcl_off"), manual: null };
+        // the target resolves to no light (e.g. an empty area, RM-F08 a)
+        const targets = main.attributes && main.attributes.target_entities;
+        if (Array.isArray(targets) && targets.length === 0) return { state: this._t("no_lights"), manual: null };
         const off = (id) => !!id && !!states[id] && states[id].state === "off";
         const bOff = off(ids.b);
         const kOff = off(ids.k);
@@ -1358,6 +1386,40 @@ class HCLCurveCard extends HTMLElement {
         const n = main.state === "on" && Array.isArray(list) ? list.length : 0;
         const manual = n === 1 ? this._t("manual_one") : n > 1 ? this._t("manual_many", { n }) : null;
         return { state, manual };
+    }
+
+    // "N lights manual" as a button (RM-O21); hidden without manual control
+    _setReleaseButton(text) {
+        const btn = this.shadowRoot && this.shadowRoot.getElementById("btn-release");
+        if (!btn) return;
+        const hidden = !text;
+        if (btn.hidden !== hidden) btn.hidden = hidden;
+        if (hidden) return;
+        hclSetText(btn, text);
+        const title = this._t("release_title");
+        if (btn.title !== title) btn.title = title;
+        const label = `${text}: ${title}`;
+        if (btn.getAttribute("aria-label") !== label) btn.setAttribute("aria-label", label);
+    }
+
+    // Hand all lights under manual control back to HCL (RM-O21): the existing
+    // action hcl_lighting.set_manual_control, after a confirmation
+    async _releaseManual() {
+        // addressed through the HCL switch: the permissions are those of
+        // releasing manual control anywhere else (switch and lights)
+        const switchId = this._switchIds.hcl;
+        if (!this._hass || !switchId || this._pendingRelease) return;
+        if (!confirm(this._t("confirm_release"))) return;
+        this._pendingRelease = true;
+        try {
+            await this._callService(
+                "hcl_lighting", "set_manual_control",
+                { entity_id: switchId, manual_control: false }, "release_failed",
+            );
+        } finally {
+            this._pendingRelease = false;
+            this._renderStatus();
+        }
     }
 
     // Short reason of an environmental feature (daylight compensation) for the "now" line

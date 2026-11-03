@@ -261,6 +261,36 @@ async def test_a01_turn_on_values_default_and_option(hass, noon, no_frontend_reg
     assert core(hass, entry).override_manager.is_overridden("light.a")
 
 
+async def test_rm_d16_setpoint_recipe_with_kept_turn_on_values(hass, noon, no_frontend_registration):
+    """Persona review 0.9.1 (R1, RM-D16): with "Keep values of turn-on
+    commands" the README recipe (turn on with the setpoint sensors) pauses the
+    light; the documented second step (apply with release_manual_control) hands
+    it back before or after the light reports on, and it follows the curve."""
+    calls = async_mock_service(hass, "light", "turn_on")
+    set_light(hass, "light.a", "off", **CT_ATTRS)
+    entry = await setup_entry(hass, ["light.a"], options={"respect_turn_on_values": True})
+    await switch_entity(hass).async_turn_on()
+    om = core(hass, entry).override_manager
+    # recipe step 1 (values of the setpoint sensors at noon: 100 % / 6000 K)
+    await _user_turn_on(hass, entity_id="light.a", brightness_pct=100, color_temp_kelvin=6000)
+    assert om.is_overridden("light.a")  # the documented consequence
+    # step 2, still before the light reports on
+    await hass.services.async_call(
+        DOMAIN, "apply", {"entity_id": SWITCH, "lights": ["light.a"], "release_manual_control": True}, blocking=True,
+    )
+    assert not om.is_overridden("light.a")
+    set_light(hass, "light.a", "on", brightness=255, color_temp_kelvin=6000, **CT_ATTRS)
+    await hass.async_block_till_done()
+    assert not om.is_overridden("light.a")
+    # the light keeps following the curve: a later cycle sends the new value
+    calls.clear()
+    noon.tick(timedelta(hours=7))  # 19:00, the default curve is lower and warmer
+    await timer_cycle(hass)
+    await hass.async_block_till_done()
+    sent = calls_for(calls, "light.a")
+    assert sent and sent[-1].data.get("color_temp_kelvin", 6000) < 6000, [c.data for c in sent]
+
+
 # ------------------------------------------------------------------ Ä-02
 async def test_a02_brightness_change_is_no_override_when_not_adapted(hass, noon, no_frontend_registration):
     async_mock_service(hass, "light", "turn_on")
