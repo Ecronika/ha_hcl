@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-11-03
+Card and documentation from a persona review of 0.9.1 (RM-O21, RM-F08, RM-D16). The behaviour of the integration does not change; the minimum Home Assistant version stays 2024.12.
+
+### Added
+- **Card: hand manually controlled lights back** (RM-O21): "2 lights manual" in the "now" line is a button; after a confirmation it hands all lights of the instance back to HCL (the action `hcl_lighting.set_manual_control` with `manual_control: false`, with the same permissions). Single lights: `hcl_lighting.apply` or `hcl_lighting.set_manual_control` with `lights`.
+- **Card: "no lights"** when the target of the instance resolves to no controllable light right now, e.g. an empty area (RM-F08).
+- **Card: "without daylight control"** in Focus, Relax and Cleaning when the daylight compensation is set up – these scenarios have fixed values (RM-F08).
+
+### Documentation
+- Recipe "Switch a light on with the HCL values": with *Keep values of turn-on commands* the light counts as manually controlled; a second step (`hcl_lighting.apply` with `release_manual_control: true`) hands it back so it keeps following the curve (RM-D16). Manual control: which option lets HCL or scenes decide the turn-on values.
+- Card: the preview lasts until it is saved or reverted or the integration is reloaded – reloading the browser page does not end it (tooltip and README, RM-F08).
+
 ## [0.9.1] - 2026-11-03
 Internal clean-up without a change of behaviour (RM-T34, RM-T35, RM-T36) and two manifest entries; entities, actions, options and stored data stay the same. The minimum Home Assistant version stays 2024.12.
 
