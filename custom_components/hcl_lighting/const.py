@@ -171,3 +171,24 @@ REMOVED_MODE_GUEST = "guest"
 def guest_issue_id(entry_id: str) -> str:
     """Repair issue of 0.8.x for an instance in the scenario Guest (RM-R12)."""
     return f"guest_deprecated_{entry_id}"
+
+
+def card_issue_id(entry_id: str) -> str:
+    """Repair issue: the curve card could not be registered as a resource."""
+    return f"setup_curve_card_{entry_id}"
+
+
+# Dispatcher signals of an instance (RM-T34): one place for their names
+def signal_update(entry_id: str) -> str:
+    """Values of the instance changed (scenario, curve, switches): update."""
+    return f"{DOMAIN}_{entry_id}_update"
+
+
+def signal_overrides(entry_id: str) -> str:
+    """The set of lights under manual control changed."""
+    return f"{DOMAIN}_{entry_id}_overrides"
+
+
+def signal_environment(entry_id: str) -> str:
+    """The state of the environmental modifiers changed."""
+    return f"{DOMAIN}_{entry_id}_environment"

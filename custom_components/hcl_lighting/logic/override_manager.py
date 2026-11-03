@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, NamedTuple
 
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import State
 from homeassistant.util import dt as dt_util
 
@@ -250,7 +250,7 @@ class OverrideManager:
         light.last_set = (brightness, kelvin)
         light.source = source
         light.own_report_open = False
-        if start is not None and start.state == "on":
+        if start is not None and start.state == STATE_ON:
             attrs = start.attributes
             light.command_start = CommandStart(
                 brightness_pct(on_brightness(attrs)), attrs.get("color_temp_kelvin"), attrs.get("xy_color")
@@ -352,7 +352,7 @@ class OverrideManager:
         """(description, verdict) of the adapted attributes of a report."""
         last_b, last_k = last
         start = start or CommandStart(None, None, None)
-        old = old_state.attributes if old_state is not None and old_state.state == "on" else {}
+        old = old_state.attributes if old_state is not None and old_state.state == STATE_ON else {}
         attrs = state.attributes
         out = []
         if self.track_brightness and last_b is not None:
@@ -436,14 +436,14 @@ class OverrideManager:
         # 1. Ignore window of the last command (lights that are on; switching
         # off is never an HCL value and goes to step 2, RM-D03): only a change
         # away from the HCL value is checked (same rule as RM-B33)
-        if light.ignore_until and now < light.ignore_until and state.state == "on":
+        if light.ignore_until and now < light.ignore_until and state.state == STATE_ON:
             if not self._moved_away(entity_id, reference, state, old_state):
                 _LOGGER.debug("Ignoring event for %s (Window active until %s)", entity_id, light.ignore_until)
                 return False
 
         # 2. Switched off
         light.unreachable_since = None
-        if state.state != "on":
+        if state.state != STATE_ON:
             light.own_report_open = False
             # Switching a light off ends its manual control (configurable)
             if self.reset_on_off and light.manual_since is not None:
@@ -468,7 +468,7 @@ class OverrideManager:
         """Whether a report switched the light on or changed an adapted value
         compared to the report before. Any change counts (not only one above
         the thresholds): a slow dimming by hand reports small steps."""
-        if old_state is None or old_state.state != "on":
+        if old_state is None or old_state.state != STATE_ON:
             return True
         attrs, old = state.attributes, old_state.attributes
 
@@ -487,7 +487,7 @@ class OverrideManager:
         self, entity_id: str, reference: tuple[int, int] | None, state: State, old_state: State | None
     ) -> bool:
         """A report inside the ignore window that moved away from the HCL value."""
-        if old_state is None or old_state.state != "on" or not reference or reference[0] is None:
+        if old_state is None or old_state.state != STATE_ON or not reference or reference[0] is None:
             return False
         away = [text for text, verdict in self._verdicts(reference, None, state, old_state) if verdict == _AWAY]
         if away:
@@ -513,7 +513,7 @@ class OverrideManager:
         light = self._lights.get(entity_id)
         if light is None:
             return False
-        if state is None or state.state != "on":
+        if state is None or state.state != STATE_ON:
             light.own_report_open = False
             # Switched off within 5 s after a command: as without HCL's
             # context, it ends manual control (configurable, RM-B49);
@@ -569,7 +569,7 @@ class OverrideManager:
         light = self._lights.get(entity_id)
         if light is None or not light.own_report_open:
             return False
-        if state is None or state.state != "on" or not light.last_set:
+        if state is None or state.state != STATE_ON or not light.last_set:
             light.own_report_open = False
             return False
         if light.ignore_until is not None and dt_util.utcnow() < light.ignore_until:

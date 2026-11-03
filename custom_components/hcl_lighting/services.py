@@ -1,6 +1,8 @@
-"""Services of HCL Lighting besides update_curve (F-02)."""
+"""Services of HCL Lighting (F-02; update_curve RM-T36)."""
 from __future__ import annotations
 
+import dataclasses
+import logging
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -11,6 +13,7 @@ from homeassistant.core import Context, HomeAssistant, ServiceCall, ServiceRespo
 from homeassistant.exceptions import ServiceValidationError, Unauthorized, UnknownUser
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from .const import (
     CONF_CURVE_CONFIG,
@@ -19,12 +22,16 @@ from .const import (
     anchor_time,
     DOMAIN,
     HCL_MODES,
+    SERVICE_UPDATE_CURVE,
+    signal_update,
 )
 from .runtime import loaded_runtime
 
 if TYPE_CHECKING:
     from .runtime import HCLRuntimeData
     from .switch import HCLSwitch
+
+_LOGGER = logging.getLogger(__name__)
 
 ATTR_LIGHTS = "lights"
 
@@ -51,6 +58,48 @@ SET_SCENARIO_SCHEMA = vol.Schema(
     }
 )
 GET_CURVE_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_id})
+_POINT_SCHEMA = vol.Schema(
+    {
+        vol.Required("t"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
+        vol.Required("b"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Required("k"): vol.All(vol.Coerce(int), vol.Range(min=2000, max=7000)),
+    },
+    # other keys are dropped: only t, b, k are stored (RM-B40)
+    extra=vol.REMOVE_EXTRA,
+)
+
+
+def _validate_update_curve(data: dict) -> dict:
+    """Points are required (at least two) for every mode except 'revert'."""
+    if data["mode"] != "revert" and len(data.get("points") or []) < 2:
+        raise vol.Invalid("points (at least 2) are required for mode " + data["mode"])
+    points = data.get("points") or []
+    times = [point["t"] for point in points]
+    duplicates = sorted({t for t in times if times.count(t) > 1})
+    if duplicates:
+        raise vol.Invalid(
+            "points must have different times; duplicate t (minutes): "
+            + ", ".join(str(t) for t in duplicates)
+        )
+    # 00:00 (t=0) and 24:00 (t=1440) are the same moment of the daily curve
+    at_midnight = {(p["b"], p["k"]) for p in points if p["t"] in (0, 1440)}
+    if len(at_midnight) > 1:
+        raise vol.Invalid(
+            "points at 00:00 (t=0) and 24:00 (t=1440) are the same moment and must have the same values"
+        )
+    return data
+
+
+UPDATE_CURVE_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Optional("mode", default="preview"): vol.In(["preview", "apply", "save", "revert"]),
+            vol.Optional("points"): [_POINT_SCHEMA],
+        }
+    ),
+    _validate_update_curve,
+)
 
 
 def resolve_entry_id(hass: HomeAssistant, entity_id: str) -> str:
@@ -132,7 +181,62 @@ async def async_check_write_permissions(
 
 
 def async_register_services(hass: HomeAssistant) -> None:
-    """Register apply, set_manual_control, set_scenario and get_curve."""
+    """Register all actions (in async_setup, independent of loaded entries)."""
+
+    async def _update_curve(call: ServiceCall) -> None:
+        _LOGGER.debug("Service update_curve called (data=%s)", call.data)
+        points = call.data.get("points")
+        mode = call.data.get("mode", "preview")
+        # Same check as the other actions: invalid input is a ServiceValidationError
+        entry_id = resolve_entry_id(hass, call.data["entity_id"])
+        runtime = loaded_runtime(hass, entry_id)
+        # Changing the curve needs control of the given entity, the HCL switch
+        # and the lights (they get the new values at once)
+        await async_check_write_permissions(hass, call, runtime)
+        await async_check_lights(hass, call.context, runtime)
+        hcl_calc = runtime.calculator
+
+        # 1. Update the calculator in memory
+        if points:
+            hcl_calc.calculate_curve_from_points(points)
+        # Preview/apply: unsaved points; save/revert: the stored curve applies again
+        hcl_calc.preview_active = mode in ("preview", "apply")
+
+        # 2. Save: the points are already active (step 1). Only the curve
+        # changes, so the entry is not reloaded (the update listener sees the
+        # stored configuration); lights and card get the saved curve via the
+        # update signal like after revert.
+        if mode == "save":
+            config_entry = hass.config_entries.async_get_entry(entry_id)
+            new_options = {**config_entry.options}
+            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+            # Only the curve part: another change still waiting for the update
+            # listener (e.g. options just saved) must reload as before
+            runtime.applied_config = dataclasses.replace(
+                runtime.applied_config, curve=new_options[CONF_CURVE_CONFIG]
+            )
+            hass.config_entries.async_update_entry(config_entry, options=new_options)
+            async_dispatcher_send(hass, signal_update(entry_id), call.context)
+            return
+        # 2b. Revert
+        if mode == "revert":
+            config_entry = hass.config_entries.async_get_entry(entry_id)
+            curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
+            if curve_config:
+                hcl_calc.generate_curve_from_config(curve_config)
+            else:
+                # No saved curve: default curve from the anchor times
+                hcl_calc.generate_curve(
+                    anchor_time(config_entry.options, CONF_WAKE_TIME),
+                    anchor_time(config_entry.options, CONF_SLEEP_TIME),
+                )
+            _LOGGER.debug("Reverted the curve of %s to the saved configuration", entry_id)
+            # Notify frontend to refresh
+            async_dispatcher_send(hass, signal_update(entry_id), call.context)
+            return
+
+        # 3. Preview/apply: lights follow the points until the next reload
+        async_dispatcher_send(hass, signal_update(entry_id), call.context)
 
     async def _apply(call: ServiceCall) -> None:
         runtime, switch = _running_runtime(hass, call)
@@ -185,6 +289,7 @@ def async_register_services(hass: HomeAssistant) -> None:
             "sleep_time": anchor(CONF_SLEEP_TIME),
         }
 
+    hass.services.async_register(DOMAIN, SERVICE_UPDATE_CURVE, _update_curve, schema=UPDATE_CURVE_SCHEMA)
     hass.services.async_register(DOMAIN, "apply", _apply, schema=APPLY_SCHEMA)
     hass.services.async_register(
         DOMAIN, "set_manual_control", _set_manual_control, schema=SET_MANUAL_CONTROL_SCHEMA

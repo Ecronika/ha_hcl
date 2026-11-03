@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-11-03
+Internal clean-up without a change of behaviour (RM-T34, RM-T35, RM-T36) and two manifest entries; entities, actions, options and stored data stay the same. The minimum Home Assistant version stays 2024.12.
+
+### Internal
+- The names of the internal update signals are built in one place (RM-T34).
+- The action `update_curve` (schema, checks, handler) lives in `services.py` with the other actions and is registered with them when the integration is set up (RM-T36).
+- Clean-up (RM-T35): outdated comments and log texts at setup ("v0.4.0 CurveConfig", "Legacy"), log messages without f-strings, one function for the repair issue of the card, merged imports, one helper to stop the listener for the lights, no dead code at the end of the state handler, simpler checks in the comparison of light values, one helper for the result of commands HCL does not wait for, `STATE_ON` instead of `"on"`, one constant for the minutes of a day in the curve calculation.
+- Manifest: a code owner (`@Ecronika`) and the category `lighting` for the integration browser of the Home Assistant Marketplace (the same category as the built-in circadian integration Flux).
+
 ## [0.9.0] - 2026-11-01
 Summary of all changes since 0.8.1; the details are in the entries of the pre-releases 0.9.0b1 to 0.9.0b5 below (RM-… numbers refer to the roadmap). No code change compared to 0.9.0b5.
 

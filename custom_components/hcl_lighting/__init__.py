@@ -1,17 +1,15 @@
 """The HCL Lighting integration."""
 from __future__ import annotations
 
-import dataclasses
 import logging
 from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
-import voluptuous as vol
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, STATE_OFF, Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
@@ -36,6 +34,8 @@ from .const import (
     anchor_time,
     REMOVED_MODE_GUEST,
     guest_issue_id,
+    card_issue_id,
+    signal_overrides,
     CONF_OVERRIDE_TIMEOUT,
     CONF_OVERRIDE_RESET_ON_OFF,
     CONF_PERSIST_OVERRIDES,
@@ -44,18 +44,12 @@ from .const import (
     DEFAULT_PERSIST_OVERRIDES,
     MODE_AUTO,
     EVENT_MANUAL_CONTROL,
-    SERVICE_UPDATE_CURVE,
 )
 from . import ha_internals
 from .conflicts import async_check_conflicts
 from .logic.hcl_math import HCLCalculator
 from .logic.override_manager import OverrideManager
-from .services import (
-    async_check_lights,
-    async_check_write_permissions,
-    async_register_services,
-    resolve_entry_id,
-)
+from .services import async_register_services
 from .logic.daylight_compensation import (
     DAYLIGHT_KEY,
     DaylightCapStore,
@@ -101,7 +95,7 @@ async def _async_setup_override_manager(
     elif not persist:
         await store.async_remove()
 
-    signal = f"{DOMAIN}_{entry.entry_id}_overrides"
+    signal = signal_overrides(entry.entry_id)
     reported = set(manager.overridden_entities())
 
     @callback
@@ -157,118 +151,15 @@ def _restored_mode(stored: StoredState | None) -> str:
     return restored_scenario(stored.state, extra)[0]
 
 
-_POINT_SCHEMA = vol.Schema(
-    {
-        vol.Required("t"): vol.All(vol.Coerce(int), vol.Range(min=0, max=1440)),
-        vol.Required("b"): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
-        vol.Required("k"): vol.All(vol.Coerce(int), vol.Range(min=2000, max=7000)),
-    },
-    # other keys are dropped: only t, b, k are stored (RM-B40)
-    extra=vol.REMOVE_EXTRA,
-)
-
-
-def _validate_update_curve(data: dict) -> dict:
-    """Points are required (at least two) for every mode except 'revert'."""
-    if data["mode"] != "revert" and len(data.get("points") or []) < 2:
-        raise vol.Invalid("points (at least 2) are required for mode " + data["mode"])
-    points = data.get("points") or []
-    times = [point["t"] for point in points]
-    duplicates = sorted({t for t in times if times.count(t) > 1})
-    if duplicates:
-        raise vol.Invalid(
-            "points must have different times; duplicate t (minutes): "
-            + ", ".join(str(t) for t in duplicates)
-        )
-    # 00:00 (t=0) and 24:00 (t=1440) are the same moment of the daily curve
-    at_midnight = {(p["b"], p["k"]) for p in points if p["t"] in (0, 1440)}
-    if len(at_midnight) > 1:
-        raise vol.Invalid(
-            "points at 00:00 (t=0) and 24:00 (t=1440) are the same moment and must have the same values"
-        )
-    return data
-
-
-UPDATE_CURVE_SCHEMA = vol.All(
-    vol.Schema(
-        {
-            vol.Required("entity_id"): cv.entity_id,
-            vol.Optional("mode", default="preview"): vol.In(["preview", "apply", "save", "revert"]),
-            vol.Optional("points"): [_POINT_SCHEMA],
-        }
-    ),
-    _validate_update_curve,
-)
-
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.SELECT]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the integration-wide service (independent of loaded entries)."""
-
-    async def _handle(call: ServiceCall) -> None:
-        await _async_update_curve_service(hass, call)
-
-    hass.services.async_register(DOMAIN, SERVICE_UPDATE_CURVE, _handle, schema=UPDATE_CURVE_SCHEMA)
+    """Register the integration-wide services (independent of loaded entries)."""
     async_register_services(hass)
     return True
-
-
-async def _async_update_curve_service(hass: HomeAssistant, call: ServiceCall) -> None:
-    """Handle global update_curve service."""
-    _LOGGER.debug(f"Service update_curve called (data={call.data})")
-    points = call.data.get("points")
-    mode = call.data.get("mode", "preview")
-    # Same check as the other actions: invalid input is a ServiceValidationError
-    entry_id = resolve_entry_id(hass, call.data["entity_id"])
-    runtime = loaded_runtime(hass, entry_id)
-    # Changing the curve needs control of the given entity, the HCL switch
-    # and the lights (they get the new values at once)
-    await async_check_write_permissions(hass, call, runtime)
-    await async_check_lights(hass, call.context, runtime)
-    hcl_calc = runtime.calculator
-    
-    # 1. Update In-Memory Calculator
-    if points:
-        hcl_calc.calculate_curve_from_points(points)
-    # Preview/apply: unsaved points; save/revert: the stored curve applies again
-    hcl_calc.preview_active = mode in ("preview", "apply")
-        
-    # 2. Handle Save: the points are already active (step 1). Only the curve
-    # changes, so the entry is not reloaded (the update listener sees the
-    # stored configuration); lights and card get the saved curve via the
-    # update signal like after revert.
-    if mode == "save":
-        config_entry = hass.config_entries.async_get_entry(entry_id)
-        new_options = {**config_entry.options}
-        new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
-        # Only the curve part: another change still waiting for the update
-        # listener (e.g. options just saved) must reload as before
-        runtime.applied_config = dataclasses.replace(runtime.applied_config, curve=new_options[CONF_CURVE_CONFIG])
-        hass.config_entries.async_update_entry(config_entry, options=new_options)
-        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
-        return
-    # 2b. Handle Revert
-    if mode == "revert":
-        config_entry = hass.config_entries.async_get_entry(entry_id)
-        curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
-        if curve_config:
-             hcl_calc.generate_curve_from_config(curve_config)
-        else:
-             # No saved curve: default curve from the anchor times
-             hcl_calc.generate_curve(
-                 anchor_time(config_entry.options, CONF_WAKE_TIME), anchor_time(config_entry.options, CONF_SLEEP_TIME)
-             )
-        _LOGGER.debug(f"Reverted HCL Curve for {entry_id} from ConfigEntry")
-        # Notify frontend to refresh
-        async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
-        return
-
-    # 3. Preview/Apply: lights follow the points until the next reload
-    async_dispatcher_send(hass, f"{DOMAIN}_{entry_id}_update", call.context)
-
 
 
 def migrated_options(data: Mapping[str, Any], options: Mapping[str, Any]) -> dict[str, Any]:
@@ -315,18 +206,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
     # Initialize Shared Calculator
     hcl_calc = HCLCalculator()
     
-    # Load Initial State
-    # Check for v0.4.0 Config
+    # The curve saved in the card, else the default curve from the anchor times
     curve_config = entry.options.get(CONF_CURVE_CONFIG)
-    
     if curve_config:
         try:
             hcl_calc.generate_curve_from_config(curve_config)
-            _LOGGER.debug("Initialized with v0.4.0 CurveConfig")
+            _LOGGER.debug("Initialized with the saved curve")
         except Exception:
-             _LOGGER.exception("Failed to load CurveConfig, falling back to Legacy")
-             # Fallback logic below
-             curve_config = None
+            _LOGGER.exception("Failed to load the saved curve, using the default curve")
+            curve_config = None
 
     if not curve_config:
         # No saved curve: default curve from the anchor times
@@ -335,8 +223,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
         )
         _LOGGER.debug("Initialized with the default curve")
 
-    # Store shared instance
-    # Initialize Logic Core
     # The override state is kept per entry across reloads (saving the curve or
     # the options reloads the entry) so manually controlled lights stay paused.
     managers = hass.data.setdefault(DATA_OVERRIDE_MANAGERS, {})
@@ -422,7 +308,7 @@ async def _async_card_hint(hass: HomeAssistant, entry: ConfigEntry) -> None:
     store = _onboarding_store(hass)
     data = await store.async_load() or {}
     shown = set(data.get("shown", []))
-    issue_id = f"setup_curve_card_{entry.entry_id}"
+    issue_id = card_issue_id(entry.entry_id)
     had_issue = ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is not None
     ir.async_delete_issue(hass, DOMAIN, issue_id)
     if entry.entry_id in shown:
@@ -507,7 +393,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data.get(DATA_DAYLIGHT_HANDOVER, {}).pop(entry.entry_id, None)
     await _override_store(hass, entry.entry_id).async_remove()
     await DaylightCapStore(hass, entry.entry_id).async_remove()
-    ir.async_delete_issue(hass, DOMAIN, f"setup_curve_card_{entry.entry_id}")
+    ir.async_delete_issue(hass, DOMAIN, card_issue_id(entry.entry_id))
     ir.async_delete_issue(hass, DOMAIN, guest_issue_id(entry.entry_id))
     persistent_notification.async_dismiss(hass, f"{DOMAIN}_card_{entry.entry_id}")
     store = _onboarding_store(hass)
