@@ -126,7 +126,11 @@ def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) ->
     entity_id = er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_{key}")
     if entity_id is None:
         return True
-    stored = async_get_restore_state(hass).last_states.get(entity_id)
+    restore_data = async_get_restore_state(hass)
+    if hasattr(restore_data, "async_get_stored_state"):
+        stored = restore_data.async_get_stored_state(entity_id)
+    else:
+        stored = restore_data.last_states.get(entity_id)
     if stored is None:
         return True
     return stored.state.state != STATE_OFF
@@ -136,7 +140,10 @@ def _stored_mode(hass: HomeAssistant, entry: ConfigEntry) -> StoredState | None:
     entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
     if entity_id is None:
         return None
-    return async_get_restore_state(hass).last_states.get(entity_id)
+    restore_data = async_get_restore_state(hass)
+    if hasattr(restore_data, "async_get_stored_state"):
+        return restore_data.async_get_stored_state(entity_id)
+    return restore_data.last_states.get(entity_id)
 
 
 def _restored_mode(stored: StoredState | None) -> str:
