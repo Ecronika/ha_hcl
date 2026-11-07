@@ -25,6 +25,7 @@ from .const import (
     SERVICE_UPDATE_CURVE,
     signal_update,
 )
+from .logic.hcl_math import default_points, normalize_points, saved_points
 from .runtime import loaded_runtime
 
 if TYPE_CHECKING:
@@ -205,15 +206,30 @@ def async_register_services(hass: HomeAssistant) -> None:
         # 2. Save: the points are already active (step 1). Only the curve
         # changes, so the entry is not reloaded (the update listener sees the
         # stored configuration); lights and card get the saved curve via the
-        # update signal like after revert.
+        # update signal like after revert. The wake and sleep time are read
+        # here, without await until the signal, so they always match the
+        # stored reference curve (RM-E05).
         if mode == "save":
             config_entry = hass.config_entries.async_get_entry(entry_id)
-            new_options = {**config_entry.options}
-            new_options[CONF_CURVE_CONFIG] = {"points": points, "version": 2}
+            options = config_entry.options
+            wake, sleep = anchor_time(options, CONF_WAKE_TIME), anchor_time(options, CONF_SLEEP_TIME)
+            new_options = {**options}
+            if normalize_points(points) == normalize_points(default_points(wake, sleep)):
+                # The unchanged default curve: no own curve, the default curve
+                # keeps following the times (way back from an own curve)
+                new_options.pop(CONF_CURVE_CONFIG, None)
+            else:
+                # Reference curve with the times it was drawn for (version 3)
+                new_options[CONF_CURVE_CONFIG] = {
+                    "version": 3,
+                    "points": points,
+                    CONF_WAKE_TIME: wake,
+                    CONF_SLEEP_TIME: sleep,
+                }
             # Only the curve part: another change still waiting for the update
             # listener (e.g. options just saved) must reload as before
             runtime.applied_config = dataclasses.replace(
-                runtime.applied_config, curve=new_options[CONF_CURVE_CONFIG]
+                runtime.applied_config, curve=new_options.get(CONF_CURVE_CONFIG)
             )
             hass.config_entries.async_update_entry(config_entry, options=new_options)
             async_dispatcher_send(hass, signal_update(entry_id), call.context)
@@ -221,15 +237,8 @@ def async_register_services(hass: HomeAssistant) -> None:
         # 2b. Revert
         if mode == "revert":
             config_entry = hass.config_entries.async_get_entry(entry_id)
-            curve_config = config_entry.options.get(CONF_CURVE_CONFIG)
-            if curve_config:
-                hcl_calc.generate_curve_from_config(curve_config)
-            else:
-                # No saved curve: default curve from the anchor times
-                hcl_calc.generate_curve(
-                    anchor_time(config_entry.options, CONF_WAKE_TIME),
-                    anchor_time(config_entry.options, CONF_SLEEP_TIME),
-                )
+            # The saved curve stretched to the current times, else the default curve
+            hcl_calc.calculate_curve_from_points(saved_points(config_entry.options))
             _LOGGER.debug("Reverted the curve of %s to the saved configuration", entry_id)
             # Notify frontend to refresh
             async_dispatcher_send(hass, signal_update(entry_id), call.context)
@@ -276,7 +285,8 @@ def async_register_services(hass: HomeAssistant) -> None:
         await async_check_permissions(hass, call, [call.data["entity_id"]], POLICY_READ)
         runtime = _runtime(hass, call)
         entry = hass.config_entries.async_get_entry(entry_id)
-        saved = (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points")
+        # The own curve as it applies now (stretched to the current times)
+        saved = saved_points(entry.options) if entry.options.get(CONF_CURVE_CONFIG) else None
 
         def anchor(key: str) -> str:
             return anchor_time(entry.options, key)[:5]

@@ -40,8 +40,6 @@ async def _run_options_flow(hass, entry, **changes):
     result = await hass.config_entries.options.async_init(entry.entry_id)
     current = {
         "target": {"entity_id": ["light.a"]},
-        CONF_WAKE_TIME: "07:00:00",
-        CONF_SLEEP_TIME: "22:00:00",
         "smart_transition": False,
         CONF_MIN_BRIGHTNESS: 10,
         CONF_MAX_BRIGHTNESS: 100,
@@ -169,7 +167,10 @@ async def test_rm_t13_saving_the_curve_does_not_reload(hass, no_frontend_registr
     assert reloads == []
     assert unavailable == []
     # saved, active and shown
-    assert entry.options[CONF_CURVE_CONFIG] == {"points": POINTS, "version": 2}
+    # reference curve with the times it was drawn for (RM-E05)
+    assert entry.options[CONF_CURVE_CONFIG] == {
+        "points": POINTS, "version": 3, CONF_WAKE_TIME: "07:00", CONF_SLEEP_TIME: "22:00"
+    }
     assert calc.active_curve == POINTS
     assert calc.preview_active is False
     attrs = hass.states.get(SENSOR).attributes
@@ -250,21 +251,28 @@ async def test_b03_options_save_keeps_custom_curve(hass, no_frontend_registratio
     assert entry.options.get(CONF_CURVE_CONFIG, {}).get("points") == CUSTOM_POINTS
 
 
-async def test_b03_changed_anchor_times_regenerate_curve(hass, no_frontend_registration):
+async def test_e05_t15_options_flow_has_no_times_and_keeps_the_curve(hass, no_frontend_registration):
+    """The times are entities (RM-E05): the options dialog neither shows nor
+    checks them, and saving it keeps the curve and the times."""
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(
         hass,
         ["light.a"],
         options={
-            CONF_WAKE_TIME: "07:00:00",
-                CONF_SLEEP_TIME: "22:00:00",
+            CONF_WAKE_TIME: "06:00:00",
+            CONF_SLEEP_TIME: "21:00:00",
             CONF_CURVE_CONFIG: {"points": CUSTOM_POINTS, "version": 2},
         },
     )
-    await _run_options_flow(hass, entry, **{CONF_WAKE_TIME: "06:00:00"})
-    assert CONF_CURVE_CONFIG not in entry.options
-    curve = core(hass, entry).calculator.active_curve
-    assert {"t": 360, "k": 3000, "b": 30} in curve  # regenerated from the new wake time
+    flow = await hass.config_entries.options.async_init(entry.entry_id)
+    fields = {str(k) for k in flow["data_schema"].schema}
+    assert not fields & {CONF_WAKE_TIME, CONF_SLEEP_TIME}
+    hass.config_entries.options.async_abort(flow["flow_id"])
+    await _run_options_flow(hass, entry, **{CONF_MAX_BRIGHTNESS: 80})
+    assert entry.options[CONF_MAX_BRIGHTNESS] == 80
+    assert (entry.options[CONF_WAKE_TIME], entry.options[CONF_SLEEP_TIME]) == ("06:00:00", "21:00:00")
+    assert entry.options[CONF_CURVE_CONFIG] == {"points": CUSTOM_POINTS, "version": 2}
+    assert core(hass, entry).calculator.active_curve == CUSTOM_POINTS
 
 
 # ---------------------------------------------------------------- B-21

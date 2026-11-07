@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0b1] - 2026-11-07
+First pre-release (beta) of 0.10.0: wake and sleep time as entities, so automations can set them (RM-E05). The minimum Home Assistant version stays 2024.12.
+
+### Upgrade notes
+- **Wake and sleep time are entities now** (device page → *Configuration*: `time.<instance>_wake_time`, `time.<instance>_sleep_time`), so automations can set them, e.g. for weekdays and weekends. The options dialog no longer shows the times; the setup still asks for them. Existing times are kept; no migration of the entry, no light command by the update.
+- **Changing them stretches your own curve instead of replacing it**; the default curve keeps following the times. Your own curve is stored with the times it was drawn for (curve format 3) and stretched to the current times each time (day and night separately); it is never rewritten, so changing the times back and forth is lossless as long as no curve is saved in between. A curve saved before (format 2) counts as drawn for the current times and is lifted to format 3 at the first change of a time.
+- **A default curve saved unchanged in an earlier version is an own curve** and is stretched too. To return to the default curve that follows the times, load *Default curve* in the card and save it.
+- **A pair needs a day of more than 6 hours and a night of at least 3 hours** (setup and entities; stored pairs are not checked again). A value that breaks the rule fails visibly in the automation and the old value stays.
+- `hcl_lighting.get_curve` returns `saved_points` stretched to the current times.
+- **Downgrade**: an older version loads the entry unchanged and reads only the points of a curve in format 3; after a change of the times it would use them without stretching. A curve saved by the older version is stored in format 2 and, after upgrading again, counts as drawn for the times then current.
+
+### Added
+- **Time entities *Wake time* and *Sleep time*** (`EntityCategory.CONFIG`, RM-E05). A change applies at once with the *transition of updates* and is stored without reloading the integration; manual control, scenarios and the daylight compensation stay. An options change that is still waiting for its reload still reloads. A running preview from the card (also `apply`) stays active. Changing a time needs control of the time entity and of every light of the instance, like an adapt switch; automations are not restricted.
+- **Sleep and Night light follow a new wake time**: when they end at the wake time (no `duration`), the end moves to the occurrence of the new wake time closest to the old end; if that is not in the future, the scenario ends now (back to Auto with the *transition when the scenario changes*). The new `until` is visible at once and kept across restarts. An end set with `duration` stays.
+- **Saving exactly the default curve of the current times stores no own curve** (`hcl_lighting.update_curve` with `mode: save`): the default curve then follows the times again.
+- Card: the editor shows the wake and sleep time ("Wake 07:00 · Sleep 22:00").
+- Diagnostics: `saved_curve_reference` (format and reference times of the saved curve) and `saved_curve_effective` (the saved curve stretched to the current times); `saved_curve` stays the curve as saved.
+
+### Documentation
+- README: section "Wake and sleep time" – the check rule, how stretching works, the way back to the default curve, the limit of losslessness, large shifts, several instances, a weekday/weekend example and a template trigger "at the wake time"; the recipe "Hand all lights back to HCL at the wake time" uses it instead of a fixed 07:00.
+
 ## [0.9.4] - 2026-11-07
 Compatibility with Home Assistant 2026.11 (RM-B68) and no more deprecation warnings from the Daylight Estimator (RM-B69). Entities, actions, options and stored data stay the same; the minimum Home Assistant version stays 2024.12.
 

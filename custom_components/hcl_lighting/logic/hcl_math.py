@@ -1,15 +1,22 @@
 from __future__ import annotations
 
 import logging
-from typing import TypedDict, List
+from collections.abc import Iterable, Mapping
+from datetime import time
+from typing import Any, NotRequired, TypedDict, List
 from homeassistant.util import dt as dt_util
 
 from ..const import (
+    CONF_CURVE_CONFIG,
+    CONF_SLEEP_TIME,
+    CONF_WAKE_TIME,
     DEFAULT_MIN_BRIGHTNESS, 
     DEFAULT_MAX_BRIGHTNESS,
     DEFAULT_WAKE_TIME,
     DEFAULT_SLEEP_TIME,
     MIN_ACTIVE_SPAN_MINUTES,
+    MIN_NIGHT_MINUTES,
+    anchor_time,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,9 +30,42 @@ class HCLPoint(TypedDict):
     k: int # Kelvin (2000..7000)
 
 class CurveConfig(TypedDict):
-    """Configuration for HCL curve."""
+    """Curve saved in the card (option curve_config). Version 3 also stores
+    the wake and sleep time it was drawn for (reference times, RM-E05);
+    version 2 has none and counts as drawn for the current times."""
     points: List[HCLPoint]
     version: int
+    wake_time: NotRequired[str]
+    sleep_time: NotRequired[str]
+
+
+def normalize_points(points: Iterable[Mapping[str, Any]]) -> List[HCLPoint]:
+    """Control points as the curve uses them: 24:00 (t=1440) is the same
+    moment as 00:00 and becomes t=0; if both are given, the 00:00 point wins
+    (the value the lights got at midnight before 0.7.0, RM-B41). Sorted, each
+    time once (the first point of a time wins)."""
+    points = list(points)
+    normalized = []
+    has_midnight = any(int(p['t']) % MINUTES_PER_DAY == 0 and int(p['t']) != MINUTES_PER_DAY for p in points)
+    for p in points:
+        t = int(p['t'])
+        if t == MINUTES_PER_DAY:
+            if has_midnight:
+                _LOGGER.warning(
+                    "Curve has points at 00:00 and 24:00 (the same moment); using the 00:00 point"
+                )
+                continue
+            t = 0
+        normalized.append({"t": t, "k": p['k'], "b": p['b']})
+
+    unique_points = []
+    seen = set()
+    for p in sorted(normalized, key=lambda p: p['t']):
+        if p['t'] not in seen:
+            unique_points.append(p)
+            seen.add(p['t'])
+    return unique_points
+
 
 class HCLCalculator:
     """Calculator for HCL values using Free-hand Interpolation."""
@@ -37,10 +77,6 @@ class HCLCalculator:
         self.preview_active = False
         # Boot with default config
         self.generate_curve(DEFAULT_WAKE_TIME, DEFAULT_SLEEP_TIME)
-
-    def generate_curve_from_config(self, config: CurveConfig):
-        """Generate the active curve from a CurveConfig object."""
-        self.calculate_curve_from_points(config['points'])
 
     def calculate_curve_from_points(self, points: List[HCLPoint]):
         """Set the control points of the active curve.
@@ -55,27 +91,7 @@ class HCLCalculator:
              _LOGGER.error("No points provided for curve calculation!")
              return
 
-        normalized = []
-        has_midnight = any(int(p['t']) % MINUTES_PER_DAY == 0 and int(p['t']) != MINUTES_PER_DAY for p in points)
-        for p in points:
-            t = int(p['t'])
-            if t == MINUTES_PER_DAY:
-                if has_midnight:
-                    _LOGGER.warning(
-                        "Curve has points at 00:00 and 24:00 (the same moment); using the 00:00 point"
-                    )
-                    continue
-                t = 0
-            normalized.append({"t": t, "k": p['k'], "b": p['b']})
-
-        unique_points = []
-        seen = set()
-        for p in sorted(normalized, key=lambda p: p['t']):
-            if p['t'] not in seen:
-                unique_points.append(p)
-                seen.add(p['t'])
-
-        self.active_curve = unique_points
+        self.active_curve = normalize_points(points)
         _LOGGER.debug("Calculated HCL Curve with %d control points", len(self.active_curve))
 
     def generate_curve(self, wake_str: str, sleep_str: str):
@@ -327,3 +343,70 @@ def default_points(wake_str: str | None, sleep_str: str | None) -> List[HCLPoint
     if night >= _NIGHT_MIN_MINUTES:
         day += [(span + _NIGHT_AFTER_SLEEP, *_NIGHT), (night + span - 1, *_NIGHT)]
     return [{"t": (wake + t) % MINUTES_PER_DAY, "k": k, "b": b} for t, k, b in day]
+
+
+def anchor_pair_error(wake: time, sleep: time) -> str | None:
+    """Error key of a wake/sleep pair: the day (wake to sleep) must be longer
+    than 6 h and the night at least 3 h (RM-O24). Used by the setup and the
+    time entities; stored pairs are not checked again."""
+    day = ((sleep.hour * 60 + sleep.minute) - (wake.hour * 60 + wake.minute)) % MINUTES_PER_DAY
+    if day <= MIN_ACTIVE_SPAN_MINUTES:
+        return "active_span_too_short"
+    if MINUTES_PER_DAY - day < MIN_NIGHT_MINUTES:
+        return "night_too_short"
+    return None
+
+
+def stretch_points(points: Iterable[HCLPoint], w0: int, s0: int, w1: int, s1: int) -> List[HCLPoint]:
+    """Normalized reference curve drawn for wake/sleep W0/S0, stretched to
+    W1/S1 (minutes 0-1439, RM-E05).
+
+    Day (wake <= t < sleep) and night are each mapped linearly; the same shift
+    of both times is a pure shift. A point on an anchor stays on it, any other
+    point lands inside its part of the day and never on an anchor (a part
+    without a free minute drops its inner points). Points falling on the same
+    minute: the smallest distance to the exact position wins, then the point
+    that comes first from the reference wake time. Values b and k are kept.
+    Returns the points sorted by time.
+    """
+    d0, d1 = (s0 - w0) % MINUTES_PER_DAY, (s1 - w1) % MINUTES_PER_DAY
+    n0, n1 = MINUTES_PER_DAY - d0, MINUTES_PER_DAY - d1
+    best: dict[int, tuple[float, int, HCLPoint]] = {}
+    for p in points:
+        rel = (int(p["t"]) - w0) % MINUTES_PER_DAY  # minutes since the reference wake time
+        if rel < d0:  # day
+            t, lo, hi = w1 + rel * d1 / d0, w1 + 1, w1 + d1 - 1
+        else:  # night
+            t, lo, hi = s1 + (rel - d0) * n1 / n0, s1 + 1, s1 + n1 - 1
+        minute = round(t)
+        if rel not in (0, d0):  # not on an anchor: never onto an anchor
+            if lo > hi:
+                continue
+            minute = min(max(minute, lo), hi)
+        key = minute % MINUTES_PER_DAY
+        candidate = (abs(t - minute), rel, {**p, "t": key})
+        if key not in best or candidate[:2] < best[key][:2]:
+            best[key] = candidate
+    return sorted((c[2] for c in best.values()), key=lambda p: p["t"])
+
+
+def saved_points(options: Mapping[str, Any]) -> List[HCLPoint]:
+    """Effective saved curve of an instance (RM-E05): the curve saved in the
+    card stretched from the times it was drawn for to the current times, else
+    the default curve of the current times. The one source for setup, revert,
+    a time change, get_curve and the diagnostics."""
+    wake, sleep = anchor_time(options, CONF_WAKE_TIME), anchor_time(options, CONF_SLEEP_TIME)
+    curve = options.get(CONF_CURVE_CONFIG)
+    if not curve:
+        return default_points(wake, sleep)
+    w1, s1 = _minutes(wake, DEFAULT_WAKE_TIME), _minutes(sleep, DEFAULT_SLEEP_TIME)
+    # Version 2 (without reference times) counts as drawn for the current times
+    w0 = _minutes(curve.get("wake_time"), wake)
+    s0 = _minutes(curve.get("sleep_time"), sleep)
+    if w0 == s0:  # invalid reference times
+        w0, s0 = w1, s1
+    points = stretch_points(normalize_points(curve.get("points") or []), w0, s0, w1, s1)
+    if len(points) < 2:
+        _LOGGER.warning("Stretched curve has fewer than 2 points; using the default curve")
+        return default_points(wake, sleep)
+    return points

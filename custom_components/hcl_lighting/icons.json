@@ -23,6 +23,14 @@
       "target_color_temp": {
         "default": "mdi:thermometer"
       }
+    },
+    "time": {
+      "wake_time": {
+        "default": "mdi:weather-sunset-up"
+      },
+      "sleep_time": {
+        "default": "mdi:weather-night"
+      }
     }
   }
 }

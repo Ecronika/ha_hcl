@@ -359,8 +359,7 @@ async def test_rm_e02_options_step(hass, no_frontend_registration):
     _lux(hass, 100)
     entry = await setup_entry(hass, ["light.a"], options={"daylight_deadband_lux": 40})
     flow = await hass.config_entries.options.async_init(entry.entry_id)
-    base = {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00",
-            "sleep_time": "22:00:00", "smart_transition": False, "min_brightness": 3, "max_brightness": 100}
+    base = {"target": {"entity_id": ["light.a"]}, "smart_transition": False, "min_brightness": 3, "max_brightness": 100}
     result = await hass.config_entries.options.async_configure(flow["flow_id"], base)
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"], {"override_timeout": 240, "override_reset_on_off": True, "persist_overrides": False,
@@ -436,8 +435,7 @@ async def test_rm_b56_after_a_long_pause_readers_start_like_the_cycle(hass, noon
 # ---------------------------------------------------------------- RM-E02-31 (Praxistest L14, 25.10.2026)
 async def _daylight_step(hass, entry):
     flow = await hass.config_entries.options.async_init(entry.entry_id)
-    base = {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00",
-            "sleep_time": "22:00:00", "smart_transition": False, "min_brightness": 3, "max_brightness": 100}
+    base = {"target": {"entity_id": ["light.a"]}, "smart_transition": False, "min_brightness": 3, "max_brightness": 100}
     await hass.config_entries.options.async_configure(flow["flow_id"], base)
     await hass.config_entries.options.async_configure(
         flow["flow_id"], {"override_timeout": 240, "override_reset_on_off": True, "persist_overrides": False,

@@ -2,14 +2,14 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoredExtraData, RestoreEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, State
+from homeassistant.core import HomeAssistant, State, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_point_in_utc_time
@@ -42,6 +42,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry, async_ad
     entry.runtime_data.mode_select = select
     async_add_entities([select])
 
+def wake_occurrence(local_date: date, wake: time) -> datetime:
+    """The wake time on a local date in the Home Assistant time zone (fold=0:
+    a doubled hour at the change from summer time is its first occurrence, a
+    missing hour counts as summer time, e.g. 02:30 becomes 03:30)."""
+    return datetime.combine(local_date, wake.replace(second=0, microsecond=0), tzinfo=dt_util.get_default_time_zone())
+
+
 def restored_scenario(state: State | None, extra: Mapping[str, Any] | None) -> tuple[str, datetime | None]:
     """Scenario and end time from the stored state of the mode select: Auto if
     unknown (also the removed Guest, RM-R12) or the timed scenario has ended; an
@@ -71,6 +78,9 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
         self._attr_current_option = controller.active_mode
         # End of a timed scenario (Focus/Relax/Cleaning with a configured duration)
         self._until: datetime | None = None
+        # The end is the wake time (Sleep/Night light without duration): it
+        # follows a new wake time (RM-E05)
+        self._ends_at_wake = False
         self._cancel_timer = None
 
     @property
@@ -81,7 +91,9 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
     @property
     def extra_restore_state_data(self) -> ExtraStoredData:
         """Keep the end time of a timed scenario across restarts."""
-        return RestoredExtraData({"until": self._until.isoformat() if self._until else None})
+        return RestoredExtraData(
+            {"until": self._until.isoformat() if self._until else None, "ends_at_wake": self._ends_at_wake}
+        )
 
     async def async_added_to_hass(self) -> None:
         """Run when entity about to be added."""
@@ -91,27 +103,57 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
         # Restore State (same rule as for the first light command, RM-T27)
         if last_state := await self.async_get_last_state():
             extra = await self.async_get_last_extra_data()
-            mode, until = restored_scenario(last_state, extra.as_dict() if extra is not None else None)
+            extra_data = extra.as_dict() if extra is not None else None
+            mode, until = restored_scenario(last_state, extra_data)
             self._set_mode(mode, announce=False)
             if until is not None:
                 self._schedule_end(until)
+                # Data of older versions without the field: the end stays
+                self._ends_at_wake = (extra_data or {}).get("ends_at_wake") is True
             _LOGGER.debug("Restored HCL Mode to %s", self._attr_current_option)
 
     def _set_mode(self, option: str, announce: bool = True) -> None:
         self._controller.set_active_mode(option, announce=announce)
         self._attr_current_option = option
 
+    def _wake_time(self) -> time:
+        return dt_util.parse_time(anchor_time(self._entry.options, CONF_WAKE_TIME)) or dt_util.parse_time(
+            DEFAULT_WAKE_TIME
+        )
+
     def _next_wake_time(self) -> datetime:
         """Next occurrence of the wake time (UTC) in the Home Assistant time zone."""
-        entry = self._entry
-        wake = dt_util.parse_time(anchor_time(entry.options, CONF_WAKE_TIME)) or dt_util.parse_time(DEFAULT_WAKE_TIME)
-        now = dt_util.now()
-        candidate = now.replace(hour=wake.hour, minute=wake.minute, second=0, microsecond=0)
-        if candidate <= now:
-            candidate = dt_util.as_local(
-                dt_util.start_of_local_day(now + timedelta(days=1))
-            ).replace(hour=wake.hour, minute=wake.minute)
-        return dt_util.as_utc(candidate)
+        wake = self._wake_time()
+        today = dt_util.now().date()
+        candidate = dt_util.as_utc(wake_occurrence(today, wake))
+        if candidate <= dt_util.utcnow():
+            candidate = dt_util.as_utc(wake_occurrence(today + timedelta(days=1), wake))
+        return candidate
+
+    @callback
+    def async_wake_time_changed(self) -> None:
+        """The wake time changed: move an end that comes from it (RM-O23-3).
+
+        The new end is the occurrence of the new wake time closest to the old
+        end (a tie: the later one); if it is not in the future, the scenario
+        ends now. No signal: the caller sends one for the scenario change and
+        the new curve.
+        """
+        if not self._ends_at_wake or self._until is None:
+            return
+        wake = self._wake_time()
+        day = dt_util.as_local(self._until).date()
+        candidates = [dt_util.as_utc(wake_occurrence(day + timedelta(days=k), wake)) for k in (-1, 0, 1)]
+        old_end = self._until
+        new_end = min(candidates, key=lambda c: (abs(c - old_end), -c.timestamp()))
+        self._stop_timer()
+        if new_end <= dt_util.utcnow():
+            self._cancel()
+            self._ends_at_wake = False
+            self._set_mode(MODE_AUTO)
+        else:
+            self._schedule_end(new_end)
+        self.async_write_ha_state()
 
     def _stop_timer(self) -> None:
         if self._cancel_timer:
@@ -144,6 +186,7 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
         context = action_context(self)
         await async_check_lights(self.hass, context, self._entry.runtime_data)
         self._cancel()
+        self._ends_at_wake = False
         self._set_mode(option)
         options = self._entry.options
         if option == MODE_AUTO:
@@ -157,6 +200,7 @@ class HCLModeSelect(HCLEntity, SelectEntity, RestoreEntity):
         elif option in NIGHT_MODES:
             # Sleep and Night light end at the next wake time (back to the curve)
             self._schedule_end(self._next_wake_time())
+            self._ends_at_wake = True
         self.async_write_ha_state()
 
         # Apply the new mode immediately (the switch and the curve sensor listen);

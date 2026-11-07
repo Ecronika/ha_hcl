@@ -14,12 +14,10 @@ from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
 
 from .const import (
-    MIN_ACTIVE_SPAN_MINUTES,
     DOMAIN, CONF_TARGET, CONF_SMART_TRANSITION,
     CONF_MIN_BRIGHTNESS, CONF_MAX_BRIGHTNESS,
     DEFAULT_MIN_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS,
-    CONF_WAKE_TIME, CONF_SLEEP_TIME, ANCHOR_DEFAULTS, anchor_time,
-    CONF_CURVE_CONFIG,
+    CONF_WAKE_TIME, CONF_SLEEP_TIME, anchor_time,
     CONF_UPDATE_INTERVAL, CONF_TRANSITION,
     CONF_OVERRIDE_TIMEOUT, CONF_OVERRIDE_RESET_ON_OFF, CONF_PERSIST_OVERRIDES,
     CONF_RESPECT_TURN_ON_VALUES, CONF_SCENARIO_DURATION,
@@ -38,6 +36,8 @@ from .const import (
 )
 
 from homeassistant.const import CONF_NAME
+
+from .logic.hcl_math import anchor_pair_error
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,15 +63,14 @@ def _optional(key: str, current: dict[str, Any]) -> vol.Optional:
 
 
 def _anchor_errors(values: dict[str, Any]) -> dict[str, str]:
-    """Validate the wake/sleep anchor times of a form."""
+    """Validate the wake/sleep times of the setup (same rule as the time
+    entities, RM-O24)."""
     wake = dt_util.parse_time(anchor_time(values, CONF_WAKE_TIME))
     sleep = dt_util.parse_time(anchor_time(values, CONF_SLEEP_TIME))
     if wake is None or sleep is None:
         return {"base": "invalid_time"}
-    span = ((sleep.hour * 60 + sleep.minute) - (wake.hour * 60 + wake.minute)) % 1440
-    if span <= MIN_ACTIVE_SPAN_MINUTES:
-        return {"base": "active_span_too_short"}
-    return {}
+    error = anchor_pair_error(wake, sleep)
+    return {"base": error} if error else {}
 
 
 def _target_errors(values: dict[str, Any]) -> dict[str, str]:
@@ -157,21 +156,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     def _merged_options(self, user_input: dict[str, Any]) -> dict[str, Any]:
         """Merge the form into the existing options.
 
-        Options not shown in this form (e.g. the curve saved by the dashboard
-        card) are kept. A saved curve is only discarded when an anchor time
-        (wake/sleep) is changed, so the curve is regenerated from the new
-        anchors.
+        Options not shown in this form (the wake and sleep time, set through
+        their entities since RM-E05, and the curve saved by the dashboard
+        card) are kept.
         """
-        entry = self.config_entry
-        new_options = {**entry.options, **user_input}
+        new_options = {**self.config_entry.options, **user_input}
         for key in [k for k, v in new_options.items() if v is None]:
             del new_options[key]  # an optional field that was cleared
-        for key in ANCHOR_DEFAULTS:
-            old = anchor_time(entry.options, key)
-            new = anchor_time(user_input, key)
-            if dt_util.parse_time(old) != dt_util.parse_time(new):
-                new_options.pop(CONF_CURVE_CONFIG, None)
-                break
         return new_options
 
     async def async_step_init(
@@ -186,7 +177,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if min_b >= max_b:
                 errors["base"] = "min_greater_max"
             else:
-                errors = _target_errors(user_input) or _anchor_errors(user_input)
+                errors = _target_errors(user_input)
             if not errors:
                 self._pending.update(user_input)
                 return await self.async_step_behavior()
@@ -200,7 +191,6 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Required(CONF_TARGET, default=schema_defaults.get(CONF_TARGET) or {}): selector.TargetSelector(
                     {"entity": {"domain": ["light"]}}
                 ),
-                **_anchor_schema(schema_defaults),
                 vol.Optional(CONF_SMART_TRANSITION, default=schema_defaults.get(CONF_SMART_TRANSITION, False)): selector.BooleanSelector(),
                 vol.Optional(CONF_MIN_BRIGHTNESS, default=schema_defaults.get(CONF_MIN_BRIGHTNESS, DEFAULT_MIN_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
                 vol.Optional(CONF_MAX_BRIGHTNESS, default=schema_defaults.get(CONF_MAX_BRIGHTNESS, DEFAULT_MAX_BRIGHTNESS)): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),

@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "HCL Lighting einrichten",
-                "description": "Konfiguriere die Human Centric Lighting Integration. Aus Aufwach- und Schlafenszeit entsteht die Standardkurve; sie lässt sich später in der Dashboard-Karte bearbeiten.",
+                "description": "Konfiguriere die Human Centric Lighting Integration. Aus Aufwach- und Schlafenszeit entsteht die Standardkurve; sie lässt sich später in der Dashboard-Karte bearbeiten. Beide Zeiten lassen sich später als Entitäten der Instanz ändern, auch per Automation.",
                 "data": {
                     "name": "Name",
                     "target": "Zu steuernde Lichter",
@@ -14,6 +14,7 @@
         },
         "error": {
             "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
+            "night_too_short": "Die Nacht (Schlafens- bis Aufwachzeit) muss mindestens 3 Stunden dauern.",
             "invalid_time": "Ungültige Uhrzeit.",
             "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen."
         },
@@ -25,14 +26,12 @@
         "step": {
             "init": {
                 "title": "HCL Lighting Optionen",
-                "description": "Eine in der Dashboard-Karte gespeicherte Kurve hat Vorrang vor den Ankerzeiten. Wer Aufwach- oder Schlafenszeit ändert, verwirft sie und erhält eine neue Standardkurve.",
+                "description": "Aufwach- und Schlafenszeit stellst du über die Entitäten der Instanz ein (Geräteseite → Konfiguration) oder per Automation. Eine in der Dashboard-Karte gespeicherte Kurve wird dabei gestreckt; *Standardkurve* laden und speichern führt zur mitwandernden Standardkurve zurück.",
                 "data": {
                     "target": "Zu steuernde Lichter",
                     "smart_transition": "Kompatibilitätsmodus (langsame/komplexe Lichter)",
                     "min_brightness": "Minimale Helligkeit (%)",
-                    "max_brightness": "Maximale Helligkeit (%)",
-                    "wake_time": "Aufwachzeit (Start der Aktivierung)",
-                    "sleep_time": "Schlafenszeit (Entspannung)"
+                    "max_brightness": "Maximale Helligkeit (%)"
                 }
             },
             "behavior": {
@@ -121,8 +120,6 @@
         "error": {
             "min_greater_max": "Minimale Helligkeit muss kleiner als Maximale sein.",
             "transition_too_long": "Die Übergangszeit muss kürzer als das Aktualisierungsintervall sein.",
-            "active_span_too_short": "Zwischen Aufwach- und Schlafenszeit müssen mehr als 6 Stunden liegen.",
-            "invalid_time": "Ungültige Uhrzeit.",
             "no_lights": "Mindestens ein Licht, einen Bereich, ein Gerät, eine Etage oder ein Label auswählen.",
             "daylight_sensor_required": "Wähle einen Luxsensor für die Tageslichtkompensation.",
             "daylight_target_required": "Gib die Ziel-Beleuchtungsstärke für die Tageslichtkompensation an.",
@@ -160,6 +157,14 @@
             },
             "target_color_temp": {
                 "name": "Sollfarbtemperatur"
+            }
+        },
+        "time": {
+            "wake_time": {
+                "name": "Aufwachzeit"
+            },
+            "sleep_time": {
+                "name": "Schlafenszeit"
             }
         }
     },
@@ -304,6 +309,12 @@
         },
         "main_switch_disabled": {
             "message": "Der Hauptschalter dieser HCL-Instanz („HCL aktiv“) ist deaktiviert; zum Verwenden dieser Aktion aktivieren."
+        },
+        "active_span_too_short": {
+            "message": "Aufwachzeit {wake}, Schlafenszeit {sleep}: Der Tag muss länger als 6 Stunden sein."
+        },
+        "night_too_short": {
+            "message": "Aufwachzeit {wake}, Schlafenszeit {sleep}: Die Nacht muss mindestens 3 Stunden dauern."
         }
     }
 }

@@ -45,6 +45,7 @@ def test_rm_h06_every_error_message_is_translated():
         # no error with a fixed text for the caller
         assert not re.search(r"raise (HomeAssistantError|ServiceValidationError)\(\s*f?[\"']", text), source.name
     keys_in_code |= {"lights_failed", "lights_no_answer", "lights_failed_and_no_answer"}  # chosen at runtime
+    keys_in_code |= {"active_span_too_short", "night_too_short"}  # anchor_pair_error (RM-E05)
     issues = json.loads((INTEGRATION / "strings.json").read_text(encoding="utf-8"))["issues"]
     keys_in_code -= set(issues)  # repair issues use translation_key too
     strings, en, de = (_exceptions(n) for n in ("strings.json", "translations/en.json", "translations/de.json"))
