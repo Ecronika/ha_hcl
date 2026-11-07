@@ -4,7 +4,7 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 
 ![Die HCL-Kurvenkarte: Szenario-Chips, die Werte, die HCL jetzt sendet (hier durch Tageslicht abgesenkt), und die Tageskurve von Helligkeit und Farbtemperatur](https://raw.githubusercontent.com/Ecronika/ha_hcl/main/docs/images/card_de.png)
 
-**Schnellstart:** über HACS installieren (siehe *Installation*), je Raum eine Instanz anlegen (Lichter, Aufwach- und Schlafenszeit), die Karte **HCL Curve Card** ins Dashboard setzen – fertig: eingeschaltete Lichter folgen der Kurve, beim Einschalten sofort. Wer ein Licht selbst ändert, pausiert HCL für dieses Licht.
+**Schnellstart:** über HACS installieren (siehe *Installation*), je Raum eine Instanz anlegen (Lichter, Aufwach- und Schlafenszeit), die Karte **HCL Curve Card** ins Dashboard setzen – fertig: eingeschaltete Lichter folgen der Kurve, beim Einschalten sofort. Wer ein Licht selbst ändert, pausiert HCL für dieses Licht. **Umstieg von Adaptive Lighting:** siehe [Umstieg von Adaptive Lighting](#umstieg-von-adaptive-lighting).
 
 **Was HCL Lighting anders macht:** eigene Tageskurve, in der Karte gezeichnet und geprüft; echte Tageslichtregelung mit Luxsensor (Regelkreis mit Grenzen, keine Ein/Aus-Schwelle); nachvollziehbare manuelle Steuerung; HCL schaltet nie ein Licht ein – Präsenz, Taster und Automationen entscheiden, *wann* Licht ist, HCL, *wie* es aussieht; Sollwert-Sensoren für KNX/DALI-Gateways.
 
@@ -21,7 +21,11 @@ Die Integration führt Helligkeit und Farbtemperatur deiner Lichter über den Ta
 - **Farbfähigkeiten** werden erkannt: Lichter mit Farbtemperatur bekommen sie immer direkt, begrenzt auf ihren Bereich (auch RGBCCT-Leuchten: kein Farbsprung an der Bereichsgrenze, kein RGB-Weiß; eine Leuchte im Farbmodus, z. B. aus der XY-Simulation bis 0.7, wird in den Farbtemperatur-Modus zurückgeholt); Farbleuchten ohne Farbtemperatur (XY, HS, RGB, RGBW, RGBWW) bekommen sie über XY (Kurvenbereich 2000–7000 K).
 
 ## Installation
-1. HACS → Menü (⋮) → Benutzerdefinierte Repositories → `https://github.com/Ecronika/ha_hcl` als **Integration** hinzufügen, dann **HCL Lighting** suchen und **Herunterladen** (ältere HACS-Versionen: Installieren), Home Assistant neu starten.
+HCL Lighting steht in der HACS-Standardliste:
+
+[![HCL Lighting in HACS in deinem Home Assistant öffnen](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Ecronika&repository=ha_hcl&category=integration)
+
+1. In HACS nach **HCL Lighting** suchen (oder den Knopf oben nutzen), öffnen und **Herunterladen** (ältere HACS-Versionen: Installieren), Home Assistant neu starten. Eine früher als benutzerdefiniertes Repository hinzugefügte Installation muss nichts ändern.
 2. Einstellungen → Geräte & Dienste → Integration hinzufügen → **HCL Lighting**.
 3. Name vergeben (z. B. „Wohnzimmer“), Lichter wählen (mindestens ein Ziel: Entitäten, Geräte, Bereiche, Etagen oder Labels; Lichtgruppen werden in ihre Mitglieder aufgelöst) und Aufwach- und Schlafenszeit festlegen. Bereiche, Geräte, Etagen und Labels löst Home Assistant selbst auf, mit den Regeln der installierten Version (wie bei Licht-Aktionen). In der Regel zählen ausgeblendete Lichter und Konfigurations-/Diagnose-Lichter, die über ein Gerät oder einen Bereich erreicht werden (z. B. Status-LEDs von Tastern), nicht mit; ein Licht mit eigenem Bereich gehört zu diesem und nicht zum Bereich seines Geräts; bei Versionen mit Unter-Geräten schließt ein Gerät diese ein. Details richten sich nach der installierten Version, z. B. ob ein Konfigurations-Licht mit dem gewählten Label selbst mitzählt. Direkt gewählte Lichter zählen immer (Lichtgruppen und Hue-Raum-/Zonengruppen mit Mitgliederliste werden in ihre Mitglieder aufgelöst, Hue-Gruppen ohne Mitgliederliste übersprungen). Lichter, die später in einen gewählten Bereich, ein Gerät, eine Etage oder ein Label kommen, werden automatisch übernommen.
 4. Dashboard-Karte hinzufügen: Dashboard bearbeiten → **Karte hinzufügen** → **HCL Curve Card** (visueller Editor mit Instanz und Ansicht). Nach dem Anlegen einer Instanz zeigt eine einmalige Benachrichtigung das YAML mit der genauen Entity-ID, z. B.
@@ -209,6 +213,45 @@ actions:
 ```
 
 **Tageslicht (Lux)**: Die Tageslichtkompensation (Optionen, Abschnitt 4) senkt die Helligkeit mit einem Luxsensor. Lichter bei genug Tageslicht ausschalten bleibt eine Automation: vor dem Ausschalten mit `set_manual_control` pausieren (mit „Ausschalten beendet die manuelle Steuerung“, Standard, endet die Pause beim Ausschalten; sonst danach an HCL zurückgeben).
+
+## Umstieg von Adaptive Lighting
+Beide Integrationen passen Helligkeit und Farbtemperatur an, mit unterschiedlicher Idee:
+- **Kurve**: Adaptive Lighting folgt der Sonne (Sonnenauf- und -untergang, wahlweise feste oder begrenzte Zeiten); das Licht ändert sich also mit den Jahreszeiten. HCL folgt dem Tagesrhythmus: Die Standardkurve entsteht aus Aufwach- und Schlafenszeit und ist das ganze Jahr gleich; in der Karte lässt sie sich frei formen. Tageslicht berücksichtigt die optionale Tageslichtkompensation mit einem Luxsensor im Raum statt des Sonnenstands.
+- **Schaltet nie ein**: HCL passt nur eingeschaltete Lichter an; das Einschalten bleibt bei Tastern, Präsenz und Automationen.
+- **Manuelle Steuerung immer aktiv**: Ein von Hand oder von anderer Seite geändertes Licht wird pausiert – und kehrt standardmäßig nach 4 Stunden zu HCL zurück (Adaptive Lighting: nie, `autoreset_control_seconds: 0`).
+
+**Vorgehen**
+1. Einstellungen von Adaptive Lighting notieren (Helligkeitsgrenzen, Schlafwerte, Rückkehrzeit).
+2. HCL Lighting installieren und je Adaptive-Lighting-Instanz (Raum oder Zone) eine Instanz mit denselben Lichtern anlegen; Aufwach- und Schlafenszeit festlegen.
+3. **Adaptive Lighting für diese Lichter beenden**: die Lichter aus seiner Instanz entfernen oder die Instanz löschen. Steuern beide dasselbe Licht, wertet jede die Befehle der anderen als manuelle Änderung und pausiert das Licht.
+4. Die Kurve in der Karte anpassen und *Nachtlicht* auf die bisherigen Schlafwerte stellen.
+5. Automationen und Dashboards umstellen, die Schalter oder Aktionen von Adaptive Lighting nutzen (Tabelle).
+
+| Adaptive Lighting | HCL Lighting |
+|---|---|
+| `lights` | *Zu steuernde Lichter* – auch Bereiche, Geräte, Etagen und Labels; Lichtgruppen werden aufgelöst |
+| `min_brightness` / `max_brightness` | *Minimale/Maximale Helligkeit* (Standard 3–100 %) |
+| `min_color_temp` / `max_color_temp` | Die Farbtemperaturen der Kurvenpunkte (2000–7000 K); jedes Licht wird auf seinen erreichbaren Bereich begrenzt |
+| `sunrise_time`, `sunset_time` (mit `min_…`, `max_…`, `…_offset`) | *Aufwachzeit* und *Schlafenszeit*; die Kurve folgt nicht der Sonne |
+| `brightness_mode` (`default`, `linear`, `tanh`) | Die Form der Kurve: Punkte in der Karte verschieben, hinzufügen oder löschen |
+| `transition_until_sleep` | Der Abendteil der Kurve (bis zur Schlafenszeit) |
+| Schalter Schlafmodus, `sleep_brightness`, `sleep_color_temp` | Szenario **Nachtlicht** (gedimmtes, warmes Licht; Standard 3 % / 2200 K, ab 2000 K) in der Szenario-Auswahl; **Schlafen** schaltet die Lichter aus. Beide enden zur nächsten Aufwachzeit |
+| `sleep_rgb_color`, `prefer_rgb_color` | Nicht vorhanden: HCL nutzt immer die Farbtemperatur (Lichter ohne sie bekommen sie über eine XY-Simulation) |
+| `interval` / `transition` | *Aktualisierungsintervall* (27 s) / *Übergangszeit der Aktualisierungen* (20 s), unter *Erweitert: Zeiten* |
+| `initial_transition` | Nicht nötig: Ein eingeschaltetes Licht bekommt die Werte sofort, ohne Übergang |
+| `sleep_transition` | *Übergang bei Szenario-Wechsel* |
+| `take_over_control`, `detect_non_ha_changes` | Immer aktiv: Befehle von anderer Seite und gemeldete Werte, die von den HCL-Werten abweichen, pausieren das Licht (ohne Abfragen) |
+| `take_over_control_mode` | HCL pausiert das ganze Licht (wie `pause_all`); Änderungen an einem Attribut, das es nicht anpasst (Anpassungs-Schalter), pausieren nicht |
+| `autoreset_control_seconds` | *Rückkehr zu HCL nach manueller Steuerung* (Minuten, Standard 240; 0 = nie) |
+| `adapt_only_on_bare_turn_on` | *Werte von Einschaltbefehlen behalten* (das Licht gilt dann als manuell gesteuert) |
+| `separate_turn_on_commands`, `send_split_delay` | *Kompatibilitätsmodus* |
+| `skip_redundant_commands` | Immer: Aktualisierung nur bei spürbarer Änderung |
+| `intercept`, `multi_light_intercept` | Nicht vorhanden: HCL fängt `light.turn_on` nicht ab (es würde die Werte des Aufrufers überschreiben); es sendet seine Werte, sobald das Licht „an“ meldet. Damit die alte Farbe nicht kurz zu sehen ist, mit den HCL-Werten einschalten (*Rezepte*) |
+| `only_once`, `adapt_delay`, `include_config_in_attributes` | Keine Entsprechung (einzelne Lichter mit `hcl_lighting.set_manual_control` pausieren; die Einstellungen stehen in den Diagnosedaten) |
+| Hauptschalter / *Adapt brightness* / *Adapt color* | *HCL aktiv* / *Helligkeit anpassen* / *Farbtemperatur anpassen* |
+| `adaptive_lighting.apply` | `hcl_lighting.apply` (schaltet nie ein; zum Einschalten mit HCL-Werten `light.turn_on` mit den Sollwert-Sensoren) |
+| `adaptive_lighting.set_manual_control` | `hcl_lighting.set_manual_control` (immer das ganze Licht) |
+| `adaptive_lighting.change_switch_settings` | Optionen unter *Konfigurieren* (bleiben über Neustarts erhalten); Szenarien mit `hcl_lighting.set_scenario` |
 
 ## Dashboard-Karte
 Punkte ziehen, mit ➕ oder Doppelklick hinzufügen, mit ➖, Entf oder Rücktaste löschen, Uhrzeit/Helligkeit/Farbtemperatur direkt eingeben, mit ↶ oder Strg+Z rückgängig machen; die Punkte bleiben zeitlich sortiert. **Vorschau** sendet die ungespeicherte Kurve an die Lichter, bis sie gespeichert oder verworfen oder die Integration neu geladen wird (Neuladen der Browserseite beendet sie nicht) (die Karte zeigt dann „Vorschau aktiv – nicht gespeichert“), **Speichern** übernimmt sie dauerhaft (ohne die Integration neu zu laden), **Verwerfen** lädt die gespeicherte Kurve. Schlägt Speichern fehl, zeigt die Karte den Fehler und die Änderungen bleiben als ungespeichert markiert. Die gestrichelte senkrechte Linie zeigt die aktuelle Uhrzeit (Zeitzone von Home Assistant), darunter stehen das aktive Szenario mit seinem Ende (z. B. „bis 07:00“) und die Werte, die HCL jetzt sendet (aus den Sollwert-Sensoren; „Sollwerte nicht verfügbar“, solange sie keinen Wert haben). Mit Tageslichtkompensation zeigt die Zeile Kurven- bzw. Szenario-Wert und wirksamen Wert, z. B. „80 % → 35 % · Tageslicht“ (auch „Tageslicht gehalten“, bei einem selten meldenden Sensor mit Grund, und „Tageslichtsensor ohne Wert“). Sie zeigt auch, ob die Werte wirken können: „HCL aus“, „nur Helligkeit“ oder „nur Farbtemperatur“ (ein Anpassungs-Schalter aus), „Anpassung aus“ (beide aus), „keine Lichter“ (das Ziel ergibt gerade kein steuerbares Licht, z. B. ein leerer Bereich) und die Zahl manuell gesteuerter Lichter (z. B. „2 Lichter manuell“ – antippen gibt sie nach einer Rückfrage an HCL zurück); bei Schlafen steht „Sollwert aus“ (manuell gesteuerte Lichter bleiben an), bei Fokus, Entspannen und Putzen mit eingerichteter Tageslichtkompensation „ohne Tageslichtregelung“ (feste Werte). Hinweise warnen vor unplausiblen Kurven, z. B. hellem oder kaltem Licht nachts (von der Schlafens- bis zur Aufwachzeit).
