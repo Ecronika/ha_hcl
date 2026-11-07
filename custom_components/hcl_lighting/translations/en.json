@@ -3,7 +3,7 @@
         "step": {
             "user": {
                 "title": "Set up HCL Lighting",
-                "description": "Configure the Human Centric Lighting integration. The wake and sleep time create the default curve; it can be edited later in the dashboard card.",
+                "description": "Configure the Human Centric Lighting integration. The wake and sleep time create the default curve; it can be edited later in the dashboard card. Both times can be changed later as entities of the instance, also by automations.",
                 "data": {
                     "name": "Name",
                     "target": "Lights to control",
@@ -14,6 +14,7 @@
         },
         "error": {
             "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
+            "night_too_short": "The night (sleep to wake time) must be at least 3 hours.",
             "invalid_time": "Invalid time.",
             "no_lights": "Select at least one light, area, device, floor or label."
         },
@@ -25,14 +26,12 @@
         "step": {
             "init": {
                 "title": "HCL Lighting options",
-                "description": "A curve saved in the dashboard card has priority over the anchor times. Changing the wake or sleep time discards it and creates a new default curve.",
+                "description": "Set the wake and sleep time with the entities of the instance (device page → Configuration) or by an automation. A curve saved in the dashboard card is stretched to the new times; load *Default curve* in the card and save to return to the default curve that follows the times.",
                 "data": {
                     "target": "Lights to control",
                     "smart_transition": "Compatibility mode (slow/complex lights)",
                     "min_brightness": "Minimum brightness (%)",
-                    "max_brightness": "Maximum brightness (%)",
-                    "wake_time": "Wake time (activation start)",
-                    "sleep_time": "Sleep time (wind down)"
+                    "max_brightness": "Maximum brightness (%)"
                 }
             },
             "behavior": {
@@ -121,8 +120,6 @@
         "error": {
             "min_greater_max": "Minimum brightness must be lower than maximum.",
             "transition_too_long": "The transition must be shorter than the update interval.",
-            "active_span_too_short": "Wake and sleep time must be more than 6 hours apart.",
-            "invalid_time": "Invalid time.",
             "no_lights": "Select at least one light, area, device, floor or label.",
             "daylight_sensor_required": "Choose a lux sensor for the daylight compensation.",
             "daylight_target_required": "Enter the target illuminance for the daylight compensation.",
@@ -160,6 +157,14 @@
             },
             "target_color_temp": {
                 "name": "Target colour temperature"
+            }
+        },
+        "time": {
+            "wake_time": {
+                "name": "Wake time"
+            },
+            "sleep_time": {
+                "name": "Sleep time"
             }
         }
     },
@@ -304,6 +309,12 @@
         },
         "main_switch_disabled": {
             "message": "The main switch of this HCL instance (HCL active) is disabled; enable it to use this action."
+        },
+        "active_span_too_short": {
+            "message": "Wake time {wake}, sleep time {sleep}: the day must be longer than 6 hours."
+        },
+        "night_too_short": {
+            "message": "Wake time {wake}, sleep time {sleep}: the night must be at least 3 hours."
         }
     }
 }

@@ -11,6 +11,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_CURVE_CONFIG, CONF_DAYLIGHT_SENSOR, CONF_HARMONY_WEATHER, CONF_TARGET
 from .logic.daylight_estimator import OUTDOOR_KEY
+from .logic.hcl_math import saved_points
 from .runtime import loaded_runtime
 
 # Target keys and the prefix of their pseudonyms (entity IDs keep their domain)
@@ -47,6 +48,13 @@ class _Pseudonyms:
         return out
 
 
+def _curve_reference(curve: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Version and reference times of the saved curve (version 2: none)."""
+    if not curve:
+        return None
+    return {key: curve.get(key) for key in ("version", "wake_time", "sleep_time")}
+
+
 def _settings(values: dict[str, Any], pseudo: _Pseudonyms) -> dict[str, Any]:
     """Entry data or options without name and with pseudonymous targets."""
     out = {k: v for k, v in values.items() if k != CONF_CURVE_CONFIG}
@@ -79,7 +87,11 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         "title": REDACTED,
         "data": _settings(dict(entry.data), pseudo),
         "options": _settings(dict(entry.options), pseudo),
+        # Reference curve as saved, the times it was drawn for, and the curve
+        # that applies now (stretched to the current times, RM-E05)
         "saved_curve": (entry.options.get(CONF_CURVE_CONFIG) or {}).get("points"),
+        "saved_curve_reference": _curve_reference(entry.options.get(CONF_CURVE_CONFIG)),
+        "saved_curve_effective": saved_points(entry.options) if entry.options.get(CONF_CURVE_CONFIG) else None,
         "loaded": runtime is not None,
     }
     if not runtime:

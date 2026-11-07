@@ -47,7 +47,7 @@ from .const import (
 )
 from . import ha_internals
 from .conflicts import async_check_conflicts
-from .logic.hcl_math import HCLCalculator
+from .logic.hcl_math import HCLCalculator, saved_points
 from .logic.override_manager import OverrideManager
 from .services import async_register_services
 from .logic.daylight_compensation import (
@@ -151,7 +151,7 @@ def _restored_mode(stored: StoredState | None) -> str:
     return restored_scenario(stored.state, extra)[0]
 
 
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.SELECT]
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.SENSOR, Platform.SELECT, Platform.TIME]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -206,22 +206,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: HCLConfigEntry) -> bool:
     # Initialize Shared Calculator
     hcl_calc = HCLCalculator()
     
-    # The curve saved in the card, else the default curve from the anchor times
-    curve_config = entry.options.get(CONF_CURVE_CONFIG)
-    if curve_config:
-        try:
-            hcl_calc.generate_curve_from_config(curve_config)
-            _LOGGER.debug("Initialized with the saved curve")
-        except Exception:
-            _LOGGER.exception("Failed to load the saved curve, using the default curve")
-            curve_config = None
-
-    if not curve_config:
-        # No saved curve: default curve from the anchor times
+    # The curve saved in the card stretched to the current wake and sleep
+    # time, else the default curve of these times (RM-E05)
+    try:
+        hcl_calc.calculate_curve_from_points(saved_points(entry.options))
+    except Exception:
+        _LOGGER.exception("Failed to load the saved curve, using the default curve")
         hcl_calc.generate_curve(
             anchor_time(entry.options, CONF_WAKE_TIME), anchor_time(entry.options, CONF_SLEEP_TIME)
         )
-        _LOGGER.debug("Initialized with the default curve")
 
     # The override state is kept per entry across reloads (saving the curve or
     # the options reloads the entry) so manually controlled lights stay paused.

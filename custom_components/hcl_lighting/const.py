@@ -36,6 +36,8 @@ DEFAULT_SLEEP_TIME = "22:00"
 # The curve needs more than 6 hours between wake and sleep time (config
 # flow; the curve falls back to 07:00-22:00 for older data, RM-T30)
 MIN_ACTIVE_SPAN_MINUTES = 360
+# The night (sleep to wake time) of a new pair: at least 3 h (RM-O24)
+MIN_NIGHT_MINUTES = 180
 
 # v0.4.0 Interactive UI
 SERVICE_UPDATE_CURVE = "update_curve"

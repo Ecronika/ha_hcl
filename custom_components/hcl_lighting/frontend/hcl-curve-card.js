@@ -33,6 +33,7 @@ const HCL_STRINGS = {
         color_temp: "Colour temperature",
         time: "Time",
         now: "Now",
+        anchor_times: "Wake {wake} · Sleep {sleep}",
         until: "until {time}",
         draft: "Draft",
         no_selection: "Select a point to edit it",
@@ -118,6 +119,7 @@ const HCL_STRINGS = {
         color_temp: "Farbtemperatur",
         time: "Uhrzeit",
         now: "Jetzt",
+        anchor_times: "Aufwachen {wake} · Schlafen {sleep}",
         until: "bis {time}",
         draft: "Entwurf",
         no_selection: "Punkt auswählen, um ihn zu bearbeiten",
@@ -664,8 +666,12 @@ class HCLCurveCard extends HTMLElement {
         };
         const start = toMin(attrs.sleep_time);
         const end = toMin(attrs.wake_time);
-        if (start === null || end === null || start === end) return false;
-        if (start === this._valSettings.nightStart && end === this._valSettings.nightEnd) return false;
+        // shown in the editor (RM-E05); the times are set with their entities
+        const anchors = start === null || end === null ? null : { wake: end, sleep: start };
+        const anchorsChanged = JSON.stringify(anchors) !== JSON.stringify(this._anchorTimes || null);
+        this._anchorTimes = anchors;
+        if (start === null || end === null || start === end) return anchorsChanged;
+        if (start === this._valSettings.nightStart && end === this._valSettings.nightEnd) return anchorsChanged;
         this._valSettings.nightStart = start;
         this._valSettings.nightEnd = end;
         this._lastValidationSig = null;
@@ -871,6 +877,8 @@ class HCLCurveCard extends HTMLElement {
           #now-info { padding: 0 16px 8px 16px; font-size: 0.875rem; }
           #draft-info { padding: 0 16px 8px 16px; font-size: 0.75rem; color: var(--hcl-text-2); }
           #draft-info:empty { display: none; }
+          #anchor-info { padding: 0 16px 8px 16px; font-size: 0.75rem; color: var(--hcl-text-2); }
+          #anchor-info:empty { display: none; }
           /* RM-O21: "N lights manual" hands the lights back to HCL (after a confirmation) */
           #btn-release { background: none; border: none; padding: 0; margin: 0; font: inherit; color: var(--hcl-accent);
               text-decoration: underline dotted; text-underline-offset: 2px; }
@@ -967,6 +975,7 @@ class HCLCurveCard extends HTMLElement {
               </div>
               <div id="validation-area" class="messages"></div>
               <div id="draft-info"></div>
+              <div id="anchor-info"></div>
               <div class="charts">
                   <div class="chart-wrapper">
                       <span class="chart-label" data-i18n="brightness" aria-hidden="true"></span>
@@ -1246,6 +1255,7 @@ class HCLCurveCard extends HTMLElement {
     _updateVisuals(retryCount = 0) {
         if (!this._chartB || !this._chartK || !this.isConnected) return;
         this._renderNowInfo();
+        this._renderAnchorInfo();
         if (this._dataState !== "ready" || !this._points.length) {
             this._chartB.data.datasets.forEach(d => { d.data = []; });
             this._chartK.data.datasets[0].data = [];
@@ -1279,6 +1289,15 @@ class HCLCurveCard extends HTMLElement {
             this._syncHandle(idx, pt, "k", this._chartK);
         });
         this._updateColorBar(data);
+    }
+
+    // Wake and sleep time of the instance (curve sensor), only shown (RM-E05)
+    _renderAnchorInfo() {
+        const el = this.shadowRoot && this.shadowRoot.getElementById("anchor-info");
+        if (!el) return;
+        const a = this._dataState === "ready" ? this._anchorTimes : null;
+        const text = a ? this._t("anchor_times", { wake: this._fmt.time(a.wake), sleep: this._fmt.time(a.sleep) }) : "";
+        if (el.textContent !== text) el.textContent = text;
     }
 
     // "Now": the value HCL is aiming for (setpoint sensors), not the draft

@@ -268,7 +268,7 @@ async def test_rm_t21_entities_share_one_device_and_take_their_icons_from_icons_
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 7
+    assert len(entities) == 9  # with the wake and sleep time (RM-E05)
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert len(devices) == 1 and devices[0].identifiers == {(DOMAIN, entry.entry_id)}
     assert {e.device_id for e in entities} == {devices[0].id}

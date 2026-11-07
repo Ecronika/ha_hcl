@@ -28,8 +28,7 @@ async def test_a11_options_flow_validation_and_steps(hass, no_frontend_registrat
     set_light(hass, "light.a", "off", **CT_ATTRS)
     entry = await setup_entry(hass, ["light.a"])
     flow = await hass.config_entries.options.async_init(entry.entry_id)
-    base = {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00",
-            "sleep_time": "22:00:00", "smart_transition": False, "min_brightness": 10, "max_brightness": 100}
+    base = {"target": {"entity_id": ["light.a"]}, "smart_transition": False, "min_brightness": 10, "max_brightness": 100}
     result = await hass.config_entries.options.async_configure(flow["flow_id"], base)
     assert result["step_id"] == "behavior"
     bad = {"override_timeout": 240, "override_reset_on_off": True, "persist_overrides": False,
@@ -77,7 +76,7 @@ async def test_rm_b35_empty_target_is_rejected_in_the_options(hass, no_frontend_
     flow = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
-        {"target": {"entity_id": []}, **ANCHORS, "smart_transition": False, "min_brightness": 10, "max_brightness": 100},
+        {"target": {"entity_id": []}, "smart_transition": False, "min_brightness": 10, "max_brightness": 100},
     )
     assert result["type"] == "form"
     assert result["errors"] == {"target": "no_lights"}
@@ -114,8 +113,7 @@ async def test_rm_r01_r03_options_gone_from_the_flow_and_the_entry(hass, no_fron
     )
     flow = await hass.config_entries.options.async_init(entry.entry_id)
     fields = {str(k) for k in flow["data_schema"].schema}
-    base = {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00",
-            "sleep_time": "22:00:00", "smart_transition": False, "min_brightness": 10, "max_brightness": 100}
+    base = {"target": {"entity_id": ["light.a"]}, "smart_transition": False, "min_brightness": 10, "max_brightness": 100}
     result = await hass.config_entries.options.async_configure(flow["flow_id"], base)
     fields |= {str(k) for k in result["data_schema"].schema}
     result = await hass.config_entries.options.async_configure(
@@ -140,7 +138,7 @@ async def test_rm_r11_timing_options_in_a_collapsed_section(hass, no_frontend_re
     flow = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         flow["flow_id"],
-        {"target": {"entity_id": ["light.a"]}, "wake_time": "07:00:00", "sleep_time": "22:00:00",
+        {"target": {"entity_id": ["light.a"]},
          "smart_transition": False, "min_brightness": 10, "max_brightness": 100},
     )
     assert result["step_id"] == "behavior"
