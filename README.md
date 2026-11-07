@@ -4,18 +4,20 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 
 🇩🇪 [Deutsche Kurzanleitung](README.de.md)
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![HACS Default](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://github.com/hacs/integration)
 [![GitHub release](https://img.shields.io/github/release/Ecronika/ha_hcl.svg)](https://github.com/Ecronika/ha_hcl/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ![The HCL curve card: scenario chips, the values HCL sends now (here lowered by daylight) and the daily curve of brightness and colour temperature](https://raw.githubusercontent.com/Ecronika/ha_hcl/main/docs/images/card_en.png)
 
 ## ⚡ Quick start
-1. **Install** with HACS: ⋮ → *Custom repositories* → `https://github.com/Ecronika/ha_hcl` as **Integration**, download **HCL Lighting**, restart Home Assistant (details: [Installation](#-installation)).
+1. **Install** with HACS: search for **HCL Lighting**, download it, restart Home Assistant (details: [Installation](#-installation)).
 2. **Add an instance** per room or zone: Settings → Devices & services → Add integration → **HCL Lighting**; choose the lights (entities, areas, labels …) and your wake and sleep time.
 3. **Add the card** to a dashboard (**HCL Curve Card**) to see what HCL does and to edit the curve.
 4. **Done**: lights that are on follow the curve; switched on, they get the current values at once. Changing a light yourself pauses HCL for that light.
 5. **Optional**: a lux sensor for the [daylight compensation](#4-daylight-compensation-optional), scenarios (Focus, Relax, Night light …) on the card or in automations.
+
+**Coming from Adaptive Lighting?** See [Switching from Adaptive Lighting](#-switching-from-adaptive-lighting).
 
 ## 💡 What HCL Lighting does differently
 - **Your own daily curve**: drawn and checked in the card instead of a fixed formula; the default curve comes from your wake and sleep time.
@@ -66,11 +68,15 @@ A **Human Centric Lighting (HCL)** custom integration for Home Assistant that ad
 ## 🚀 Installation
 
 ### 1. Install via HACS
-1. Open HACS in Home Assistant.
-2. Open the top right menu (⋮) > "Custom repositories".
-3. Add `https://github.com/Ecronika/ha_hcl` as **Integration**.
-4. Search for **HCL Lighting**, open it and click **Download** (older HACS versions: **Install**).
-5. **Restart Home Assistant**.
+HCL Lighting is in the HACS default list:
+
+[![Open HCL Lighting in HACS in your Home Assistant](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Ecronika&repository=ha_hcl&category=integration)
+
+1. Open HACS in Home Assistant (or use the button above).
+2. Search for **HCL Lighting**, open it and click **Download** (older HACS versions: **Install**).
+3. **Restart Home Assistant**.
+
+An installation added earlier as a custom repository needs no change.
 
 ### 2. Add Integration
 1. Go to **Settings** → **Devices & Services** → **Add Integration**.
@@ -278,6 +284,49 @@ actions:
 ```
 
 **Daylight (lux)**: the daylight compensation (*Configuration*, section 4) lowers the brightness with a lux sensor. Switching lights off when there is enough daylight stays an automation: pause them with `set_manual_control` before switching them off (with *Switching a light off ends manual control*, the default, the pause ends when they are off; otherwise hand them back afterwards).
+
+---
+
+## 🔁 Switching from Adaptive Lighting
+
+Both integrations adapt brightness and colour temperature, with a different idea behind them:
+
+*   **Curve**: Adaptive Lighting follows the sun (sunrise and sunset, optionally fixed or limited times), so the light changes with the seasons. HCL follows your daily rhythm: the default curve comes from your wake and sleep time and is the same all year; you can reshape it freely in the card. Daylight is handled by the optional [daylight compensation](#4-daylight-compensation-optional) with an indoor lux sensor instead of the sun's position.
+*   **Never switches a light on**: HCL only adapts lights that are on; switching on stays with your switches, presence and automations.
+*   **Manual control is always on**: a light changed by hand or by another source is paused – and returns to HCL after 4 hours by default (Adaptive Lighting: never, `autoreset_control_seconds: 0`).
+
+**Steps**
+1. Note your Adaptive Lighting settings (brightness limits, sleep values, reset time).
+2. Install HCL Lighting and add one instance per Adaptive Lighting instance (room or zone) with the same lights; set your wake and sleep time.
+3. **Stop Adaptive Lighting for these lights**: remove them from its instance or delete the instance. If both control the same light, each sees the other's commands as manual changes and pauses the light.
+4. Adjust the curve in the card and set *Night light* to your former sleep values.
+5. Update automations and dashboards that use the Adaptive Lighting switches or actions (table below).
+
+| Adaptive Lighting | HCL Lighting |
+|---|---|
+| `lights` | *Lights to control* – also areas, devices, floors and labels; light groups are expanded |
+| `min_brightness` / `max_brightness` | *Minimum/Maximum brightness* (default 3–100 %) |
+| `min_color_temp` / `max_color_temp` | The colour temperatures of the curve points (2000–7000 K); each light is limited to the range it can reach |
+| `sunrise_time`, `sunset_time` (with `min_…`, `max_…`, `…_offset`) | *Wake time* and *sleep time*; the curve does not follow the sun |
+| `brightness_mode` (`default`, `linear`, `tanh`) | The shape of the curve: move, add or delete points in the card |
+| `transition_until_sleep` | The evening part of the curve (down to the sleep time) |
+| Sleep mode switch, `sleep_brightness`, `sleep_color_temp` | Scenario **Night light** (dim, warm light; default 3 % / 2200 K, from 2000 K) in the scenario select; **Sleep** switches the lights off. Both end at the next wake time |
+| `sleep_rgb_color`, `prefer_rgb_color` | Not available: HCL always uses colour temperature (lights without it get it through an XY simulation) |
+| `interval` / `transition` | *Update interval* (27 s) / *Transition of updates* (20 s), under *Advanced: timing* |
+| `initial_transition` | Not needed: a light switched on gets the values at once, without transition |
+| `sleep_transition` | *Transition when the scenario changes* |
+| `take_over_control`, `detect_non_ha_changes` | Always on: commands from other sources and reported values that differ from HCL's values pause the light (without polling) |
+| `take_over_control_mode` | HCL pauses the whole light (like `pause_all`); changes of an attribute it does not adapt (adapt switches) do not pause it |
+| `autoreset_control_seconds` | *Return to HCL after manual control* (minutes, default 240; 0 = never) |
+| `adapt_only_on_bare_turn_on` | *Keep values of turn-on commands* (the light then counts as manually controlled) |
+| `separate_turn_on_commands`, `send_split_delay` | *Compatibility mode* |
+| `skip_redundant_commands` | Always: updates only on a noticeable change |
+| `intercept`, `multi_light_intercept` | Not available: HCL does not intercept `light.turn_on` (it would override the values of the caller); it sends its values when the light reports on. To avoid the previous colour for a moment, switch on with the HCL values ([Recipes](#recipes)) |
+| `only_once`, `adapt_delay`, `include_config_in_attributes` | No equivalent (pause single lights with `hcl_lighting.set_manual_control`; settings are in the diagnostics) |
+| Main switch / *Adapt brightness* / *Adapt color* | *HCL active* / *Adapt brightness* / *Adapt colour temperature* |
+| `adaptive_lighting.apply` | `hcl_lighting.apply` (never switches a light on; to switch on with the HCL values use `light.turn_on` with the target sensors) |
+| `adaptive_lighting.set_manual_control` | `hcl_lighting.set_manual_control` (always the whole light) |
+| `adaptive_lighting.change_switch_settings` | Options under *Configure* (kept across restarts); scenarios with `hcl_lighting.set_scenario` |
 
 ---
 
