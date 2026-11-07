@@ -204,8 +204,8 @@ def test_de_t22_sunny_and_cloudy_do_not_flutter():
 
 # ---------------------------------------------------------------- provider
 async def test_de_t01_t02_t10_provider_is_deterministic_and_peek_keeps_the_state(hass, freezer):
-    """Solar position from get_astral_location (2024.12-compatible), the same
-    moment gives the same state; only step() commits the character."""
+    """Solar position from astral (2024.12-compatible), the same moment gives
+    the same state; only step() commits the character."""
     from custom_components.hcl_lighting.logic.daylight_estimator import OutdoorLightProvider
     from custom_components.hcl_lighting.logic.environmental_controller import (
         EnvironmentalContext,
@@ -224,6 +224,34 @@ async def test_de_t01_t02_t10_provider_is_deterministic_and_peek_keeps_the_state
     assert a.payload.diagnostics.solar_elevation_deg == pytest.approx(59.9, abs=0.5)  # Hamburg, midsummer noon
     assert (a.quality, a.payload.daylight_character, next_a) == ("D1", CLEAR_DIRECT, CLEAR_DIRECT)
     assert a.payload.diagnostics.weather_entity_id == "weather.home"
+
+
+async def test_rm_b69_solar_position_without_the_deprecated_helper(hass, caplog):
+    """No deprecation warning in every cycle (get_astral_location is deprecated
+    since Home Assistant 2026.7, removed in 2027.7); the position is unchanged.
+    From 2026.7 on the observer comes from Home Assistant, before from the
+    fallback built the same way."""
+    from homeassistant.helpers import sun
+
+    from custom_components.hcl_lighting.logic import daylight_estimator
+    from custom_components.hcl_lighting.logic.daylight_estimator import OutdoorLightProvider
+    from custom_components.hcl_lighting.logic.environmental_controller import (
+        EnvironmentalContext,
+        StepTime,
+    )
+
+    await hass.config.async_update(latitude=53.55, longitude=9.99, elevation=10)
+    when = datetime(2026, 6, 21, 11, 0, tzinfo=timezone.utc)
+    provider = OutdoorLightProvider(hass, None)
+    ctx = EnvironmentalContext("auto", True, True, True, 27.0, 3, 100)
+    caplog.clear()
+    snapshot, _ = provider.evaluate(None, ctx, StepTime(when, 0.0, 0.0, 0.0, False))
+    assert not [r for r in caplog.records if "deprecated" in r.getMessage()]
+    diagnostics = snapshot.payload.diagnostics
+    assert diagnostics.solar_elevation_deg == pytest.approx(59.9, abs=0.5)  # Hamburg, midsummer noon
+    assert diagnostics.solar_azimuth_deg == pytest.approx(170.1, abs=0.5)  # before local solar noon
+    if hasattr(sun, "get_astral_observer"):  # Home Assistant 2026.7 and later
+        assert daylight_estimator.get_astral_observer is sun.get_astral_observer
 
 
 async def test_de_prd_04_weather_auto_detect_only_with_exactly_one_entity(hass):

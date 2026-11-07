@@ -4,8 +4,10 @@ Kept in one module so that a change in Home Assistant affects only this file:
 - the Lovelace resource collection (dashboard resource of the card; there is
   no public API to register a resource in storage mode),
 - the context of the action an entity is handling (Entity._context and
-  _context_set, read to know which user caused a command, RM-B31).
-Both are checked by targeted tests against the supported Home Assistant
+  _context_set, read to know which user caused a command, RM-B31),
+- the state an entity stored in the last run, read before the entities are
+  added (RestoreStateData; its index changed in Home Assistant 2026.11).
+Each is checked by targeted tests against the supported Home Assistant
 versions.
 """
 from __future__ import annotations
@@ -16,6 +18,7 @@ import time
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.helpers.entity import CONTEXT_RECENT_TIME_SECONDS, Entity
+from homeassistant.helpers.restore_state import StoredState, async_get as async_get_restore_state
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN
@@ -24,6 +27,19 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_FRONTEND_REGISTERED = f"{DOMAIN}_frontend_registered"
 CARD_BASE_URL = "/hcl_lighting_static/hcl-curve-card.js"
+
+
+def stored_state(hass: HomeAssistant, entity_id: str) -> StoredState | None:
+    """State an entity stored in the last run, before the entity is added.
+
+    Home Assistant 2026.11 indexes the stored states by entity registry id and
+    reads them with async_get_stored_state (it also follows a changed
+    entity_id); older versions keep them in last_states by entity_id.
+    """
+    data = async_get_restore_state(hass)
+    if hasattr(data, "async_get_stored_state"):  # Home Assistant 2026.11 and later
+        return data.async_get_stored_state(entity_id)
+    return data.last_states.get(entity_id)  # remove with minimum Home Assistant 2026.11 (RM-H07)
 
 
 def action_context(entity: Entity) -> Context | None:

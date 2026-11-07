@@ -14,7 +14,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.restore_state import StoredState, async_get as async_get_restore_state
+from homeassistant.helpers.restore_state import StoredState
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 
@@ -126,11 +126,7 @@ def _restored_switch_state(hass: HomeAssistant, entry: ConfigEntry, key: str) ->
     entity_id = er.async_get(hass).async_get_entity_id("switch", DOMAIN, f"{entry.entry_id}_{key}")
     if entity_id is None:
         return True
-    restore_data = async_get_restore_state(hass)
-    if hasattr(restore_data, "async_get_stored_state"):
-        stored = restore_data.async_get_stored_state(entity_id)
-    else:
-        stored = restore_data.last_states.get(entity_id)
+    stored = ha_internals.stored_state(hass, entity_id)
     if stored is None:
         return True
     return stored.state.state != STATE_OFF
@@ -140,10 +136,7 @@ def _stored_mode(hass: HomeAssistant, entry: ConfigEntry) -> StoredState | None:
     entity_id = er.async_get(hass).async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_mode")
     if entity_id is None:
         return None
-    restore_data = async_get_restore_state(hass)
-    if hasattr(restore_data, "async_get_stored_state"):
-        return restore_data.async_get_stored_state(entity_id)
-    return restore_data.last_states.get(entity_id)
+    return ha_internals.stored_state(hass, entity_id)
 
 
 def _restored_mode(stored: StoredState | None) -> str:

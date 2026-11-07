@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-11-07
+Compatibility with Home Assistant 2026.11 (RM-B68) and no more deprecation warnings from the Daylight Estimator (RM-B69). Entities, actions, options and stored data stay the same; the minimum Home Assistant version stays 2024.12.
+
+### Fixed
+- **Home Assistant 2026.11: the integration did not load** (RM-B68): Home Assistant 2026.11 stores the last states of entities differently (`RestoreStateData.last_states` was removed). HCL reads the stored adaptation switches and the scenario before its entities are added, so setting up an existing instance failed with `AttributeError`. HCL now reads them with `async_get_stored_state` and falls back to the previous way on older versions. Thanks to @saut-de-chat for the fix (#43).
+- **Deprecation warning in every update cycle with Visual Harmony** (RM-B69): from Home Assistant 2026.7 on, the Daylight Estimator called the deprecated `get_astral_location`, and Home Assistant logged a warning with a request to report it on every call – about every 27 seconds per instance; Home Assistant 2027.7 removes the function. HCL now uses its successor `get_astral_observer`, and on older versions builds the same observer itself. The position of the sun is unchanged.
+
 ## [0.9.3] - 2026-11-04
 A fix for lights that can only be switched in Sleep (RM-B67), a clearer question in the card (RM-F09) and notes on such lights (RM-D17), from a re-review of 0.9.2. The minimum Home Assistant version stays 2024.12.
 

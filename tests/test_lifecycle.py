@@ -115,6 +115,48 @@ async def test_a02_flags_survive_reload_and_restart(hass, no_frontend_registrati
     assert ctl.adapt_brightness is False and ctl.adapt_color is False  # reload
 
 
+class _RestoreStateData2611:
+    """RestoreStateData as in Home Assistant 2026.11: last_states is gone, the
+    stored states are read with async_get_stored_state."""
+
+    def __init__(self, stored):
+        self._stored = stored
+
+    def async_get_stored_state(self, entity_id):
+        return self._stored.get(entity_id)
+
+
+async def test_rm_b68_restore_with_the_interface_of_home_assistant_2026_11(hass):
+    """The switches and the scenario are read from the stored states before the
+    entities are added; with the interface of 2026.11 0.9.3 failed to set up
+    every existing instance (AttributeError: last_states)."""
+    from homeassistant.helpers import restore_state as rs
+
+    from custom_components.hcl_lighting import _restored_switch_state, _stored_mode
+
+    entry = MockConfigEntry(domain=DOMAIN, title="HCL", data={"name": "HCL", "target": {"entity_id": ["light.a"]}})
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "switch", DOMAIN, f"{entry.entry_id}_adapt_color",
+        suggested_object_id="hcl_adapt_colour_temperature", config_entry=entry,
+    )
+    registry.async_get_or_create(
+        "select", DOMAIN, f"{entry.entry_id}_mode", suggested_object_id="hcl_scenario", config_entry=entry,
+    )
+    mock_restore_cache(hass, [State(ADAPT_K, "off"), State(SELECT, "relax")])
+    real = hass.data[rs.DATA_RESTORE_STATE]
+    hass.data[rs.DATA_RESTORE_STATE] = _RestoreStateData2611(real.last_states)
+    rs.async_get.cache_clear()
+    try:
+        assert _restored_switch_state(hass, entry, "adapt_color") is False
+        assert _restored_switch_state(hass, entry, "adapt_brightness") is True  # no entity, nothing stored
+        assert _stored_mode(hass, entry).state.state == "relax"
+    finally:
+        hass.data[rs.DATA_RESTORE_STATE] = real
+        rs.async_get.cache_clear()
+
+
 # ------------------------------------------------------------------ Ä-06
 async def test_a06_persist_across_restart(hass, hass_storage, no_frontend_registration):
     set_light(hass, "light.a", "on", brightness=128, color_temp_kelvin=4000, **CT_ATTRS)
