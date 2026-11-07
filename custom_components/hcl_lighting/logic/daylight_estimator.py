@@ -14,9 +14,20 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 
+from astral import Observer
+from astral.sun import azimuth as solar_azimuth
+from astral.sun import elevation as solar_elevation
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.sun import get_astral_location
+
+try:  # Home Assistant 2026.7 and later (get_astral_location is deprecated there, RM-B69)
+    from homeassistant.helpers.sun import get_astral_observer
+except ImportError:  # older versions; remove with minimum Home Assistant 2026.7 (RM-H07)
+
+    def get_astral_observer(hass: HomeAssistant) -> Observer:
+        """Observer of the Home Assistant location, built like Home Assistant 2026.7."""
+        return Observer(hass.config.latitude, hass.config.longitude, hass.config.elevation)
+
 
 from .environmental_controller import (
     STATUS_ACTIVE,
@@ -266,9 +277,9 @@ class OutdoorLightProvider:
     def evaluate(
         self, state: str | None, ctx: EnvironmentalContext, time: StepTime
     ) -> tuple[EnvironmentalStateSnapshot[OutdoorLightState], str | None]:
-        location, elevation_m = get_astral_location(self._hass)
-        elevation = location.solar_elevation(time.now, elevation_m)
-        azimuth = location.solar_azimuth(time.now, elevation_m)
+        observer = get_astral_observer(self._hass)
+        elevation = solar_elevation(observer, time.now)
+        azimuth = solar_azimuth(observer, time.now)
         weather = read_weather(self._hass, resolve_weather_entity(self._hass, self._weather), time.now)
         result = estimate(time.now, elevation, azimuth, weather, state)
         status = STATUS_ACTIVE if result.quality_level == QUALITY_D1 or weather.entity_id is None else STATUS_DEGRADED

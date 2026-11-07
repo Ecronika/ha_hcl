@@ -18,5 +18,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/Ecronika/ha_hcl/issues",
   "requirements": [],
-  "version": "0.9.3"
+  "version": "0.9.4"
 }
